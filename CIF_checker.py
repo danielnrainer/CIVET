@@ -1,13 +1,18 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
-                           QFileDialog, QMessageBox, QLineEdit,  
+                           QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog)
 from PyQt6.QtCore import Qt, QRegularExpression
-from PyQt6.QtGui import QTextCharFormat, QSyntaxHighlighter, QColor, QFont, QFontMetrics
+from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
+                        QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
 from utils import CIFFieldChecker
+
+# needs checking of _refine_special_details; seems to overwrite current value when running again?
+# .exe seems not to be working; need to check if it is in the same directory as the script
+
 
 # Dialog result codes for consistency
 RESULT_ABORT = 2
@@ -458,10 +463,29 @@ class CIFEditor(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
+        
+        # Undo/Redo
         undo_action = edit_menu.addAction("Undo")
+        undo_action.setShortcut("Ctrl+Z")
         undo_action.triggered.connect(self.text_editor.undo)
+        
         redo_action = edit_menu.addAction("Redo")
+        redo_action.setShortcut("Ctrl+Y")
         redo_action.triggered.connect(self.text_editor.redo)
+        
+        edit_menu.addSeparator()
+        
+        # Find
+        find_action = edit_menu.addAction("Find")
+        find_action.setShortcut("Ctrl+F")
+        find_action.triggered.connect(self.show_find_dialog)
+        
+        # Find and Replace
+        replace_action = edit_menu.addAction("Find and Replace")
+        replace_action.setShortcut("Ctrl+H")
+        replace_action.triggered.connect(self.show_replace_dialog)
+        
+        edit_menu.addSeparator()
         
         # View menu for editor settings
         view_menu = menubar.addMenu("View")
@@ -695,8 +719,8 @@ class CIFEditor(QMainWindow):
             lines.append(f"{prefix} {formatted_value}")
         
         self.text_editor.setText("\n".join(lines))
-        return result
-
+        return result    
+    
     def check_refine_special_details(self):
         """Check and edit _refine_special_details field, creating it if needed."""
         lines = self.text_editor.toPlainText().splitlines()
@@ -704,6 +728,7 @@ class CIFEditor(QMainWindow):
         end_line = None
         found = False
         
+        # Look for the field
         for i, line in enumerate(lines):
             if line.startswith("_refine_special_details"):
                 start_line = i
@@ -711,30 +736,34 @@ class CIFEditor(QMainWindow):
                 break
                 
         template = (
-                   "Please enter refinement details, replacing this template:\n"
-                   "\n"
                    "STRUCTURE REFINEMENT\n"
                    "- Refinement method\n"
                    "- Special constraints and restraints\n"
-                   "- Special treatments\n"
+                   "- Special treatments"
                    )
         
         if found:
-            # Find the end of existing multiline value
-            semicolon_count = 0
+            # Find the content between semicolons
+            content_lines = []
+            in_content = False
+            
             for i in range(start_line + 1, len(lines)):
-                if lines[i].strip() == ";":
-                    semicolon_count += 1
-                    if semicolon_count == 2:
+                line = lines[i].strip()
+                if line == ";":
+                    if not in_content:
+                        in_content = True
+                        continue
+                    else:
                         end_line = i
                         break
+                if in_content:
+                    content_lines.append(lines[i])
             
-            if end_line:
-                content = "\n".join(lines[start_line:end_line+1])
+            if content_lines:
+                content = "\n".join(content_lines)
             else:
-                content = lines[start_line]
+                content = template
         else:
-            # Use template for new field
             content = template
         
         # Open dialog for editing
@@ -747,18 +776,21 @@ class CIFEditor(QMainWindow):
         elif result == QDialog.DialogCode.Accepted:
             updated_content = dialog.getText()
             
-            # If not properly formatted as multiline, format it
-            if not updated_content.startswith("_refine_special_details\n;"):
-                updated_content = f"_refine_special_details\n;\n{updated_content}\n;"
+            # Format the complete field with proper CIF syntax
+            formatted_content = [
+                "_refine_special_details",
+                ";",
+                updated_content,
+                ";"
+            ]
             
             # Update or insert the content
             if found and end_line is not None:
-                lines[start_line:end_line+1] = updated_content.splitlines()
-            elif found:
-                lines[start_line] = updated_content
+                lines[start_line:end_line + 1] = formatted_content
             else:
-                lines.append("")  # Add blank line before new field
-                lines.extend(updated_content.splitlines())
+                if lines and lines[-1].strip():  # If last line is not empty
+                    lines.append("")  # Add blank line before new field
+                lines.extend(formatted_content)
             
             self.text_editor.setText("\n".join(lines))
             
@@ -992,6 +1024,142 @@ class CIFEditor(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, 'ruler'):
             self.ruler.setGeometry(self.ruler.x(), 0, 1, self.text_editor.height())
+
+    def show_find_dialog(self):
+        """Show a dialog for finding text in the editor"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Find")
+        layout = QVBoxLayout(dialog)
+        
+        # Search input
+        search_label = QLabel("Find what:")
+        search_input = QLineEdit()
+        layout.addWidget(search_label)
+        layout.addWidget(search_input)
+        
+        # Options
+        case_checkbox = QCheckBox("Match case")
+        layout.addWidget(case_checkbox)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        find_next_button = QPushButton("Find Next")
+        find_next_button.clicked.connect(lambda: self.find_text(
+            search_input.text(), 
+            case_sensitive=case_checkbox.isChecked()
+        ))
+        button_layout.addWidget(find_next_button)
+        
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+        
+        layout.addLayout(button_layout)
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def show_replace_dialog(self):
+        """Show a dialog for finding and replacing text in the editor"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Find and Replace")
+        layout = QVBoxLayout(dialog)
+        
+        # Find input
+        find_label = QLabel("Find what:")
+        find_input = QLineEdit()
+        layout.addWidget(find_label)
+        layout.addWidget(find_input)
+        
+        # Replace input
+        replace_label = QLabel("Replace with:")
+        replace_input = QLineEdit()
+        layout.addWidget(replace_label)
+        layout.addWidget(replace_input)
+        
+        # Options
+        case_checkbox = QCheckBox("Match case")
+        layout.addWidget(case_checkbox)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        find_next_button = QPushButton("Find Next")
+        find_next_button.clicked.connect(lambda: self.find_text(
+            find_input.text(), 
+            case_sensitive=case_checkbox.isChecked()
+        ))
+        
+        replace_button = QPushButton("Replace")
+        replace_button.clicked.connect(lambda: self.replace_text(
+            find_input.text(),
+            replace_input.text(),
+            case_sensitive=case_checkbox.isChecked()
+        ))
+        
+        replace_all_button = QPushButton("Replace All")
+        replace_all_button.clicked.connect(lambda: self.replace_all_text(
+            find_input.text(),
+            replace_input.text(),
+            case_sensitive=case_checkbox.isChecked()
+        ))
+        
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.close)
+        
+        button_layout.addWidget(find_next_button)
+        button_layout.addWidget(replace_button)
+        button_layout.addWidget(replace_all_button)
+        button_layout.addWidget(close_button)
+        
+        layout.addLayout(button_layout)
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def find_text(self, text, case_sensitive=False):
+        """Find the next occurrence of text in the editor"""
+        flags = QTextDocument.FindFlag.FindBackward
+        if case_sensitive:
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
+            
+        cursor = self.text_editor.textCursor()
+        found = self.text_editor.find(text)
+        
+        if not found:
+            # If not found, try from the start
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.text_editor.setTextCursor(cursor)
+            found = self.text_editor.find(text)
+            
+            if not found:
+                QMessageBox.information(self, "Find", f"Cannot find '{text}'")
+
+    def replace_text(self, find_text, replace_text, case_sensitive=False):
+        """Replace the next occurrence of find_text with replace_text"""
+        cursor = self.text_editor.textCursor()
+        if cursor.hasSelection() and cursor.selectedText() == find_text:
+            cursor.insertText(replace_text)
+            
+        self.find_text(find_text, case_sensitive)
+
+    def replace_all_text(self, find_text, replace_text, case_sensitive=False):
+        """Replace all occurrences of find_text with replace_text"""
+        cursor = self.text_editor.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        self.text_editor.setTextCursor(cursor)
+        
+        count = 0
+        while self.text_editor.find(find_text):
+            cursor = self.text_editor.textCursor()
+            cursor.insertText(replace_text)
+            count += 1
+            
+        if count > 0:
+            QMessageBox.information(self, "Replace All", 
+                                  f"Replaced {count} occurrence(s)")
+        else:
+            QMessageBox.information(self, "Replace All", 
+                                  f"Cannot find '{find_text}'")
+
 
 def main():
     app = QApplication(sys.argv)
