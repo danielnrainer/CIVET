@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QTextEdit, 
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog)
@@ -8,7 +8,7 @@ from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont,
                         QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
-from utils import CIFFieldChecker
+from utils.CIF_field_parsing import CIFFieldChecker
 
 # needs checking of _refine_special_details; seems to overwrite current value when running again?
 # .exe seems not to be working; need to check if it is in the same directory as the script
@@ -1159,13 +1159,3 @@ class CIFEditor(QMainWindow):
         else:
             QMessageBox.information(self, "Replace All", 
                                   f"Cannot find '{find_text}'")
-
-
-def main():
-    app = QApplication(sys.argv)
-    editor = CIFEditor()
-    editor.show()
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
