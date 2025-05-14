@@ -1,0 +1,95 @@
+# CIF Field Constants for EDCIF-check
+# Fields and their standard values for electron diffraction CIF files
+# References: https://github.com/COMCIFS/cif_ed
+
+# _cell_measurement_temperature: Sample temperature during cell measurement (in K)
+_cell_measurement_temperature   293(5)
+
+# _diffrn_ambient_temperature: Sample temperature during data collection (in K)
+_diffrn_ambient_temperature     293(5)
+
+# _diffrn_ambient_environment: Sample environment during measurement
+_diffrn_ambient_environment     vacuum  # options: vacuum, helium, nitrogen, air
+
+# _exptl_crystal_colour: Visual description of the crystal color
+_exptl_crystal_colour           'white (bulk)'
+
+# _diffrn_radiation_wavelength: Electron wavelength in Å
+_diffrn_radiation_wavelength    0.0251
+
+# _diffrn_source: Primary description of the electron source
+_diffrn_source                  'electron gun'  # options: 'electron gun', 'electron microscope'
+
+# _diffrn_source_type: Specific electron source model
+_diffrn_source_type             'JEOL JSM-2300ED, LaB6'
+
+# _diffrn_source_details: Details of electron source type
+_diffrn_source_details          'LaB6'  # options: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+
+# _diffrn_source_voltage: Accelerating voltage in kV
+_diffrn_source_voltage          200
+
+# _diffrn_radiation_probe: Type of radiation probe
+_diffrn_radiation_probe         electron
+
+# _diffrn_radiation_type: Type of radiation used
+_diffrn_radiation_type          electron
+
+# _diffrn_radiation_monochromator: Monochromator type if present
+_diffrn_radiation_monochromator none
+
+# _diffrn_detector: General detector category
+_diffrn_detector                'hybrid pixel array detector'  # options: 'CCD', 'CMOS', 'Hybrid pixel', 'Direct detection camera'
+
+# _diffrn_detector_type: Specific detector model
+_diffrn_detector_type           'Rigaku HyPix-ED'  # options: 'HyPix-ED', 'HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
+
+# _diffrn_measurement_device: Primary instrument used
+_diffrn_measurement_device      'electron diffractometer'  # options: 'electron diffractometer', 'transmission electron microscope'
+
+# _diffrn_measurement_method: Data collection method
+_diffrn_measurement_method      'continuous rotation electron diffraction'  # options: 'continuous rotation electron diffraction', 'serial electron diffraction'
+
+# _diffrn_measurement_specimen_support: Sample holder details
+_diffrn_measurement_specimen_support 'lacey carbon copper grid, 200 mesh; Gatan Elsa cryo-transfer holder 698'
+
+# _exptl_crystal_preparation: Sample preparation method
+_exptl_crystal_preparation 'suspension in ethanol, dropcast on grid, evaporation in air'
+
+# _exptl.crystals_number: Number of crystals used
+_exptl.crystals_number          1
+
+# _diffrn_source.description: Extended source description
+_diffrn_source.description      'electron gun'  # better than 'electron microscope'
+
+# _diffrn_source.make: Source manufacturer/type
+_diffrn_source.make             'LaB6'  # options: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+
+# _diffrn_source.voltage: Operating voltage in kV
+_diffrn_source.voltage          200
+
+# _diffrn_source.ed_diffracting_area_selection: Area selection method
+_diffrn_source.ed_diffracting_area_selection SAED  # options: SAED, probe
+
+# _diffrn_detector.description: Extended detector description
+_diffrn_detector.description    'hybrid pixel array detector'  # options: 'CCD', 'CMOS', 'Hybrid pixel', 'Direct detection camera'
+
+# _diffrn_detector.make: Detector manufacturer/model
+_diffrn_detector.make           'Rigaku HyPix-ED'  # options: 'HyPix-ED', 'HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
+
+# _diffrn_radiation.wavelength: Electron wavelength in Å
+_diffrn_radiation.wavelength    0.0251
+
+# _diffrn_measurement.rotation_mode: Data collection rotation mode
+_diffrn_measurement.rotation_mode   rotation  # options: rotation, stepwise
+
+# _refine.diffraction_theory: Theory used for structure refinement
+_refine.diffraction_theory      kinematical  # options: kinematical, dynamical
+
+# Optional but recommended fields
+# _diffrn.flux_density: Beam flux density in e-/Å^2
+# _diffrn.total_dose: Total electron dose in MGy
+# _diffrn.total_exposure_time: Total exposure time in minutes
+# _refine_diff.potential_max: Maximum potential in e-/Å
+# _refine_diff.potential_min: Minimum potential in e-/Å
+# _refine_diff.potential_rms: RMS potential in e-/Å

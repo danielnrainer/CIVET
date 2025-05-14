@@ -1,0 +1,18 @@
+# CIF Field Constants for HP-checks
+
+# _cell_measurement_temperature: Sample temperature during cell measurement (in K)
+_cell_measurement_temperature   293(5)
+
+# _diffrn_ambient_temperature: Sample temperature during data collection (in K)
+_diffrn_ambient_temperature     293(5)
+
+# _diffrn_ambient_environment: Sample environment during measurement
+_diffrn_ambient_environment  ?  # options: vacuum, helium, nitrogen, air
+
+# _diffrn_ambient_pressure: Mean hydrostatic pressure at which intensities were measured (in kPa)
+_diffrn_ambient_pressure  2.0
+
+# _diffrn_ambient_pressure_su: Sample temperature during data collection (in K)
+# _diffrn_ambient_pressure_su  0.1
+
+# local fields (?) for PTM, diamond type, ...
