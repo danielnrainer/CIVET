@@ -10,9 +10,6 @@ import os
 import json
 from utils.CIF_field_parsing import CIFFieldChecker
 
-# needs checking of _refine_special_details; seems to overwrite current value when running again?
-# .exe seems not to be working; need to check if it is in the same directory as the script
-
 
 # Dialog result codes for consistency
 RESULT_ABORT = 2
@@ -27,7 +24,8 @@ def load_cif_field_definitions(filepath):
     # _field_name: description
     _field_name value
     
-    Values can be quoted or unquoted. The function preserves the quotation style.
+    Values can be quoted or unquoted. The function should preserve 
+    the quotation style.
     Comments starting with # can contain field descriptions.
     """
     try:
