@@ -14,17 +14,20 @@ _diffrn_ambient_environment     vacuum  # options: vacuum, helium, nitrogen, air
 # _exptl_crystal_colour: Visual description of the crystal color
 _exptl_crystal_colour           'white (bulk)'
 
+# _exptl_crystal_description: Visual description of the crystal habit
+_exptl_crystal_description  'irregular'   # suggestions: 'plate', 'needle', 'block', 'prism', ...
+
 # _diffrn_radiation_wavelength: Electron wavelength in Å
 _diffrn_radiation_wavelength    0.0251
 
 # _diffrn_source: Primary description of the electron source
-_diffrn_source                  'electron gun'  # options: 'electron gun', 'electron microscope'
+_diffrn_source                  'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
 
 # _diffrn_source_type: Specific electron source model
 _diffrn_source_type             'JEOL JSM-2300ED, LaB6'
 
 # _diffrn_source_details: Details of electron source type
-_diffrn_source_details          'LaB6'  # options: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+_diffrn_source_details          'LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
 
 # _diffrn_source_voltage: Accelerating voltage in kV
 _diffrn_source_voltage          200
@@ -39,19 +42,22 @@ _diffrn_radiation_type          electron
 _diffrn_radiation_monochromator none
 
 # _diffrn_detector: General detector category
-_diffrn_detector                'hybrid pixel array detector'  # options: 'CCD', 'CMOS', 'Hybrid pixel', 'Direct detection camera'
+_diffrn_detector                'hybrid pixel array detector'  # suggestions: 'CCD', 'CMOS', 'hybrid pixel', 'direct detection camera'
 
 # _diffrn_detector_type: Specific detector model
-_diffrn_detector_type           'Rigaku HyPix-ED'  # options: 'HyPix-ED', 'HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
+_diffrn_detector_type           'Rigaku HyPix-ED'  # suggestions: 'Rigaku HyPix-ED', 'Rigaku HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
 
 # _diffrn_measurement_device: Primary instrument used
-_diffrn_measurement_device      'electron diffractometer'  # options: 'electron diffractometer', 'transmission electron microscope'
+_diffrn_measurement_device      'electron diffractometer'  # suggestions: 'electron diffractometer', 'transmission electron microscope'
 
 # _diffrn_measurement_method: Data collection method
 _diffrn_measurement_method      'continuous rotation electron diffraction'  # options: 'continuous rotation electron diffraction', 'serial electron diffraction'
 
-# _diffrn_measurement_specimen_support: Sample holder details
-_diffrn_measurement_specimen_support 'lacey carbon copper grid, 200 mesh; Gatan Elsa cryo-transfer holder 698'
+# _diffrn_measurement_specimen_support: Grid details (or equivalent)
+_diffrn_measurement_specimen_support 'lacey carbon copper grid, 200 mesh'
+
+# _exptl_special_details: holder make and T-control if applicable (lack of different CIF_field)
+_exptl_special_details 'Gatan Elsa cryo-transfer holder model 698. Temperature controller model 1905'
 
 # _exptl_crystal_preparation: Sample preparation method
 _exptl_crystal_preparation 'suspension in ethanol, dropcast on grid, evaporation in air'
@@ -59,11 +65,13 @@ _exptl_crystal_preparation 'suspension in ethanol, dropcast on grid, evaporation
 # _exptl.crystals_number: Number of crystals used
 _exptl.crystals_number          1
 
+##### New notation (several as double entries from above)
+
 # _diffrn_source.description: Extended source description
-_diffrn_source.description      'electron gun'  # better than 'electron microscope'
+_diffrn_source.description      'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
 
 # _diffrn_source.make: Source manufacturer/type
-_diffrn_source.make             'LaB6'  # options: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+_diffrn_source.make             'LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
 
 # _diffrn_source.voltage: Operating voltage in kV
 _diffrn_source.voltage          200
@@ -72,10 +80,10 @@ _diffrn_source.voltage          200
 _diffrn_source.ed_diffracting_area_selection SAED  # options: SAED, probe
 
 # _diffrn_detector.description: Extended detector description
-_diffrn_detector.description    'hybrid pixel array detector'  # options: 'CCD', 'CMOS', 'Hybrid pixel', 'Direct detection camera'
+_diffrn_detector.description    'hybrid pixel array detector'  # suggestions: 'CCD', 'CMOS', 'Hybrid pixel', 'Direct detection camera'
 
 # _diffrn_detector.make: Detector manufacturer/model
-_diffrn_detector.make           'Rigaku HyPix-ED'  # options: 'HyPix-ED', 'HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
+_diffrn_detector.make           'Rigaku HyPix-ED'  # suggestions: 'Rigaku HyPix-ED', 'Rigaku HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
 
 # _diffrn_radiation.wavelength: Electron wavelength in Å
 _diffrn_radiation.wavelength    0.0251
@@ -86,10 +94,46 @@ _diffrn_measurement.rotation_mode   rotation  # options: rotation, stepwise
 # _refine.diffraction_theory: Theory used for structure refinement
 _refine.diffraction_theory      kinematical  # options: kinematical, dynamical
 
-# Optional but recommended fields
+###### Optional for later integration
 # _diffrn.flux_density: Beam flux density in e-/Å^2
 # _diffrn.total_dose: Total electron dose in MGy
 # _diffrn.total_exposure_time: Total exposure time in minutes
 # _refine_diff.potential_max: Maximum potential in e-/Å
 # _refine_diff.potential_min: Minimum potential in e-/Å
 # _refine_diff.potential_rms: RMS potential in e-/Å
+# _computing.sample_tracking: options missing
+# _computing.sample_tracking 
+# _diffrn_detector.distance_sample: probably DD in mm? nominal or refined?
+# _diffrn_detector.distance_sample  650
+# _diffrn_detector.ed_calibration_constant is this pix/A ?
+# _diffrn_detector.ed_calibration_constant  0.02345
+# _diffrn.precession_semi_angle: in mrad? only if precession specified? or defined by having this field?
+# _diffrn.precession_semi_angle: 0.2 ?
+# _diffrn_measurement.method_precession: none? yes/no?
+# _diffrn_measurement.method_precession: ??
+# _diffrn_measurement.sample_tracking: ?? none? yes/no?
+# _diffrn_measurement.sample_tracking ??
+# _diffrn_measurement.sample_tracking_method: how is it different to _computing.sample_tracking ?
+# _diffrn_measurement.sample_tracking_method: ?
+# _diffrn_radiation.illumination_mode: parallel/nano?
+# _diffrn_radiation.illumination_mode ??
+# _diffrn_source.convergence_angle: ?? only for nanobeam?
+# _diffrn_source.convergence_angle ??
+# _exptl_crystal.mosaic_block_size: ??
+# _exptl_crystal.mosaic_block_size ??
+# _exptl_crystal.mosaic_method: ??
+# _exptl_crystal.mosaic_method ??
+# _exptl_crystal.mosaicity: ??
+# _exptl_crystal.mosaicity ??
+# _refine.diffraction_theory_details: what to state here?
+# _refine.diffraction_theory_details ??
+# _refine_ls.abs_structure_z-score ?? which one? are all z-score calcs the same? needs specifying?!
+# _refine_ls.abs_structure_z-score ??
+# _refine_ls.sample_shape_details ??
+# _refine_ls.sample_shape_details ??
+# _refine_ls.sample_shape_expression ??
+# _refine_ls.sample_thickness ??
+# _refine_ls.sample_thickness ??
+# _chemical_absolute_configuration dyn
+
+

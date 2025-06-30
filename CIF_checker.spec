@@ -7,9 +7,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('src//gui/field_definitions.cif_ed', '.'),  # Include field definitions
-        ('src//gui/field_definitions.cif_hp', '.'),  # Include HP field definitions
-        ('src//gui/editor_settings.json', '.'),      # Include settings file
+        ('src/gui/field_definitions.cif_ed', 'gui'),  # Include field definitions
+        ('src/gui/field_definitions.cif_hp', 'gui'),  # Include HP field definitions
+        ('src/gui/editor_settings.json', 'gui'),      # Include settings file
     ],
     hiddenimports=[
         'PyQt6.QtWidgets',

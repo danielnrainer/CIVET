@@ -15,4 +15,7 @@ _diffrn_ambient_pressure  150000
 # _diffrn_ambient_pressure_su: Sample temperature during data collection (in K)
 # _diffrn_ambient_pressure_su  10
 
+# _exptl_crystal.pressure_history: Details concerning the pressure history of the crystals.
+# _exptl_crystal.pressure_history  
+
 # local fields (?) for PTM, diamond type, ...

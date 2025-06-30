@@ -1,4 +1,3 @@
-import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
@@ -24,8 +23,7 @@ def load_cif_field_definitions(filepath):
     # _field_name: description
     _field_name value
     
-    Values can be quoted or unquoted. The function should preserve 
-    the quotation style.
+    Values can be quoted or unquoted. The function preserves the quotation style.
     Comments starting with # can contain field descriptions.
     """
     try:
@@ -629,16 +627,16 @@ class CIFEditor(QMainWindow):
         return errors
 
     def save_to_file(self, filepath):
-        errors = self.validate_cif()
-        if errors:
-            error_text = "\n".join(errors)
-            reply = QMessageBox.warning(
-                self, "CIF Validation Errors",
-                f"The following validation errors were found:\n\n{error_text}\n\nSave anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        # errors = self.validate_cif()
+        # if errors:
+        #     error_text = "\n".join(errors)
+        #     reply = QMessageBox.warning(
+        #         self, "CIF Validation Errors",
+        #         f"The following validation errors were found:\n\n{error_text}\n\nSave anyway?",
+        #         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             
-            if reply == QMessageBox.StandardButton.No:
-                return
+        #     if reply == QMessageBox.StandardButton.No:
+        #         return
                 
         try:
             with open(filepath, "w") as file:
@@ -794,39 +792,6 @@ class CIFEditor(QMainWindow):
             
         return result
 
-    def check_optional_fields(self):
-        """Check if any optional fields are present and validate their values."""
-        optional_fields = [
-            ("_diffrn.flux_density", "", "Beam flux density in e-/Å^2"),
-            ("_diffrn.total_dose", "", "Total electron dose in MGy"),
-            ("_diffrn.total_exposure_time", "", "Total exposure time in minutes"),
-            ("_refine_diff.potential_max", "", "Maximum potential in e-/Å"),
-            ("_refine_diff.potential_min", "", "Minimum potential in e-/Å"),
-            ("_refine_diff.potential_rms", "", "RMS potential in e-/Å")
-        ]
-        
-        lines = self.text_editor.toPlainText().splitlines()
-        found_fields = []
-        
-        for line in lines:
-            field = line.split()[0] if line.strip() and line.strip().startswith('_') else None
-            if field:
-                for opt_field, default_value, description in optional_fields:
-                    if field == opt_field:
-                        # For found optional fields, offer to edit them
-                        result = self.check_line(field, default_value, description=description)
-                        if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
-                            return result
-                        found_fields.append((field, description))
-        
-        if found_fields:
-            message = "Found and processed optional fields:\n\n"
-            for field, desc in found_fields:
-                message += f"• {field}: {desc}\n"
-            QMessageBox.information(self, "Optional Fields", message)
-        
-        return QDialog.DialogCode.Accepted
-
     def start_checks_3ded(self):
         """Start checking CIF fields using 3DED field definitions."""
         # Store the initial state for potential restore
@@ -855,9 +820,6 @@ class CIFEditor(QMainWindow):
                                        "Changes have been saved. Remaining checks skipped.")
                     return
             
-            # Check optional fields
-            self.check_optional_fields()
-            
             # Always check refine special details last
             result = self.check_refine_special_details()
             if result == MultilineInputDialog.RESULT_ABORT:
@@ -870,6 +832,30 @@ class CIFEditor(QMainWindow):
                 QMessageBox.information(self, "Checks Stopped",
                                    "Changes have been saved. Remaining checks skipped.")
                 return
+
+            # Check for _chemical_absolute_configuration
+            sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
+            SG_number = None
+            lines = self.text_editor.toPlainText().splitlines()
+            for line in lines:
+                if line.startswith("_space_group_IT_number"):
+                    parts = line.split()
+                    if len(parts) > 1:
+                        try:
+                            SG_number = int(parts[1].strip("'\""))
+                        except Exception:
+                            pass
+                    break
+            if SG_number is not None and SG_number in sohncke_groups:
+                found = False
+                for line in lines:
+                    if line.startswith("_chemical_absolute_configuration"):
+                        found = True
+                        break
+                if found:
+                    self.check_line("_chemical_absolute_configuration", default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
+                else:
+                    self.add_missing_line("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
             
             QMessageBox.information(self, "Checks Complete", 
                                   "All 3DED CIF checks completed successfully.")
@@ -905,10 +891,7 @@ class CIFEditor(QMainWindow):
                     QMessageBox.information(self, "Checks Stopped",
                                        "Changes have been saved. Remaining checks skipped.")
                     return
-            
-            # Check optional fields
-            self.check_optional_fields()
-            
+
             # Always check refine special details last
             result = self.check_refine_special_details()
             if result == MultilineInputDialog.RESULT_ABORT:
