@@ -400,7 +400,7 @@ class CIFEditor(QMainWindow):
         text_layout.addWidget(self.text_editor)
         main_layout.addWidget(text_widget)
         
-        # Create button layout
+        # Create button layout = QHBoxLayout()
         button_layout = QHBoxLayout()
         
         # Create buttons
@@ -912,36 +912,39 @@ class CIFEditor(QMainWindow):
             QMessageBox.critical(self, "Error",
                              f"An error occurred during checks:\n{str(e)}")    
     def reformat_file(self):
-        """Reformat CIF file to handle long lines and properly format values."""
+        """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
         lines = self.text_editor.toPlainText().splitlines()
         new_lines = []
-        
+        in_multiline_block = False
         for line in lines:
-            # Handle CIF field values (lines starting with _)
-            if line.startswith('_') and len(line) > 80:
-                key, value = line.split(maxsplit=1)
-                # Strip quotes if present
-                value = value.strip().strip("'\"")
-                formatted_value = self.insert_line_breaks(value, 80)
-                # Use semicolon-delimited format for long values
-                new_lines.append(f"{key} \n;\n{formatted_value}\n;")
-                
-            # Handle quoted values that are too long
-            elif line.lstrip().startswith(("'", '"')) and len(line) > 80:
-                # Strip quotes and convert to semicolon-delimited format
-                value = line.lstrip().strip("'\"")
-                formatted_value = self.insert_line_breaks(value, 80)
-                new_lines.append(f";\n{formatted_value}\n;")
-                
-            # Keep existing semicolon blocks and short lines unchanged
-            elif line.startswith(';') or len(line) <= 80:
+            if line.strip() == ';':
+                in_multiline_block = not in_multiline_block
                 new_lines.append(line)
-                
-            # Handle other long lines
-            elif len(line) > 80:
-                formatted_value = self.insert_line_breaks(line.lstrip(), 80)
-                new_lines.append(formatted_value)
-        
+                continue
+            if in_multiline_block:
+                new_lines.append(line)
+            else:
+                # Handle CIF field values (lines starting with _)
+                if line.startswith('_') and len(line) > 80:
+                    key, value = line.split(maxsplit=1)
+                    # Strip quotes if present
+                    value = value.strip().strip("'\"")
+                    formatted_value = self.insert_line_breaks(value, 80)
+                    # Use semicolon-delimited format for long values
+                    new_lines.append(f"{key} \n;\n{formatted_value}\n;")
+                # Handle quoted values that are too long
+                elif line.lstrip().startswith(("'", '"')) and len(line) > 80:
+                    # Strip quotes and convert to semicolon-delimited format
+                    value = line.lstrip().strip("'\"")
+                    formatted_value = self.insert_line_breaks(value, 80)
+                    new_lines.append(f";\n{formatted_value}\n;")
+                # Keep short lines unchanged
+                elif len(line) <= 80:
+                    new_lines.append(line)
+                # Handle other long lines
+                elif len(line) > 80:
+                    formatted_value = self.insert_line_breaks(line.lstrip(), 80)
+                    new_lines.append(formatted_value)
         self.text_editor.setText("\n".join(new_lines))
         QMessageBox.information(self, "Reformatting Completed",
                               "The file has been successfully reformatted.")
