@@ -1,1 +1,5 @@
 *.pyc
+cif_core.dic
+IMPLEMENTATION_SUMMARY.md
+src/gui/field_definitions_issues.cif_defs
+src/gui/field_definitions_all.cif_defs

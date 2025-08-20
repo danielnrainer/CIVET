@@ -8,78 +8,12 @@ from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont,
 import os
 import json
 from utils.CIF_field_parsing import CIFFieldChecker
+from utils.CIF_parser import CIFParser
 
 
 # Dialog result codes for consistency
 RESULT_ABORT = 2
 RESULT_STOP_SAVE = 3
-
-def load_cif_field_definitions(filepath):
-    """Load CIF field definitions from a CIF-style file.
-    
-    The file format is CIF-like with each line having:
-    _field_name value # description
-    or
-    # _field_name: description
-    _field_name value
-    
-    Values can be quoted or unquoted. The function preserves the quotation style.
-    Comments starting with # can contain field descriptions.
-    """
-    try:
-        all_fields = []
-        descriptions = {}
-        
-        # First pass: collect descriptions from comments
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                # Description on its own line
-                if line.startswith('#'):
-                    parts = line[1:].strip().split(':', 1)
-                    if len(parts) == 2 and parts[0].strip().startswith('_'):
-                        field_name = parts[0].strip()
-                        descriptions[field_name] = parts[1].strip()
-                # Description at end of line
-                elif '#' in line and not line.startswith('//'):
-                    value_part, comment_part = line.split('#', 1)
-                    if value_part.strip().startswith('_'):
-                        field_name = value_part.split()[0].strip()
-                        descriptions[field_name] = comment_part.strip()
-        
-        # Second pass: collect field definitions
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if not line or line.startswith('#') or line.startswith('//'):
-                    continue
-                
-                # Handle inline comments
-                if '#' in line:
-                    line = line.split('#', 1)[0].strip()
-                
-                # Split on first whitespace to separate field from value
-                parts = line.split(maxsplit=1)
-                if len(parts) != 2:
-                    continue
-                    
-                field, value = parts
-                description = descriptions.get(field, '')
-                    
-                # Add options to description if present in comments
-                if 'options:' in description.lower():
-                    options_idx = description.lower().find('options:')
-                    options_text = description[options_idx:].strip()
-                    description = f"{description[:options_idx].strip()}\n{options_text}"
-                
-                # Store the field definition with value and description
-                all_fields.append((field, value, description))
-                
-        return all_fields
-    except Exception as e:
-        print(f"Error loading CIF field definitions: {e}")
-        return []
 
 class CIFSyntaxHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
@@ -258,8 +192,9 @@ class CIFEditor(QMainWindow):
         self.recent_files = []
         self.max_recent_files = 5
         
-        # Initialize field checker
+        # Initialize field checker and CIF parser
         self.field_checker = CIFFieldChecker()
+        self.cif_parser = CIFParser()
         config_path = os.path.dirname(__file__)
         
         # Load both field definition sets
@@ -400,7 +335,7 @@ class CIFEditor(QMainWindow):
         text_layout.addWidget(self.text_editor)
         main_layout.addWidget(text_widget)
         
-        # Create button layout = QHBoxLayout()
+        # Create button layout
         button_layout = QHBoxLayout()
         
         # Create buttons
@@ -719,51 +654,25 @@ class CIFEditor(QMainWindow):
     
     def check_refine_special_details(self):
         """Check and edit _refine_special_details field, creating it if needed."""
-        lines = self.text_editor.toPlainText().splitlines()
-        start_line = None
-        end_line = None
-        found = False
+        content = self.text_editor.toPlainText()
         
-        # Look for the field
-        for i, line in enumerate(lines):
-            if line.startswith("_refine_special_details"):
-                start_line = i
-                found = True
-                break
-                
+        # Parse the CIF content using the new parser
+        self.cif_parser.parse_file(content)
+        
         template = (
-                   "STRUCTURE REFINEMENT\n"
-                   "- Refinement method\n"
-                   "- Special constraints and restraints\n"
-                   "- Special treatments"
-                   )
+            "STRUCTURE REFINEMENT\n"
+            "- Refinement method\n"
+            "- Special constraints and restraints\n"
+            "- Special treatments"
+        )
         
-        if found:
-            # Find the content between semicolons
-            content_lines = []
-            in_content = False
-            
-            for i in range(start_line + 1, len(lines)):
-                line = lines[i].strip()
-                if line == ";":
-                    if not in_content:
-                        in_content = True
-                        continue
-                    else:
-                        end_line = i
-                        break
-                if in_content:
-                    content_lines.append(lines[i])
-            
-            if content_lines:
-                content = "\n".join(content_lines)
-            else:
-                content = template
-        else:
-            content = template
+        # Get current value or use template
+        current_value = self.cif_parser.get_field_value('_refine_special_details')
+        if current_value is None:
+            current_value = template
         
         # Open dialog for editing
-        dialog = MultilineInputDialog(content, self)
+        dialog = MultilineInputDialog(current_value, self)
         dialog.setWindowTitle("Edit Refinement Special Details")
         result = dialog.exec()
         
@@ -772,25 +681,18 @@ class CIFEditor(QMainWindow):
         elif result == QDialog.DialogCode.Accepted:
             updated_content = dialog.getText()
             
-            # Format the complete field with proper CIF syntax
-            formatted_content = [
-                "_refine_special_details",
-                ";",
-                updated_content,
-                ";"
-            ]
+            # Update the field in the parser
+            self.cif_parser.set_field_value('_refine_special_details', updated_content)
             
-            # Update or insert the content
-            if found and end_line is not None:
-                lines[start_line:end_line + 1] = formatted_content
-            else:
-                if lines and lines[-1].strip():  # If last line is not empty
-                    lines.append("")  # Add blank line before new field
-                lines.extend(formatted_content)
+            # Generate updated CIF content and update the text editor
+            updated_cif = self.cif_parser.generate_cif_content()
+            self.text_editor.setText(updated_cif)
+            self.modified = True
+            self.update_status_bar()
             
-            self.text_editor.setText("\n".join(lines))
-            
-        return result
+            return QDialog.DialogCode.Accepted
+        
+        return QDialog.DialogCode.Rejected
 
     def start_checks_3ded(self):
         """Start checking CIF fields using 3DED field definitions."""
@@ -913,41 +815,19 @@ class CIFEditor(QMainWindow):
                              f"An error occurred during checks:\n{str(e)}")    
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
-        lines = self.text_editor.toPlainText().splitlines()
-        new_lines = []
-        in_multiline_block = False
-        for line in lines:
-            if line.strip() == ';':
-                in_multiline_block = not in_multiline_block
-                new_lines.append(line)
-                continue
-            if in_multiline_block:
-                new_lines.append(line)
-            else:
-                # Handle CIF field values (lines starting with _)
-                if line.startswith('_') and len(line) > 80:
-                    key, value = line.split(maxsplit=1)
-                    # Strip quotes if present
-                    value = value.strip().strip("'\"")
-                    formatted_value = self.insert_line_breaks(value, 80)
-                    # Use semicolon-delimited format for long values
-                    new_lines.append(f"{key} \n;\n{formatted_value}\n;")
-                # Handle quoted values that are too long
-                elif line.lstrip().startswith(("'", '"')) and len(line) > 80:
-                    # Strip quotes and convert to semicolon-delimited format
-                    value = line.lstrip().strip("'\"")
-                    formatted_value = self.insert_line_breaks(value, 80)
-                    new_lines.append(f";\n{formatted_value}\n;")
-                # Keep short lines unchanged
-                elif len(line) <= 80:
-                    new_lines.append(line)
-                # Handle other long lines
-                elif len(line) > 80:
-                    formatted_value = self.insert_line_breaks(line.lstrip(), 80)
-                    new_lines.append(formatted_value)
-        self.text_editor.setText("\n".join(new_lines))
-        QMessageBox.information(self, "Reformatting Completed",
-                              "The file has been successfully reformatted.")
+        try:
+            # Use the CIF parser's reformatting functionality
+            current_content = self.text_editor.toPlainText()
+            reformatted_content = self.cif_parser.reformat_for_line_length(current_content)
+            
+            # Update the text editor with the reformatted content
+            self.text_editor.setText(reformatted_content)
+            
+            QMessageBox.information(self, "Reformatting Completed",
+                                  "The file has been successfully reformatted with proper line length handling.")
+        except Exception as e:
+            QMessageBox.critical(self, "Reformatting Error",
+                               f"An error occurred while reformatting:\n{str(e)}")
 
     def insert_line_breaks(self, text, limit):
         words = text.split()
