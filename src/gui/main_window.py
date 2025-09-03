@@ -40,32 +40,101 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.multiline_format = QTextCharFormat()
         self.multiline_format.setForeground(QColor("#800080"))  # Purple
         
-        # State for tracking multiline blocks
+        # Loop-specific formats
+        self.loop_keyword_format = QTextCharFormat()
+        self.loop_keyword_format.setForeground(QColor("#FF6600"))  # Orange
+        self.loop_keyword_format.setFontWeight(QFont.Weight.Bold)  # Bold
+        
+        self.loop_field_format = QTextCharFormat()
+        self.loop_field_format.setForeground(QColor("#CC6600"))  # Darker orange for loop fields
+        
+        self.loop_data_format = QTextCharFormat()
+        self.loop_data_format.setForeground(QColor("#996600"))  # Even darker orange for loop data
+        
+        # State for tracking multiline blocks and loops
         self.in_multiline = False
+        self.in_loop = False
+        self.in_loop_data = False
 
     def highlightBlock(self, text):
-        # Check if previous block was in a multiline state
-        if self.previousBlockState() == 1:
+        # Check previous block state
+        prev_state = self.previousBlockState()
+        if prev_state == 1:
             self.in_multiline = True
+            self.in_loop = False
+            self.in_loop_data = False
+        elif prev_state == 2:
+            self.in_loop = True
+            self.in_loop_data = False
+            self.in_multiline = False
+        elif prev_state == 3:
+            self.in_loop = True
+            self.in_loop_data = True
+            self.in_multiline = False
         else:
             self.in_multiline = False
-            
-        # Apply standard rules first
+            self.in_loop = False
+            self.in_loop_data = False
+        
+        stripped_text = text.strip()
+        
+        # Handle multiline values first
+        if text.startswith(';'):
+            self.setFormat(0, len(text), self.multiline_format)
+            self.in_multiline = not self.in_multiline
+            if self.in_multiline:
+                self.setCurrentBlockState(1)
+            else:
+                self.setCurrentBlockState(0)
+            return
+        elif self.in_multiline:
+            self.setFormat(0, len(text), self.multiline_format)
+            self.setCurrentBlockState(1)
+            return
+        
+        # Check for loop start
+        if stripped_text.lower() == 'loop_':
+            self.setFormat(0, len(text), self.loop_keyword_format)
+            self.in_loop = True
+            self.in_loop_data = False
+            self.setCurrentBlockState(2)
+            return
+        # Check if we're in a loop and encounter non-field data (start of data rows)
+        elif self.in_loop and stripped_text and not stripped_text.startswith('_') and not stripped_text.startswith('#'):
+            self.in_loop_data = True
+            self.setCurrentBlockState(3)
+        # Check if we're leaving a loop (new field outside loop or new loop)
+        elif stripped_text.startswith('_') and not self.in_loop:
+            self.in_loop = False
+            self.in_loop_data = False
+            self.setCurrentBlockState(0)
+        elif stripped_text.lower().startswith('loop_'):
+            self.in_loop = True
+            self.in_loop_data = False
+            self.setCurrentBlockState(2)
+        elif self.in_loop and not self.in_loop_data:
+            self.setCurrentBlockState(2)
+        elif self.in_loop and self.in_loop_data:
+            self.setCurrentBlockState(3)
+        else:
+            self.setCurrentBlockState(0)
+        
+        # Apply background highlighting for loop data
+        if self.in_loop_data and stripped_text and not stripped_text.startswith('#'):
+            self.setFormat(0, len(text), self.loop_data_format)
+        
+        # Apply standard rules
         for pattern, format in self.highlighting_rules:
             matches = pattern.globalMatch(text)
             while matches.hasNext():
                 match = matches.next()
-                self.setFormat(match.capturedStart(), match.capturedLength(), format)
+                # Don't override loop data formatting for basic patterns
+                if not (self.in_loop_data and pattern.pattern() in [r'_\w+(?:\.\w+)*', r"'[^']*'"]):
+                    self.setFormat(match.capturedStart(), match.capturedLength(), format)
         
-        # Handle multiline values
-        if text.startswith(';'):
-            self.setFormat(0, len(text), self.multiline_format)
-            self.in_multiline = not self.in_multiline
-        elif self.in_multiline:
-            self.setFormat(0, len(text), self.multiline_format)
-        
-        # Set state for next block
-        self.setCurrentBlockState(1 if self.in_multiline else 0)
+        # Special formatting for loop field names
+        if self.in_loop and not self.in_loop_data and stripped_text.startswith('_'):
+            self.setFormat(0, len(text), self.loop_field_format)
 
 class MultilineInputDialog(QDialog):
     # Define result codes as class attributes
@@ -205,10 +274,12 @@ class CIFInputDialog(QDialog):
     # Define result codes as class attributes
     RESULT_ABORT = 2  # User wants to abort all changes
     RESULT_STOP_SAVE = 3  # User wants to stop but save changes
+    RESULT_USE_DEFAULT = 4  # User wants to use default value
 
-    def __init__(self, title, text, value="", parent=None):
+    def __init__(self, title, text, value="", default_value=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
+        self.default_value = default_value
         
         layout = QVBoxLayout(self)
         
@@ -230,6 +301,12 @@ class CIFInputDialog(QDialog):
         
         cancelButton = QPushButton("Cancel Current")
         cancelButton.clicked.connect(self.reject)
+        
+        # Add "Use Default" button only if default value is provided
+        if default_value is not None and default_value.strip():
+            useDefaultButton = QPushButton(f"Use Default ({default_value})")
+            useDefaultButton.clicked.connect(self.use_default)
+            buttonBox.addWidget(useDefaultButton)
         
         abortButton = QPushButton("Abort All Changes")
         abortButton.clicked.connect(self.abort_changes)
@@ -253,10 +330,13 @@ class CIFInputDialog(QDialog):
         
     def stop_and_save(self):
         self.done(self.RESULT_STOP_SAVE)
+    
+    def use_default(self):
+        self.done(self.RESULT_USE_DEFAULT)
 
     @staticmethod
-    def getText(parent, title, text, value=""):
-        dialog = CIFInputDialog(title, text, value, parent)
+    def getText(parent, title, text, value="", default_value=None):
+        dialog = CIFInputDialog(title, text, value, default_value, parent)
         result = dialog.exec()
         
         if result == QDialog.DialogCode.Accepted:
@@ -265,6 +345,8 @@ class CIFInputDialog(QDialog):
             return None, CIFInputDialog.RESULT_ABORT
         elif result == CIFInputDialog.RESULT_STOP_SAVE:
             return dialog.getValue(), CIFInputDialog.RESULT_STOP_SAVE
+        elif result == CIFInputDialog.RESULT_USE_DEFAULT:
+            return default_value, QDialog.DialogCode.Accepted
         else:
             return None, QDialog.DialogCode.Rejected
 
@@ -670,7 +752,7 @@ class CIFEditor(QMainWindow):
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value)
+                    current_value, default_value)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
@@ -694,7 +776,7 @@ class CIFEditor(QMainWindow):
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
             f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
-            default_value if default_value else "")
+            default_value if default_value else "", default_value)
         
         if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
             return result
@@ -752,7 +834,7 @@ class CIFEditor(QMainWindow):
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value)
+                    current_value, default_value)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
