@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
-                           QDialog, QLabel, QFontDialog)
+                           QDialog, QLabel, QFontDialog, QGroupBox)
 from PyQt6.QtCore import Qt, QRegularExpression
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument)
@@ -116,6 +116,90 @@ class MultilineInputDialog(QDialog):
         
     def stop_and_save(self):
         self.done(self.RESULT_STOP_SAVE)
+
+class CheckConfigDialog(QDialog):
+    """Configuration dialog for CIF field checking parameters."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Check Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        
+        # Initialize configuration settings
+        self.auto_fill_missing = False
+        self.skip_matching_defaults = False
+        self.reformat_after_checks = False
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize the user interface."""
+        layout = QVBoxLayout(self)
+        
+        # Add title and description
+        title_label = QLabel("Configure CIF Field Checking")
+        title_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(title_label)
+        
+        description_label = QLabel(
+            "Configure how the field checking process should behave:"
+        )
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+        
+        # Create configuration group
+        config_group = QGroupBox("Checking Options")
+        config_layout = QVBoxLayout(config_group)
+        
+        # Option 1: Auto-fill missing fields
+        self.auto_fill_checkbox = QCheckBox(
+            "Automatically fill missing fields with default values\n"
+            "(No user prompts for missing fields - they will be added silently)"
+        )
+        self.auto_fill_checkbox.setChecked(self.auto_fill_missing)
+        config_layout.addWidget(self.auto_fill_checkbox)
+        
+        # Option 2: Skip fields that match defaults
+        self.skip_defaults_checkbox = QCheckBox(
+            "Skip prompts for fields that already match default values\n"
+            "(Fields with correct default values will not prompt for editing)"
+        )
+        self.skip_defaults_checkbox.setChecked(self.skip_matching_defaults)
+        config_layout.addWidget(self.skip_defaults_checkbox)
+        
+        # Option 3: Reformat file after checks
+        self.reformat_checkbox = QCheckBox(
+            "Reformat file after checks complete\n"
+            "(Automatically reformat CIF file for proper line lengths and formatting)"
+        )
+        self.reformat_checkbox.setChecked(self.reformat_after_checks)
+        config_layout.addWidget(self.reformat_checkbox)
+        
+        layout.addWidget(config_group)
+        
+        # Add buttons
+        button_layout = QHBoxLayout()
+        
+        ok_button = QPushButton("Start Checks")
+        ok_button.setDefault(True)
+        ok_button.clicked.connect(self.accept)
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(ok_button)
+        
+        layout.addLayout(button_layout)
+    
+    def get_config(self):
+        """Get the current configuration settings."""
+        return {
+            'auto_fill_missing': self.auto_fill_checkbox.isChecked(),
+            'skip_matching_defaults': self.skip_defaults_checkbox.isChecked(),
+            'reformat_after_checks': self.reformat_checkbox.isChecked()
+        }
 
 class CIFInputDialog(QDialog):
     # Define result codes as class attributes
@@ -562,17 +646,6 @@ class CIFEditor(QMainWindow):
         return errors
 
     def save_to_file(self, filepath):
-        # errors = self.validate_cif()
-        # if errors:
-        #     error_text = "\n".join(errors)
-        #     reply = QMessageBox.warning(
-        #         self, "CIF Validation Errors",
-        #         f"The following validation errors were found:\n\n{error_text}\n\nSave anyway?",
-        #         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
-        #     if reply == QMessageBox.StandardButton.No:
-        #         return
-                
         try:
             with open(filepath, "w") as file:
                 content = self.text_editor.toPlainText().strip()
@@ -652,6 +725,85 @@ class CIFEditor(QMainWindow):
         self.text_editor.setText("\n".join(lines))
         return result    
     
+    def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None):
+        """Check and potentially update a CIF field value with configuration options."""
+        if config is None:
+            config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
+        
+        removable_chars = "'"
+        lines = self.text_editor.toPlainText().splitlines()
+        
+        # Check if field exists
+        field_found = False
+        for i, line in enumerate(lines):
+            if line.startswith(prefix):
+                field_found = True
+                current_value = " ".join(line.split()[1:]).strip(removable_chars)
+                
+                # If skip_matching_defaults is enabled and current value matches default
+                if config.get('skip_matching_defaults', False) and default_value:
+                    # Clean both values for comparison
+                    clean_current = current_value.strip().strip("'\"")
+                    clean_default = str(default_value).strip().strip("'\"")
+                    if clean_current == clean_default:
+                        return QDialog.DialogCode.Accepted  # Skip this field
+                
+                # Show normal edit dialog
+                value, result = CIFInputDialog.getText(
+                    self, "Edit Line",
+                    f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    current_value)
+                
+                if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
+                    return result
+                elif result == QDialog.DialogCode.Accepted and value:
+                    # Preserve original quoting style - only quote if value has spaces or special chars
+                    stripped_value = value.strip(removable_chars)
+                    if ' ' in stripped_value or ',' in stripped_value:
+                        formatted_value = f"'{stripped_value}'"
+                    else:
+                        formatted_value = stripped_value
+                    lines[i] = f"{prefix} {formatted_value}"
+                    self.text_editor.setText("\n".join(lines))
+                return result
+        
+        # Field not found - handle missing field
+        if not field_found:
+            return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config)
+        
+        return QDialog.DialogCode.Accepted
+    
+    def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None):
+        """Add a missing CIF field with value, respecting configuration options."""
+        if config is None:
+            config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
+        
+        # If auto_fill_missing is enabled, add the field silently with default value
+        if config.get('auto_fill_missing', False) and default_value:
+            removable_chars = "'"
+            stripped_value = str(default_value).strip(removable_chars)
+            
+            if multiline:
+                insert_index = len(lines)
+                for i, line in enumerate(lines):
+                    if line.startswith(prefix.split("_")[0]):
+                        insert_index = i + 1
+                lines.insert(insert_index, 
+                            f"{prefix} \n;\n{stripped_value}\n;")
+            else:
+                # Only quote if value has spaces or special chars
+                if ' ' in stripped_value or ',' in stripped_value:
+                    formatted_value = f"'{stripped_value}'"
+                else:
+                    formatted_value = stripped_value
+                lines.append(f"{prefix} {formatted_value}")
+            
+            self.text_editor.setText("\n".join(lines))
+            return QDialog.DialogCode.Accepted
+        
+        # Otherwise, use the normal missing line dialog
+        return self.add_missing_line(prefix, lines, default_value, multiline, description)
+    
     def check_refine_special_details(self):
         """Check and edit _refine_special_details field, creating it if needed."""
         content = self.text_editor.toPlainText()
@@ -696,6 +848,14 @@ class CIFEditor(QMainWindow):
 
     def start_checks_3ded(self):
         """Start checking CIF fields using 3DED field definitions."""
+        # Show configuration dialog first
+        config_dialog = CheckConfigDialog(self)
+        if config_dialog.exec() != QDialog.DialogCode.Accepted:
+            return  # User cancelled
+        
+        # Get configuration settings
+        config = config_dialog.get_config()
+        
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
@@ -709,8 +869,10 @@ class CIFEditor(QMainWindow):
         try:
             # Process all required fields
             for field in fields:
-                # Check each field
-                result = self.check_line(field.name, field.default_value, description=field.description)
+                # Check each field with configuration options
+                result = self.check_line_with_config(field.name, field.default_value, 
+                                                   description=field.description, 
+                                                   config=config)
                 if result == CIFInputDialog.RESULT_ABORT:
                     # Restore original state
                     self.text_editor.setText(initial_state)
@@ -759,6 +921,16 @@ class CIFEditor(QMainWindow):
                 else:
                     self.add_missing_line("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
             
+            # Reformat file if requested
+            if config.get('reformat_after_checks', False):
+                try:
+                    current_content = self.text_editor.toPlainText()
+                    reformatted_content = self.cif_parser.reformat_for_line_length(current_content)
+                    self.text_editor.setText(reformatted_content)
+                except Exception as e:
+                    QMessageBox.warning(self, "Reformatting Warning",
+                                       f"Checks completed successfully, but reformatting failed:\n{str(e)}")
+            
             QMessageBox.information(self, "Checks Complete", 
                                   "All 3DED CIF checks completed successfully.")
             
@@ -768,6 +940,14 @@ class CIFEditor(QMainWindow):
 
     def start_checks_hp(self):
         """Start checking CIF fields using HP (high pressure) field definitions."""
+        # Show configuration dialog first
+        config_dialog = CheckConfigDialog(self)
+        if config_dialog.exec() != QDialog.DialogCode.Accepted:
+            return  # User cancelled
+        
+        # Get configuration settings
+        config = config_dialog.get_config()
+        
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
@@ -781,8 +961,10 @@ class CIFEditor(QMainWindow):
         try:
             # Process all required fields
             for field in fields:
-                # Check each field
-                result = self.check_line(field.name, field.default_value, description=field.description)
+                # Check each field with configuration options
+                result = self.check_line_with_config(field.name, field.default_value, 
+                                                   description=field.description, 
+                                                   config=config)
                 if result == CIFInputDialog.RESULT_ABORT:
                     # Restore original state
                     self.text_editor.setText(initial_state)
@@ -806,6 +988,16 @@ class CIFEditor(QMainWindow):
                 QMessageBox.information(self, "Checks Stopped",
                                    "Changes have been saved. Remaining checks skipped.")
                 return
+            
+            # Reformat file if requested
+            if config.get('reformat_after_checks', False):
+                try:
+                    current_content = self.text_editor.toPlainText()
+                    reformatted_content = self.cif_parser.reformat_for_line_length(current_content)
+                    self.text_editor.setText(reformatted_content)
+                except Exception as e:
+                    QMessageBox.warning(self, "Reformatting Warning",
+                                       f"Checks completed successfully, but reformatting failed:\n{str(e)}")
             
             QMessageBox.information(self, "Checks Complete", 
                                   "All HP CIF checks completed successfully.")

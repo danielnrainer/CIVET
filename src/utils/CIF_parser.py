@@ -10,6 +10,7 @@ templates for validation purposes.
 
 Classes:
     CIFField: Represents an actual field instance parsed from a CIF file
+    CIFLoop: Represents a CIF loop structure with multiple fields and data rows
     CIFParser: Main parser class for processing CIF file content
 """
 
@@ -37,15 +38,31 @@ class CIFField:
         return f"CIFField(name='{self.name}', value='{self.value}', multiline={self.is_multiline})"
 
 
+class CIFLoop:
+    """Represents a CIF loop structure with field names and data rows."""
+    
+    def __init__(self, field_names: List[str], data_rows: List[List[str]], line_number: int = None):
+        self.field_names = field_names
+        self.data_rows = data_rows
+        self.line_number = line_number
+    
+    def __repr__(self):
+        return f"CIFLoop(fields={len(self.field_names)}, rows={len(self.data_rows)})"
+
+
 class CIFParser:
     """Main parser class for processing CIF file content."""
     
     def __init__(self):
         self.fields: Dict[str, CIFField] = {}
+        self.loops: List[CIFLoop] = []
+        self.content_blocks: List[Dict] = []  # Ordered list of fields and loops
         
     def parse_file(self, content: str) -> Dict[str, CIFField]:
         """Parse CIF content and return a dictionary of fields."""
         self.fields = {}
+        self.loops = []
+        self.content_blocks = []
         lines = content.splitlines()
         i = 0
         
@@ -57,22 +74,145 @@ class CIFParser:
                 i += 1
                 continue
             
+            # Check for loop structure
+            if line.lower().startswith('loop_'):
+                loop, lines_consumed = self._parse_loop(lines, i)
+                if loop:
+                    self.loops.append(loop)
+                    self.content_blocks.append({'type': 'loop', 'content': loop})
+                    # Add loop fields to main fields dict for compatibility
+                    for field_name in loop.field_names:
+                        if field_name not in self.fields:
+                            self.fields[field_name] = CIFField(name=field_name, value="(in loop)", line_number=i + 1)
+                i += lines_consumed
+                continue
+            
             # Check if this line starts a field definition
             if line.startswith('_'):
                 field_name, value, lines_consumed = self._parse_field(lines, i)
                 if field_name:
-                    self.fields[field_name] = CIFField(
+                    field = CIFField(
                         name=field_name,
                         value=value,
                         is_multiline=self._is_multiline_value(value),
                         line_number=i + 1,
                         raw_lines=lines[i:i+lines_consumed]
                     )
+                    self.fields[field_name] = field
+                    self.content_blocks.append({'type': 'field', 'content': field})
                 i += lines_consumed
             else:
                 i += 1
                 
         return self.fields
+    
+    def _parse_loop(self, lines: List[str], start_index: int) -> Tuple[Optional[CIFLoop], int]:
+        """Parse a CIF loop structure starting at the given line index.
+        
+        Returns:
+            Tuple of (CIFLoop object or None, lines_consumed)
+        """
+        i = start_index + 1  # Skip the 'loop_' line
+        field_names = []
+        
+        # Parse field names
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                i += 1
+                continue
+            
+            # Check if this is a field name
+            if line.startswith('_'):
+                field_names.append(line)
+                i += 1
+            else:
+                # We've reached the data section
+                break
+        
+        if not field_names:
+            return None, i - start_index
+        
+        # Parse data rows
+        data_rows = []
+        current_row = []
+        
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                i += 1
+                continue
+            
+            # Check if we've reached the end of the loop (next field or loop)
+            if line.startswith('_') or line.lower().startswith('loop_'):
+                break
+            
+            # Parse data values from this line
+            values = self._parse_data_line(line)
+            current_row.extend(values)
+            
+            # Check if we have a complete row
+            if len(current_row) >= len(field_names):
+                # Extract one complete row
+                row = current_row[:len(field_names)]
+                data_rows.append(row)
+                current_row = current_row[len(field_names):]
+            
+            i += 1
+        
+        # Handle any remaining partial row
+        if current_row:
+            # Pad with empty values if needed
+            while len(current_row) < len(field_names):
+                current_row.append('')
+            data_rows.append(current_row)
+        
+        loop = CIFLoop(field_names, data_rows, start_index + 1)
+        return loop, i - start_index
+    
+    def _parse_data_line(self, line: str) -> List[str]:
+        """Parse a line of data values, handling quoted strings properly."""
+        values = []
+        i = 0
+        
+        while i < len(line):
+            # Skip whitespace
+            while i < len(line) and line[i].isspace():
+                i += 1
+            
+            if i >= len(line):
+                break
+            
+            # Handle quoted strings
+            if line[i] in ("'", '"'):
+                quote_char = line[i]
+                i += 1  # Skip opening quote
+                value = ""
+                
+                while i < len(line):
+                    if line[i] == quote_char:
+                        # Found closing quote
+                        i += 1
+                        break
+                    value += line[i]
+                    i += 1
+                
+                values.append(value)
+            else:
+                # Handle unquoted value
+                value = ""
+                while i < len(line) and not line[i].isspace():
+                    value += line[i]
+                    i += 1
+                
+                if value:
+                    values.append(value)
+        
+        return values
     
     def _parse_field(self, lines: List[str], start_index: int) -> Tuple[str, str, int]:
         """Parse a single field starting at the given line index.
@@ -227,18 +367,60 @@ class CIFParser:
             )
     
     def generate_cif_content(self) -> str:
-        """Generate CIF content from the current fields."""
+        """Generate CIF content from the current fields and loops, preserving order."""
         lines = []
         
-        for field_name, field in self.fields.items():
-            formatted_lines = self._format_field(field)
-            lines.extend(formatted_lines)
+        # Use content_blocks to preserve the original order of fields and loops
+        for block in self.content_blocks:
+            if block['type'] == 'field':
+                field = block['content']
+                formatted_lines = self._format_field(field)
+                lines.extend(formatted_lines)
+            elif block['type'] == 'loop':
+                loop = block['content']
+                formatted_lines = self._format_loop(loop)
+                lines.extend(formatted_lines)
+        
+        # If no content_blocks (backward compatibility), fall back to fields only
+        if not self.content_blocks:
+            for field_name, field in self.fields.items():
+                if field.value != "(in loop)":  # Skip fields that are part of loops
+                    formatted_lines = self._format_field(field)
+                    lines.extend(formatted_lines)
+        
+        # Remove trailing empty lines
+        while lines and lines[-1] == '':
+            lines.pop()
         
         return '\n'.join(lines)
     
+    def _format_loop(self, loop: CIFLoop) -> List[str]:
+        """Format a CIF loop for output."""
+        lines = ['loop_']
+        
+        # Add field names
+        for field_name in loop.field_names:
+            lines.append(field_name)
+        
+        # Add data rows
+        for row in loop.data_rows:
+            # Format each value in the row
+            formatted_values = []
+            for value in row:
+                # Quote values that need quoting
+                if self._needs_quotes(value):
+                    formatted_values.append(f"'{value}'")
+                else:
+                    formatted_values.append(value)
+            
+            # Join values with spaces - keep them on the same line to preserve tabular format
+            lines.append(' '.join(formatted_values))
+        
+        return lines
+    
     def _format_field(self, field: CIFField) -> List[str]:
         """Format a CIF field for output with proper 80-character line length handling."""
-        if field.value is None:
+        if field.value is None or field.value == "(in loop)":
             return [field.name]
         
         # Check if we should use multiline format based on content or length
@@ -335,14 +517,14 @@ class CIFParser:
             content: The CIF content to reformat
             
         Returns:
-            Reformatted CIF content with proper line length handling
+            Reformatted CIF content with proper line length handling and preserved loop structures
         """
         # Parse the content first
         self.parse_file(content)
         
-        # Reformat all fields based on 80-character rule
+        # Reformat individual fields based on 80-character rule (loops are preserved as-is)
         for field_name, field in self.fields.items():
-            if field.value is not None:
+            if field.value is not None and field.value != "(in loop)":
                 # Recalculate multiline status based on 80-character rule
                 should_be_multiline = self._should_use_multiline_format(field.name, field.value)
                 field.is_multiline = should_be_multiline

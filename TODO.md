@@ -28,6 +28,25 @@
   - [x] Clear separation: `field_definitions.py` handles validation schemas, `CIF_parser.py` handles content parsing
   - [x] Updated all imports and documentation accordingly
 
+## ✅ Recently Completed (September 2025)
+- [x] **CHECK CONFIGURATION SYSTEM**: Added configuration dialog for field checking
+  - [x] Created `CheckConfigDialog` with checkbox options for checking behavior
+  - [x] Option 1: Auto-fill missing fields with default values (no user prompts)
+  - [x] Option 2: Skip prompts for fields that already match default values  
+  - [x] Updated `start_checks_3ded()` and `start_checks_hp()` to use configuration
+  - [x] Created `check_line_with_config()` method to respect configuration settings
+  - [x] Dialog appears before starting any checks, can be cancelled to abort
+
+- [x] **CRITICAL BUG FIX: CIF Loop Structure Preservation**
+  - [x] Fixed major bug where CIF loop structures were corrupted during reformatting
+  - [x] Added `CIFLoop` class to properly represent loop structures
+  - [x] Updated `CIFParser` to detect and parse `loop_` blocks correctly
+  - [x] Implemented `_parse_loop()` method for proper tabular data parsing
+  - [x] Added `_format_loop()` method to preserve loop structure in output
+  - [x] Fixed issue where loop data was incorrectly converted to semicolon-delimited format
+  - [x] Loop structures now maintain proper tabular format with space-separated values
+  - [x] Proper handling of quoted values within loop data rows
+
 ## 🔄 Current Priority Items
 
 ### Field Definitions Modernization
