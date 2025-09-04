@@ -56,13 +56,15 @@ class CIFParser:
     def __init__(self):
         self.fields: Dict[str, CIFField] = {}
         self.loops: List[CIFLoop] = []
-        self.content_blocks: List[Dict] = []  # Ordered list of fields and loops
+        self.content_blocks: List[Dict] = []  # Ordered list of fields, loops, and header lines
+        self.header_lines: List[str] = []  # Store important header lines like data_
         
     def parse_file(self, content: str) -> Dict[str, CIFField]:
         """Parse CIF content and return a dictionary of fields."""
         self.fields = {}
         self.loops = []
         self.content_blocks = []
+        self.header_lines = []
         lines = content.splitlines()
         i = 0
         
@@ -71,6 +73,16 @@ class CIFParser:
             
             # Skip empty lines and comments
             if not line or line.startswith('#'):
+                i += 1
+                continue
+            
+            # Check for data block identifier and other important header lines
+            if (line.lower().startswith('data_') or 
+                line.lower().startswith('save_') or 
+                line.lower().startswith('global_') or
+                line.lower().startswith('stop_')):
+                self.header_lines.append(line)
+                self.content_blocks.append({'type': 'header', 'content': line})
                 i += 1
                 continue
             
@@ -142,10 +154,14 @@ class CIFParser:
         while i < len(lines):
             line = lines[i].strip()
             
-            # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            # Skip comments but not empty lines
+            if line.startswith('#'):
                 i += 1
                 continue
+            
+            # Empty line ends the loop
+            if not line:
+                break
             
             # Check if we've reached the end of the loop (next field or loop)
             if line.startswith('_') or line.lower().startswith('loop_'):
@@ -370,9 +386,12 @@ class CIFParser:
         """Generate CIF content from the current fields and loops, preserving order."""
         lines = []
         
-        # Use content_blocks to preserve the original order of fields and loops
+        # Use content_blocks to preserve the original order of fields, loops, and headers
         for block in self.content_blocks:
-            if block['type'] == 'field':
+            if block['type'] == 'header':
+                # Add header lines (like data_xxxx)
+                lines.append(block['content'])
+            elif block['type'] == 'field':
                 field = block['content']
                 formatted_lines = self._format_field(field)
                 lines.extend(formatted_lines)
@@ -381,8 +400,13 @@ class CIFParser:
                 formatted_lines = self._format_loop(loop)
                 lines.extend(formatted_lines)
         
-        # If no content_blocks (backward compatibility), fall back to fields only
+        # If no content_blocks (backward compatibility), fall back to headers + fields
         if not self.content_blocks:
+            # Add header lines first
+            for header in self.header_lines:
+                lines.append(header)
+            
+            # Then add fields
             for field_name, field in self.fields.items():
                 if field.value != "(in loop)":  # Skip fields that are part of loops
                     formatted_lines = self._format_field(field)

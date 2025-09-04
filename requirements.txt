@@ -1,1 +1,12 @@
+# CIF Checker Application Requirements
+# For development and building standalone executable
+
+# GUI Framework
 PyQt6>=6.4.0
+
+# Build tools for creating standalone executable
+pyinstaller>=5.13.0
+
+# Standard libraries (usually included with Python)
+# These are listed for completeness and for PyInstaller
+typing-extensions>=4.0.0
