@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
-                           QDialog, QLabel, QFontDialog, QGroupBox)
+                           QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
+                           QButtonGroup)
 from PyQt6.QtCore import Qt, QRegularExpression
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument)
@@ -11,7 +12,7 @@ from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
-from .editor import CIFSyntaxHighlighter
+from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
 class CIFEditor(QMainWindow):
@@ -31,93 +32,43 @@ class CIFEditor(QMainWindow):
         self.field_checker.load_field_set('3DED', os.path.join(config_path, 'field_definitions.cif_ed'))
         self.field_checker.load_field_set('HP', os.path.join(config_path, 'field_definitions.cif_hp'))
         
-        # Load settings
-        self.load_settings()
+        # Field definition selection variables
+        self.custom_field_definition_file = None
+        self.current_field_set = '3DED'  # Default to 3DED
         
         self.init_ui()
         self.select_initial_file()
 
     def load_settings(self):
-        """Load editor settings from JSON file"""
-        self.settings = {
-            'font_family': 'Courier New',
-            'font_size': 10,
-            'line_numbers_enabled': True,
-            'syntax_highlighting_enabled': True,
-            'show_ruler': True  # New setting for the ruler
-        }
-        
-        settings_path = os.path.join(os.path.dirname(__file__), 'editor_settings.json')
-        try:
-            if os.path.exists(settings_path):
-                with open(settings_path, 'r') as f:
-                    saved_settings = json.load(f)
-                    self.settings.update(saved_settings)
-        except Exception as e:
-            print(f"Error loading settings: {e}")
+        """Load editor settings - delegated to text editor component"""
+        # This method is now handled by the CIFTextEditor component
+        pass
 
     def save_settings(self):
-        """Save editor settings to JSON file"""
-        settings_path = os.path.join(os.path.dirname(__file__), 'editor_settings.json')
-        try:
-            with open(settings_path, 'w') as f:
-                json.dump(self.settings, f, indent=4)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
+        """Save editor settings - delegated to text editor component"""
+        # This method is now handled by the CIFTextEditor component
+        pass
 
     def apply_settings(self):
-        """Apply current settings to the editor"""
-        # Create font from settings
-        font = QFont(self.settings['font_family'], self.settings['font_size'])
-        
-        # Create a QFontMetrics object to measure character width
-        metrics = QFontMetrics(font)
-        char_width = metrics.horizontalAdvance('x')  # Width of a typical character
-          # Position the ruler at 80 characters
-        ruler_x = int(char_width * 80 + self.text_editor.document().documentMargin())
-        self.ruler.setGeometry(ruler_x, 0, 1, self.text_editor.height())
-        self.ruler.setVisible(self.settings['show_ruler'])
-        
-        # Apply font to editor and line numbers
-        self.text_editor.setFont(font)
-        self.line_numbers.setFont(font)
-        
-        # Update other settings
-        self.line_numbers.setVisible(self.settings['line_numbers_enabled'])
-        if hasattr(self, 'highlighter'):
-            self.highlighter.setDocument(
-                self.text_editor.document() if self.settings['syntax_highlighting_enabled'] 
-                else None
-            )
+        """Apply current settings - delegated to text editor component"""
+        # This method is now handled by the CIFTextEditor component
+        pass
 
     def change_font(self):
         """Open font dialog to change editor font"""
-        current_font = self.text_editor.font()
-        font, ok = QFontDialog.getFont(current_font, self,
-                                     "Select Editor Font",
-                                     QFontDialog.FontDialogOption.MonospacedFonts)
-        if ok:
-            self.settings['font_family'] = font.family()
-            self.settings['font_size'] = font.pointSize()
-            self.apply_settings()
-            self.save_settings()
+        self.cif_text_editor.change_font()
             
     def toggle_line_numbers(self):
         """Toggle line numbers visibility"""
-        self.settings['line_numbers_enabled'] = not self.settings['line_numbers_enabled']
-        self.apply_settings()
-        self.save_settings()
+        self.cif_text_editor.toggle_line_numbers()
         
     def toggle_syntax_highlighting(self):
         """Toggle syntax highlighting"""
-        self.settings['syntax_highlighting_enabled'] = not self.settings['syntax_highlighting_enabled']
-        self.apply_settings()
-        self.save_settings()
+        self.cif_text_editor.toggle_syntax_highlighting()
         
     def toggle_ruler(self):
         """Toggle ruler visibility"""
-        self.settings['show_ruler'] = not self.settings['show_ruler']
-        self.ruler.setVisible(self.settings['show_ruler'])
+        self.cif_text_editor.toggle_ruler()
         self.save_settings()
 
     def init_ui(self):
@@ -135,44 +86,72 @@ class CIFEditor(QMainWindow):
         self.cursor_label = QLabel()
         self.status_bar.addPermanentWidget(self.path_label)
         self.status_bar.addPermanentWidget(self.cursor_label)
-          # Create text editor with line numbers
-        text_widget = QWidget()
-        text_layout = QHBoxLayout(text_widget)
         
-        self.line_numbers = QTextEdit()
-        self.line_numbers.setFixedWidth(50)
-        self.line_numbers.setReadOnly(True)
-        self.line_numbers.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Create CIF text editor component
+        self.cif_text_editor = CIFTextEditor()
+        self.cif_text_editor.textChanged.connect(self.handle_text_changed)
+        self.cif_text_editor.cursorPositionChanged.connect(self.update_cursor_position)
         
-        self.text_editor = QTextEdit()
-        self.text_editor.textChanged.connect(self.handle_text_changed)
-        self.text_editor.cursorPositionChanged.connect(self.update_cursor_position)
-
-        # Create ruler overlay
-        self.ruler = QWidget(self.text_editor)
-        self.ruler.setFixedWidth(1)  # 1 pixel wide line
-        self.ruler.setStyleSheet("background-color: #E0E0E0;")  # Light gray color
-        self.ruler.hide()  # Initially hidden until we position it
-
-        # Apply font and other settings
-        self.apply_settings()
+        # Provide access to the underlying text editor for backwards compatibility
+        self.text_editor = self.cif_text_editor.text_editor
+        self.line_numbers = self.cif_text_editor.line_numbers
+        self.ruler = self.cif_text_editor.ruler
         
-        # Sync scrolling between line numbers and text editor
-        self.text_editor.verticalScrollBar().valueChanged.connect(
-            self.line_numbers.verticalScrollBar().setValue)
+        main_layout.addWidget(self.cif_text_editor)
         
-        text_layout.addWidget(self.line_numbers)
-        text_layout.addWidget(self.text_editor)
-        main_layout.addWidget(text_widget)
+        # Create field definition selection section
+        field_selection_group = QGroupBox("CIF Field Definition Selection")
+        field_selection_layout = QVBoxLayout(field_selection_group)
+        
+        # Create radio button group for field definition selection
+        self.field_definition_group = QButtonGroup()
+        
+        # Radio buttons for built-in field definitions
+        radio_layout = QHBoxLayout()
+        
+        self.radio_3ded = QRadioButton("3D ED")
+        self.radio_3ded.setChecked(True)  # Default selection
+        self.radio_3ded.toggled.connect(lambda checked: self.set_field_set('3DED') if checked else None)
+        
+        self.radio_hp = QRadioButton("HP")
+        self.radio_hp.toggled.connect(lambda checked: self.set_field_set('HP') if checked else None)
+        
+        self.radio_custom = QRadioButton("Custom File")
+        self.radio_custom.toggled.connect(lambda checked: self.set_field_set('Custom') if checked else None)
+        
+        # Add radio buttons to group and layout
+        self.field_definition_group.addButton(self.radio_3ded)
+        self.field_definition_group.addButton(self.radio_hp)
+        self.field_definition_group.addButton(self.radio_custom)
+        
+        radio_layout.addWidget(self.radio_3ded)
+        radio_layout.addWidget(self.radio_hp)
+        radio_layout.addWidget(self.radio_custom)
+        
+        # Custom file selection layout
+        custom_file_layout = QHBoxLayout()
+        self.custom_file_button = QPushButton("Select Custom File...")
+        self.custom_file_button.clicked.connect(self.select_custom_field_file)
+        self.custom_file_button.setEnabled(False)  # Initially disabled
+        
+        self.custom_file_label = QLabel("No custom file selected")
+        self.custom_file_label.setStyleSheet("color: gray; font-style: italic;")
+        
+        custom_file_layout.addWidget(self.custom_file_button)
+        custom_file_layout.addWidget(self.custom_file_label)
+        custom_file_layout.addStretch()
+        
+        field_selection_layout.addLayout(radio_layout)
+        field_selection_layout.addLayout(custom_file_layout)
+        
+        main_layout.addWidget(field_selection_group)
         
         # Create button layout
         button_layout = QHBoxLayout()
         
         # Create buttons
-        check_3ded_button = QPushButton("Start Checks (3DED)")
-        check_3ded_button.clicked.connect(self.start_checks_3ded)
-        check_hp_button = QPushButton("Start Checks (HP)")
-        check_hp_button.clicked.connect(self.start_checks_hp)
+        start_checks_button = QPushButton("Start Checks")
+        start_checks_button.clicked.connect(self.start_checks)
         refine_details_button = QPushButton("Edit Refinement Details")
         refine_details_button.clicked.connect(self.check_refine_special_details)
         format_button = QPushButton("Reformat File")
@@ -181,8 +160,7 @@ class CIFEditor(QMainWindow):
         save_button.clicked.connect(self.save_file)
         
         # Add buttons to layout
-        button_layout.addWidget(check_3ded_button)
-        button_layout.addWidget(check_hp_button)
+        button_layout.addWidget(start_checks_button)
         button_layout.addWidget(refine_details_button)
         button_layout.addWidget(format_button)
         button_layout.addWidget(save_button)
@@ -210,11 +188,8 @@ class CIFEditor(QMainWindow):
         # Actions menu
         action_menu = menubar.addMenu("Actions")
         
-        check_3ded_action = action_menu.addAction("Start Checks (3DED)")
-        check_3ded_action.triggered.connect(self.start_checks_3ded)
-        
-        check_hp_action = action_menu.addAction("Start Checks (HP)")
-        check_hp_action.triggered.connect(self.start_checks_hp)
+        start_checks_action = action_menu.addAction("Start Checks")
+        start_checks_action.triggered.connect(self.start_checks)
         
         refine_details_action = action_menu.addAction("Edit Refinement Details")
         refine_details_action.triggered.connect(self.check_refine_special_details)
@@ -256,27 +231,21 @@ class CIFEditor(QMainWindow):
         
         line_numbers_action = view_menu.addAction("Show Line Numbers")
         line_numbers_action.setCheckable(True)
-        line_numbers_action.setChecked(self.settings['line_numbers_enabled'])
+        line_numbers_action.setChecked(self.cif_text_editor.settings['line_numbers_enabled'])
         line_numbers_action.triggered.connect(self.toggle_line_numbers)
         
         ruler_action = view_menu.addAction("Show 80-Char Ruler")
         ruler_action.setCheckable(True)
-        ruler_action.setChecked(self.settings['show_ruler'])
+        ruler_action.setChecked(self.cif_text_editor.settings['show_ruler'])
         ruler_action.triggered.connect(self.toggle_ruler)
         
         syntax_action = view_menu.addAction("Syntax Highlighting")
         syntax_action.setCheckable(True)
-        syntax_action.setChecked(self.settings['syntax_highlighting_enabled'])
+        syntax_action.setChecked(self.cif_text_editor.settings['syntax_highlighting_enabled'])
         syntax_action.triggered.connect(self.toggle_syntax_highlighting)
         
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
-
-        # Apply syntax highlighter
-        self.highlighter = CIFSyntaxHighlighter(self.text_editor.document())
-
-        # Apply saved settings
-        self.apply_settings()
 
     def select_initial_file(self):
         file_filter = "CIF Files (*.cif);;All Files (*.*)"
@@ -329,7 +298,6 @@ class CIFEditor(QMainWindow):
             self.current_file = filepath
             self.modified = False
             self.update_status_bar()
-            self.update_line_numbers()
             self.add_to_recent_files(filepath)
             self.setWindowTitle(f"EDCIF-check - {filepath}")
         except Exception as e:
@@ -592,6 +560,143 @@ class CIFEditor(QMainWindow):
         
         return QDialog.DialogCode.Rejected
 
+    def set_field_set(self, field_set_name):
+        """Set the current field set selection."""
+        self.current_field_set = field_set_name
+        
+        # Enable/disable custom file button based on selection
+        if field_set_name == 'Custom':
+            self.custom_file_button.setEnabled(True)
+            if not self.custom_field_definition_file:
+                self.custom_file_label.setText("Please select a custom file")
+                self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
+        else:
+            self.custom_file_button.setEnabled(False)
+            self.custom_file_label.setText("No custom file selected")
+            self.custom_file_label.setStyleSheet("color: gray; font-style: italic;")
+    
+    def select_custom_field_file(self):
+        """Open file dialog to select a custom field definition file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Field Definition File",
+            "",
+            "Field Definition Files (*.cif_ed *.cif_hp *.cif_defs);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                # Try to load the custom field definition file
+                self.field_checker.load_field_set('Custom', file_path)
+                self.custom_field_definition_file = file_path
+                
+                # Update the label to show the selected file
+                file_name = os.path.basename(file_path)
+                self.custom_file_label.setText(f"Using: {file_name}")
+                self.custom_file_label.setStyleSheet("color: green; font-weight: bold;")
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error Loading Custom File",
+                    f"Failed to load field definition file:\n{str(e)}\n\n"
+                    "Please ensure the file is in the correct format."
+                )
+                self.custom_file_label.setText("Error loading file")
+                self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
+    
+    def start_checks(self):
+        """Start checking CIF fields using the selected field definition set."""
+        # Validate field set selection
+        if self.current_field_set == 'Custom':
+            if not self.custom_field_definition_file:
+                QMessageBox.warning(
+                    self,
+                    "No Custom File Selected",
+                    "Please select a custom field definition file first."
+                )
+                return
+            
+            # Check if custom field set is loaded
+            fields = self.field_checker.get_field_set('Custom')
+            if not fields:
+                QMessageBox.warning(
+                    self,
+                    "Custom File Not Loaded",
+                    "The custom field definition file could not be loaded. "
+                    "Please select a valid file."
+                )
+                return
+        
+        # Show configuration dialog first
+        config_dialog = CheckConfigDialog(self)
+        if config_dialog.exec() != QDialog.DialogCode.Accepted:
+            return  # User cancelled
+        
+        # Get configuration settings
+        config = config_dialog.get_config()
+        
+        # Store the initial state for potential restore
+        initial_state = self.text_editor.toPlainText()
+        
+        # Get the selected field set
+        fields = self.field_checker.get_field_set(self.current_field_set)
+        if not fields:
+            QMessageBox.warning(
+                self,
+                "Warning", 
+                f"No {self.current_field_set} field definitions loaded."
+            )
+            return
+        
+        # Update window title to show which field set is being used
+        field_set_display = {
+            '3DED': '3D ED',
+            'HP': 'HP',
+            'Custom': f'Custom ({os.path.basename(self.custom_field_definition_file) if self.custom_field_definition_file else "Unknown"})'
+        }
+        
+        self.setWindowTitle(f"EDCIF-check - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
+        
+        # Parse the current CIF content
+        content = self.text_editor.toPlainText()
+        self.cif_parser.parse_file(content)
+        
+        # Start the checking process
+        try:
+            for field_def in fields:
+                result = self.check_line_with_config(
+                    field_def.name,
+                    field_def.default_value,
+                    False,  # multiline - will be auto-detected
+                    field_def.description,
+                    config
+                )
+                
+                # Handle special result codes
+                if result == RESULT_ABORT:
+                    # User wants to abort - restore initial state
+                    self.text_editor.setText(initial_state)
+                    self.setWindowTitle("EDCIF-check")
+                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                    return
+                elif result == RESULT_STOP_SAVE:
+                    # User wants to stop but keep changes
+                    break
+            
+            # If we get here, checks completed successfully
+            if config.get('reformat_after_checks', False):
+                self.reformat_file()
+            
+            self.setWindowTitle("EDCIF-check")
+            QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+            
+        except Exception as e:
+            # Error occurred - restore initial state
+            self.text_editor.setText(initial_state)
+            self.setWindowTitle("EDCIF-check")
+            QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
+
     def start_checks_3ded(self):
         """Start checking CIF fields using 3DED field definitions."""
         # Show configuration dialog first
@@ -789,15 +894,8 @@ class CIFEditor(QMainWindow):
 
     def handle_text_changed(self):
         self.modified = True
-        self.update_line_numbers()
         self.update_status_bar()
     
-    def update_line_numbers(self):
-        text = self.text_editor.toPlainText()
-        num_lines = text.count('\n') + 1
-        numbers = '\n'.join(str(i) for i in range(1, num_lines + 1))
-        self.line_numbers.setText(numbers)
-        
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
         line = cursor.blockNumber() + 1
@@ -821,143 +919,22 @@ class CIFEditor(QMainWindow):
         modified = "*" if self.modified else ""
         self.path_label.setText(f"{path}{modified} | ")
 
-    def resizeEvent(self, event):
-        """Handle resize events to update the ruler position"""
-        super().resizeEvent(event)
-        if hasattr(self, 'ruler'):
-            self.ruler.setGeometry(self.ruler.x(), 0, 1, self.text_editor.height())
-
     def show_find_dialog(self):
         """Show a dialog for finding text in the editor"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Find")
-        layout = QVBoxLayout(dialog)
-        
-        # Search input
-        search_label = QLabel("Find what:")
-        search_input = QLineEdit()
-        layout.addWidget(search_label)
-        layout.addWidget(search_input)
-        
-        # Options
-        case_checkbox = QCheckBox("Match case")
-        layout.addWidget(case_checkbox)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        find_next_button = QPushButton("Find Next")
-        find_next_button.clicked.connect(lambda: self.find_text(
-            search_input.text(), 
-            case_sensitive=case_checkbox.isChecked()
-        ))
-        button_layout.addWidget(find_next_button)
-        
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(dialog.close)
-        button_layout.addWidget(close_button)
-        
-        layout.addLayout(button_layout)
-        dialog.setLayout(layout)
-        dialog.exec()
+        self.cif_text_editor.show_find_dialog()
 
     def show_replace_dialog(self):
         """Show a dialog for finding and replacing text in the editor"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Find and Replace")
-        layout = QVBoxLayout(dialog)
-        
-        # Find input
-        find_label = QLabel("Find what:")
-        find_input = QLineEdit()
-        layout.addWidget(find_label)
-        layout.addWidget(find_input)
-        
-        # Replace input
-        replace_label = QLabel("Replace with:")
-        replace_input = QLineEdit()
-        layout.addWidget(replace_label)
-        layout.addWidget(replace_input)
-        
-        # Options
-        case_checkbox = QCheckBox("Match case")
-        layout.addWidget(case_checkbox)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        
-        find_next_button = QPushButton("Find Next")
-        find_next_button.clicked.connect(lambda: self.find_text(
-            find_input.text(), 
-            case_sensitive=case_checkbox.isChecked()
-        ))
-        
-        replace_button = QPushButton("Replace")
-        replace_button.clicked.connect(lambda: self.replace_text(
-            find_input.text(),
-            replace_input.text(),
-            case_sensitive=case_checkbox.isChecked()
-        ))
-        
-        replace_all_button = QPushButton("Replace All")
-        replace_all_button.clicked.connect(lambda: self.replace_all_text(
-            find_input.text(),
-            replace_input.text(),
-            case_sensitive=case_checkbox.isChecked()
-        ))
-        
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(dialog.close)
-        
-        button_layout.addWidget(find_next_button)
-        button_layout.addWidget(replace_button)
-        button_layout.addWidget(replace_all_button)
-        button_layout.addWidget(close_button)
-        
-        layout.addLayout(button_layout)
-        dialog.setLayout(layout)
-        dialog.exec()
+        self.cif_text_editor.show_replace_dialog()
 
     def find_text(self, text, case_sensitive=False):
         """Find the next occurrence of text in the editor"""
-        flags = QTextDocument.FindFlag.FindBackward
-        if case_sensitive:
-            flags |= QTextDocument.FindFlag.FindCaseSensitively
-            
-        cursor = self.text_editor.textCursor()
-        found = self.text_editor.find(text)
-        
-        if not found:
-            # If not found, try from the start
-            cursor.movePosition(QTextCursor.MoveOperation.Start)
-            self.text_editor.setTextCursor(cursor)
-            found = self.text_editor.find(text)
-            
-            if not found:
-                QMessageBox.information(self, "Find", f"Cannot find '{text}'")
+        return self.cif_text_editor.find_text(text, case_sensitive)
 
     def replace_text(self, find_text, replace_text, case_sensitive=False):
         """Replace the next occurrence of find_text with replace_text"""
-        cursor = self.text_editor.textCursor()
-        if cursor.hasSelection() and cursor.selectedText() == find_text:
-            cursor.insertText(replace_text)
-            
-        self.find_text(find_text, case_sensitive)
+        self.cif_text_editor.replace_text(find_text, replace_text, case_sensitive)
 
     def replace_all_text(self, find_text, replace_text, case_sensitive=False):
         """Replace all occurrences of find_text with replace_text"""
-        cursor = self.text_editor.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        self.text_editor.setTextCursor(cursor)
-        
-        count = 0
-        while self.text_editor.find(find_text):
-            cursor = self.text_editor.textCursor()
-            cursor.insertText(replace_text)
-            count += 1
-            
-        if count > 0:
-            QMessageBox.information(self, "Replace All", 
-                                  f"Replaced {count} occurrence(s)")
-        else:
-            QMessageBox.information(self, "Replace All", 
-                                  f"Cannot find '{find_text}'")
+        return self.cif_text_editor.replace_all_text(find_text, replace_text, case_sensitive)

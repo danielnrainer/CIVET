@@ -47,6 +47,57 @@
   - [x] Loop structures now maintain proper tabular format with space-separated values
   - [x] Proper handling of quoted values within loop data rows
 
+- [x] **MODULAR CODE REFACTORING (Step-by-Step Approach)**
+  - [x] Extracted `CIFSyntaxHighlighter` from `main_window.py` to dedicated `src/gui/editor/` module
+  - [x] Created modular dialog system with separate classes:
+    - [x] `CIFInputDialog` - Field editing with abort/stop/default options
+    - [x] `MultilineInputDialog` - Large text field editing
+    - [x] `CheckConfigDialog` - Field checking configuration
+  - [x] Organized dialogs in `src/gui/dialogs/` package with proper `__init__.py`
+  - [x] Updated imports and maintained backward compatibility
+  - [x] Reduced `main_window.py` by ~350 lines while improving modularity
+
+- [x] **CIF HEADER PRESERVATION BUG FIX**
+  - [x] Fixed critical bug where `data_` lines were being deleted during reformatting
+  - [x] Enhanced `CIFParser` to preserve important header lines (`data_`, `save_`, `global_`, `stop_`)
+  - [x] Added `header_lines` tracking and proper content block ordering
+  - [x] Updated `generate_cif_content()` to output headers before fields
+  - [x] Ensured CIF files maintain valid structure after reformatting
+
+- [x] **SYNTAX HIGHLIGHTING IMPROVEMENTS**
+  - [x] Fixed loop syntax highlighting bugs where loops didn't terminate properly
+  - [x] Implemented proper CIF-compliant loop termination detection:
+    - [x] Loops end on empty lines when in data phase
+    - [x] Loops end on new fields (`_fieldname`) after data phase
+    - [x] Loops end on CIF headers (`data_`, `save_`, etc.) or new `loop_` statements
+  - [x] Fixed issue where loop field definitions were incorrectly highlighted as non-loop content
+  - [x] Added proper state management for loop field definitions vs. loop data phases
+  - [x] Synchronized loop termination logic between syntax highlighting and CIF parser
+
+- [x] **STANDALONE EXECUTABLE CREATION**
+  - [x] Created comprehensive `CIF_checker.spec` file for PyInstaller
+  - [x] Added all hidden imports for PyQt6, utils, and GUI modules
+  - [x] Included data files (field definitions, CIF dictionary) in executable
+  - [x] Created `build_exe.bat` script for automated build process
+  - [x] Added `BUILD.md` documentation with complete build instructions
+  - [x] Verified successful standalone executable creation (~37MB)
+  - [x] Tested executable runs independently without Python installation
+
+- [x] **UNIFIED FIELD DEFINITION SELECTION SYSTEM**
+  - [x] Replaced separate 3DED/HP buttons with unified "Start Checks" button
+  - [x] Added radio button selection for field definition sets (3D ED, HP, Custom File)
+  - [x] Implemented custom field definition file support with file browser
+  - [x] Added file validation and visual feedback for custom files
+  - [x] Enhanced user experience with smart UI state management
+  - [x] Updated menu system to use unified check approach
+  - [x] Maintained all existing functionality (configuration dialog, abort/stop options)
+
+- [x] **CIF FORMATTING IMPROVEMENTS**
+  - [x] Fixed loop spacing issue where fields immediately followed loops without empty lines
+  - [x] Enhanced `generate_cif_content()` to add empty line after loops when followed by fields
+  - [x] Maintained proper spacing: loops → empty line → fields, but fields → fields (no empty line)
+  - [x] Improved CIF readability while maintaining format compliance
+
 ## 🔄 Current Priority Items
 
 ### Field Definitions Modernization
@@ -108,6 +159,28 @@
 
 ## 🔮 Future Enhancements
 
+### Advanced CIF Processing Features
+- [ ] **"Stripped CIF" Creation**
+  - [ ] Implement functionality to create minimal CIF files with only essential fields
+  - [ ] Allow user selection of which field categories to include/exclude
+  - [ ] Useful for creating publication-ready CIF files or data sharing
+  - [ ] Option to strip comments, verbose descriptions, and optional fields
+
+- [ ] **CIF Core Dictionary Validation**
+  - [ ] Implement validation against official `cif_core.dic` from IUCr
+  - [ ] Parse CIF dictionary format and extract field definitions, types, and constraints
+  - [ ] Add real-time validation of field names, types, and enumerated values
+  - [ ] Display official CIF core descriptions and allowed values
+  - [ ] Flag non-standard or deprecated fields
+
+- [ ] **CIF-1 ↔ CIF-2 Converter**
+  - [ ] Implement bidirectional conversion between CIF-1 and CIF-2 syntax
+  - [ ] Handle syntax differences (quoted strings, nested structures, etc.)
+  - [ ] Detect mixed CIF-1/CIF-2 notation and resolve discrepancies
+  - [ ] Smart field mapping between different CIF versions
+  - [ ] Preserve data integrity during conversion
+  - [ ] Add validation to ensure converted files meet target CIF standard
+
 ### Advanced Features
 - [ ] **CIF validation against official dictionary:**
   - [ ] Implement full CIF core dictionary parsing
@@ -144,5 +217,5 @@
 4. **Future:** Advanced features and testing framework
 
 ---
-*Last updated: August 18, 2025*
+*Last updated: September 4, 2025*
 *Feel free to modify this file as priorities change or new requirements emerge*

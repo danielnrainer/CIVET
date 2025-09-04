@@ -28,8 +28,32 @@ See [BUILD.md](BUILD.md) for detailed build instructions.
 ## Features
 
 - **CIF Field Validation**: Check for missing or incorrect fields
+- **Flexible Field Definitions**: Choose from built-in sets (3DED, HP) or use custom field definition files
 - **Syntax Highlighting**: Enhanced CIF syntax highlighting with loop support
 - **File Reformatting**: Automatic line length handling while preserving structure
-- **Multiple Field Sets**: Support for 3DED and High-Pressure crystallography
+- **Custom Field Sets**: Load your own field definition files for specialized workflows
 - **Use Default Values**: Quick application of suggested field values
+
+## Using Custom Field Definition Files
+
+You can create and use your own field definition files for specialized workflows:
+
+1. **Select Custom File**: Choose the "Custom File" radio button in the field definition selection
+2. **Browse for File**: Click "Select Custom File..." to choose your field definition file
+3. **Start Checks**: Once loaded, use "Start Checks" to validate against your custom fields
+
+### Field Definition File Format
+
+Custom field definition files should follow this format:
+```
+# Field definitions for custom workflow
+_field_name default_value # Optional description
+_another_field 'default with spaces' # Description here
+
+# You can also use the comment-only description format:
+# _field_name: Detailed description of the field
+_field_name default_value
+```
+
+Supported file extensions: `.cif_ed`, `.cif_hp`, `.cif_defs`
 

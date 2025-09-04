@@ -387,7 +387,7 @@ class CIFParser:
         lines = []
         
         # Use content_blocks to preserve the original order of fields, loops, and headers
-        for block in self.content_blocks:
+        for i, block in enumerate(self.content_blocks):
             if block['type'] == 'header':
                 # Add header lines (like data_xxxx)
                 lines.append(block['content'])
@@ -399,6 +399,12 @@ class CIFParser:
                 loop = block['content']
                 formatted_lines = self._format_loop(loop)
                 lines.extend(formatted_lines)
+                
+                # Add empty line after loop if next block is a field (not another loop or header)
+                if i + 1 < len(self.content_blocks):
+                    next_block = self.content_blocks[i + 1]
+                    if next_block['type'] == 'field':
+                        lines.append('')  # Add empty line after loop before next field
         
         # If no content_blocks (backward compatibility), fall back to headers + fields
         if not self.content_blocks:
@@ -419,14 +425,22 @@ class CIFParser:
         return '\n'.join(lines)
     
     def _format_loop(self, loop: CIFLoop) -> List[str]:
-        """Format a CIF loop for output."""
+        """Format a CIF loop for output with proper line length handling.
+        
+        In CIF format:
+        - loop_ starts the loop
+        - Field names follow, each on its own line
+        - Data rows follow, where each row contains values for all fields
+        - When a row is too long, it can continue on the next line(s)
+        - Values are separated by whitespace
+        """
         lines = ['loop_']
         
         # Add field names
         for field_name in loop.field_names:
             lines.append(field_name)
         
-        # Add data rows
+        # Add data rows with proper line length handling
         for row in loop.data_rows:
             # Format each value in the row
             formatted_values = []
@@ -437,10 +451,45 @@ class CIFParser:
                 else:
                     formatted_values.append(value)
             
-            # Join values with spaces - keep them on the same line to preserve tabular format
-            lines.append(' '.join(formatted_values))
+            # Now output the values, breaking lines as needed to stay under 80 chars
+            self._add_data_row_with_line_breaks(lines, formatted_values)
         
         return lines
+    
+    def _add_data_row_with_line_breaks(self, lines: List[str], values: List[str]):
+        """Add a data row to lines, breaking across multiple lines if needed to respect 80-char limit.
+        
+        This maintains the CIF format where a logical row can span multiple physical lines.
+        """
+        if not values:
+            return
+        
+        current_line_values = []
+        current_line_length = 0
+        
+        for value in values:
+            value_length = len(value)
+            
+            # Check if we can add this value to the current line
+            # Account for space before value (except for first value on line)
+            space_needed = 1 if current_line_values else 0
+            
+            if current_line_length + space_needed + value_length <= 80:
+                # Add to current line
+                current_line_values.append(value)
+                current_line_length += space_needed + value_length
+            else:
+                # Current line is full, output it and start a new line
+                if current_line_values:
+                    lines.append(' '.join(current_line_values))
+                
+                # Start new line with this value
+                current_line_values = [value]
+                current_line_length = value_length
+        
+        # Add the final line if it has content
+        if current_line_values:
+            lines.append(' '.join(current_line_values))
     
     def _format_field(self, field: CIFField) -> List[str]:
         """Format a CIF field for output with proper 80-character line length handling."""
