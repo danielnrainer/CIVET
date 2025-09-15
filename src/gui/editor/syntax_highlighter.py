@@ -9,11 +9,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         super().__init__(parent)
         self.highlighting_rules = []
         
-        # Field names (starting with _)
+        # Field names (starting with _ and including hyphens, brackets, etc.)
         self.field_format = QTextCharFormat()
         self.field_format.setForeground(QColor("#0000FF"))  # Blue
         self.highlighting_rules.append((
-            QRegularExpression(r'_\w+(?:\.\w+)*'),
+            QRegularExpression(r'_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*'),
             self.field_format
         ))
         
@@ -166,7 +166,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             while matches.hasNext():
                 match = matches.next()
                 # Don't override loop data formatting for basic patterns
-                if not (self.in_loop_data and pattern.pattern() in [r'_\w+(?:\.\w+)*', r"'[^']*'"]):
+                if not (self.in_loop_data and pattern.pattern() in [r'_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*', r"'[^']*'"]):
                     self.setFormat(match.capturedStart(), match.capturedLength(), format)
         
         # Special formatting for loop field names

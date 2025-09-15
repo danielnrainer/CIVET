@@ -1,0 +1,472 @@
+"""
+CIF Format Converter
+====================
+
+Converts between CIF1 and CIF2 formats, handling:
+- Field name modernization (deprecated → current)
+- Format compliance fixing (mixed → pure)
+- Version header management
+- Data type conversions where applicable
+
+"""
+
+import re
+from typing import Dict, List, Tuple, Optional
+from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion
+
+
+class CIFFormatConverter:
+    """
+    Converts CIF files between different format versions and fixes compliance issues.
+    """
+    
+    def __init__(self, dictionary_manager: Optional[CIFDictionaryManager] = None):
+        """
+        Initialize the converter.
+        
+        Args:
+            dictionary_manager: Optional pre-configured dictionary manager
+        """
+        self.dict_manager = dictionary_manager or CIFDictionaryManager()
+    
+    def convert_to_cif2(self, cif_content: str) -> Tuple[str, List[str]]:
+        """
+        Convert CIF content to CIF2 format.
+        
+        Args:
+            cif_content: Original CIF content
+            
+        Returns:
+            Tuple of (converted_content, list_of_changes_made)
+        """
+        lines = cif_content.split('\n')
+        converted_lines = []
+        changes = []
+        
+        # Add CIF2 header if not present
+        header_added = False
+        if not any(line.strip().startswith('#\\#CIF_2.0') for line in lines[:5]):
+            converted_lines.append('#\\#CIF_2.0')
+            converted_lines.append('')
+            changes.append("Added CIF2 version header")
+            header_added = True
+        
+        # Track loop state for proper field conversion within loops
+        in_loop = False
+        loop_field_count = 0
+        
+        for i, line in enumerate(lines):
+            original_line = line
+            
+            # Check for loop start/end
+            if line.strip() == 'loop_':
+                in_loop = True
+                loop_field_count = 0
+                converted_line = line
+            elif in_loop and line.strip().startswith('_'):
+                # This is a loop field definition
+                loop_field_count += 1
+                converted_line = self._convert_line_to_cif2(line)
+            elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
+                # This might be loop data (not a field definition)
+                # Check if we've seen field definitions and now have data
+                if loop_field_count > 0:
+                    # This is loop data, don't convert field names in data
+                    converted_line = line
+                else:
+                    # Still in field definitions
+                    converted_line = self._convert_line_to_cif2(line)
+            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip().startswith('_') and not line.strip().startswith('_') or line.strip() == 'loop_'):
+                # End of loop (empty line, new data block, or new non-loop field)
+                in_loop = False
+                loop_field_count = 0
+                if line.strip().startswith('_'):
+                    converted_line = self._convert_line_to_cif2(line)
+                else:
+                    converted_line = line
+            else:
+                # Regular line processing
+                converted_line = self._convert_line_to_cif2(line)
+            
+            if converted_line != original_line:
+                changes.append(f"Line {i+1+(2 if header_added else 0)}: {original_line.strip()} → {converted_line.strip()}")
+            
+            converted_lines.append(converted_line)
+        
+        return '\n'.join(converted_lines), changes
+    
+    def convert_to_cif1(self, cif_content: str) -> Tuple[str, List[str]]:
+        """
+        Convert CIF content to CIF1 format.
+        
+        Args:
+            cif_content: Original CIF content
+            
+        Returns:
+            Tuple of (converted_content, list_of_changes_made)
+        """
+        lines = cif_content.split('\n')
+        converted_lines = []
+        changes = []
+        
+        # Track loop state for proper field conversion within loops
+        in_loop = False
+        loop_field_count = 0
+        
+        for i, line in enumerate(lines):
+            # Skip CIF2 version headers
+            if line.strip().startswith('#\\#CIF_2.0'):
+                changes.append(f"Line {i+1}: Removed CIF2 version header")
+                continue
+            
+            # Add CIF1 header if this was the first line and we're replacing CIF2 header
+            if i == 0 and line.strip().startswith('#\\#CIF_2.0'):
+                converted_lines.append('#\\#CIF_1.1')
+                converted_lines.append('')
+                changes.append("Added CIF1 version header")
+                continue
+            
+            original_line = line
+            
+            # Check for loop start/end
+            if line.strip() == 'loop_':
+                in_loop = True
+                loop_field_count = 0
+                converted_line = line
+            elif in_loop and line.strip().startswith('_'):
+                # This is a loop field definition
+                loop_field_count += 1
+                converted_line = self._convert_line_to_cif1(line)
+            elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
+                # This might be loop data (not a field definition)
+                # Check if we've seen field definitions and now have data
+                if loop_field_count > 0:
+                    # This is loop data, don't convert field names in data
+                    converted_line = line
+                else:
+                    # Still in field definitions
+                    converted_line = self._convert_line_to_cif1(line)
+            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip().startswith('_') and not line.strip().startswith('_') or line.strip() == 'loop_'):
+                # End of loop (empty line, new data block, or new non-loop field)
+                in_loop = False
+                loop_field_count = 0
+                if line.strip().startswith('_'):
+                    converted_line = self._convert_line_to_cif1(line)
+                else:
+                    converted_line = line
+            else:
+                # Regular line processing
+                converted_line = self._convert_line_to_cif1(line)
+            
+            if converted_line != original_line:
+                changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
+            
+            converted_lines.append(converted_line)
+        
+        return '\n'.join(converted_lines), changes
+    
+    def fix_mixed_format(self, cif_content: str, target_version: CIFVersion = CIFVersion.CIF2) -> Tuple[str, List[str]]:
+        """
+        Fix a mixed-format CIF file to be compliant with specified version.
+        
+        Args:
+            cif_content: Mixed-format CIF content
+            target_version: Target CIF version (CIF1 or CIF2)
+            
+        Returns:
+            Tuple of (fixed_content, list_of_changes_made)
+        """
+        if target_version == CIFVersion.CIF2:
+            return self.convert_to_cif2(cif_content)
+        elif target_version == CIFVersion.CIF1:
+            return self.convert_to_cif1(cif_content)
+        else:
+            raise ValueError(f"Cannot convert to {target_version}")
+    
+    def _convert_line_to_cif2(self, line: str) -> str:
+        """
+        Convert a single line to CIF2 format.
+        
+        Args:
+            line: Line to convert
+            
+        Returns:
+            Converted line
+        """
+        # Skip comments and empty lines
+        if line.strip().startswith('#') or not line.strip():
+            return line
+        
+        # Check if line starts with a field name (allow hyphens, dots, brackets, etc.)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s+(.*)$', line)
+        if not field_match:
+            return line
+        
+        indent, field_name, rest = field_match.groups()
+        
+        # Convert field name using pattern-based mapping
+        converted_field = self._convert_field_to_cif2(field_name)
+        if converted_field != field_name:
+            return f"{indent}{converted_field} {rest}"
+        
+        return line
+    
+    def _convert_line_to_cif1(self, line: str) -> str:
+        """
+        Convert a single line to CIF1 format.
+        
+        Args:
+            line: Line to convert
+            
+        Returns:
+            Converted line
+        """
+        # Skip comments and empty lines
+        if line.strip().startswith('#') or not line.strip():
+            return line
+        
+        # Check if line starts with a CIF field name (allow dots, hyphens, brackets, etc.)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s+(.*)$', line)
+        if not field_match:
+            return line
+        
+        indent, field_name, rest = field_match.groups()
+        
+        # Convert field name using pattern-based mapping
+        converted_field = self._convert_field_to_cif1(field_name)
+        if converted_field != field_name:
+            return f"{indent}{converted_field} {rest}"
+        
+        return line
+    
+    def _convert_field_to_cif2(self, field_name: str) -> str:
+        """
+        Convert a CIF1 field name to CIF2 format using the CIF core dictionary.
+        
+        Args:
+            field_name: CIF1 field name (e.g., '_cell_length_a')
+            
+        Returns:
+            CIF2 field name (e.g., '_cell.length_a') based on dictionary aliases
+        """
+        # First try to get the canonical name from the dictionary
+        canonical_name = self.dict_manager.get_canonical_name(field_name)
+        
+        # If we found a canonical name that's different, use it
+        if canonical_name != field_name.lower():
+            return canonical_name
+        
+        # Fallback: try to identify category patterns in the field name
+        # This handles cases where the field might not be in the dictionary
+        # but follows standard CIF category.item patterns
+        
+        # Try to identify category patterns in the field name
+        # Handle compound categories like 'publ_section', 'citation_author', etc.
+        if field_name.count('_') >= 2:
+            field_without_prefix = field_name[1:]  # Remove initial underscore
+            
+            # Check for compound categories first (longer matches take priority)
+            compound_categories = [
+                'publ_section', 'citation_author', 'citation_editor', 'database_code',
+                'computing_data_collection', 'computing_cell_refinement', 
+                'computing_data_reduction', 'computing_structure_solution',
+                'computing_structure_refinement', 'computing_molecular_graphics',
+                'computing_publication_material', 'diffrn_source', 'diffrn_detector',
+                'diffrn_radiation', 'diffrn_reflns', 'diffrn_standards', 
+                'diffrn_orient_matrix', 'diffrn_measurement', 'exptl_crystal',
+                'exptl_absorpt', 'geom_bond', 'geom_angle', 'geom_torsion', 'geom_hbond',
+                'chemical_formula', 'atom_site', 'atom_type', 'space_group'
+            ]
+            
+            # Try compound categories first
+            for compound_cat in compound_categories:
+                if field_without_prefix.startswith(compound_cat + '_'):
+                    category = compound_cat
+                    item = field_without_prefix[len(compound_cat) + 1:]  # +1 for underscore
+                    if self._should_use_dot_notation(category):
+                        return f'_{category}.{item}'
+                    break
+            else:
+                # Fall back to simple category (split on first underscore)
+                parts = field_without_prefix.split('_', 1)
+                if len(parts) == 2:
+                    category, item = parts
+                    if self._should_use_dot_notation(category):
+                        return f'_{category}.{item}'
+        
+        return field_name
+    
+    def _convert_field_to_cif1(self, field_name: str) -> str:
+        """
+        Convert a CIF2 field name to CIF1 format using the CIF core dictionary.
+        
+        Args:
+            field_name: CIF2 field name (e.g., '_cell.length_a')
+            
+        Returns:
+            CIF1 field name (e.g., '_cell_length_a') based on dictionary aliases
+        """
+        # First try to get the canonical name from the dictionary
+        canonical_name = self.dict_manager.get_canonical_name(field_name)
+        
+        # If we found a canonical name that's different and uses underscores, use it
+        if canonical_name != field_name.lower() and '.' not in canonical_name:
+            return canonical_name
+        
+        # Fallback: convert dots to underscores for CIF1 format
+        if '.' in field_name:
+            return field_name.replace('.', '_')
+        
+        return field_name
+    
+    def _should_use_dot_notation(self, category: str) -> bool:
+        """
+        Check if a category should use dot notation in CIF2 by examining the dictionary.
+        
+        Args:
+            category: The category name (e.g., 'audit', 'cell', 'atom_site')
+            
+        Returns:
+            True if this category should use dot notation in CIF2
+        """
+        # Check if we can find any fields in the dictionary that use this category with dots
+        test_patterns = [
+            f'_{category}.', # Look for fields starting with _category.
+        ]
+        
+        # Try to find a field info that would indicate dot notation is used
+        for pattern in test_patterns:
+            # This is a simplified check - in a full implementation we'd scan the dictionary
+            # For now, we'll use a reasonable set of known CIF2 categories
+            known_cif2_categories = {
+                'cell', 'atom_site', 'atom_type', 'space_group', 'symmetry',
+                'diffrn', 'diffrn_source', 'diffrn_detector', 'diffrn_radiation', 
+                'diffrn_reflns', 'diffrn_standards', 'diffrn_orient_matrix', 'diffrn_measurement',
+                'refine', 'refln', 'chemical', 'chemical_formula', 'exptl_crystal',
+                'exptl_absorpt', 'publ', 'publ_section', 'database', 'citation',
+                'computing', 'geom_bond', 'geom_angle', 'geom_torsion', 'geom_hbond',
+                # Add the missing categories
+                'audit', 'journal', 'citation_author', 'citation_editor',
+                'database_code', 'software', 'computing_data_collection',
+                'computing_cell_refinement', 'computing_data_reduction',
+                'computing_structure_solution', 'computing_structure_refinement',
+                'computing_molecular_graphics', 'computing_publication_material'
+            }
+            
+            if category in known_cif2_categories:
+                return True
+                
+        return False
+
+    def get_conversion_preview(self, cif_content: str, target_version: CIFVersion) -> Dict:
+        """
+        Get a preview of what changes would be made in conversion.
+        
+        Args:
+            cif_content: Original CIF content
+            target_version: Target CIF version
+            
+        Returns:
+            Dictionary with preview information
+        """
+        current_version = self.dict_manager.detect_cif_version(cif_content)
+        
+        if target_version == CIFVersion.CIF2:
+            _, changes = self.convert_to_cif2(cif_content)
+        elif target_version == CIFVersion.CIF1:
+            _, changes = self.convert_to_cif1(cif_content)
+        else:
+            return {
+                'error': f'Cannot convert to {target_version}',
+                'changes': []
+            }
+        
+        # Analyze the types of changes
+        field_changes = []
+        header_changes = []
+        other_changes = []
+        
+        for change in changes:
+            if 'header' in change.lower():
+                header_changes.append(change)
+            elif '→' in change:  # Field name change
+                field_changes.append(change)
+            else:
+                other_changes.append(change)
+        
+        return {
+            'current_version': current_version,
+            'target_version': target_version,
+            'total_changes': len(changes),
+            'field_changes': field_changes,
+            'header_changes': header_changes,
+            'other_changes': other_changes,
+            'preview_safe': len(changes) < 50  # Arbitrary threshold for "safe" preview
+        }
+    
+    def add_field_mapping(self, old_field: str, new_field: str):
+        """
+        Add a custom field mapping for conversions.
+        
+        Args:
+            old_field: Old/deprecated field name
+            new_field: Modern field name
+        """
+        self.field_mappings[old_field.lower()] = new_field.lower()
+        self.reverse_mappings[new_field.lower()] = old_field.lower()
+    
+    def validate_conversion_safety(self, cif_content: str, target_version: CIFVersion) -> Dict:
+        """
+        Validate that a conversion can be performed safely without data loss.
+        
+        Args:
+            cif_content: CIF content to validate
+            target_version: Target version for conversion
+            
+        Returns:
+            Dictionary with safety analysis
+        """
+        current_version = self.dict_manager.detect_cif_version(cif_content)
+        warnings = []
+        errors = []
+        
+        # Check for potential data loss scenarios
+        if target_version == CIFVersion.CIF1:
+            # Converting to CIF1 might lose some CIF2 features
+            if current_version == CIFVersion.CIF2:
+                # Check for CIF2-only constructs (lists, tables, etc.)
+                if '[' in cif_content or '{' in cif_content:
+                    warnings.append("CIF2 list/table constructs detected - may not be compatible with CIF1")
+                
+                # Check for triple-quoted strings
+                if '"""' in cif_content or "'''" in cif_content:
+                    warnings.append("CIF2 triple-quoted strings detected - will be converted to text fields")
+        
+        # Check for unknown field mappings
+        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)', re.MULTILINE)
+        unmapped_fields = []
+        
+        for match in field_pattern.finditer(cif_content):
+            field_name = match.group(2).lower()
+            
+            if target_version == CIFVersion.CIF2:
+                if field_name not in self.field_mappings and not '.' in field_name:
+                    # This might be an old field without a known mapping
+                    unmapped_fields.append(field_name)
+            elif target_version == CIFVersion.CIF1:
+                if field_name not in self.reverse_mappings and '.' in field_name:
+                    # This might be a CIF2 field without a CIF1 equivalent
+                    unmapped_fields.append(field_name)
+        
+        if unmapped_fields:
+            warnings.append(f"Fields without known mappings: {', '.join(set(unmapped_fields[:5]))}")
+            if len(unmapped_fields) > 5:
+                warnings.append(f"... and {len(unmapped_fields) - 5} more")
+        
+        return {
+            'safe': len(errors) == 0,
+            'warnings': warnings,
+            'errors': errors,
+            'current_version': current_version,
+            'target_version': target_version
+        }

@@ -3,13 +3,15 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
                            QButtonGroup)
-from PyQt6.QtCore import Qt, QRegularExpression
+from PyQt6.QtCore import Qt, QRegularExpression, QTimer
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
 from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
+from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion
+from utils.cif_format_converter import CIFFormatConverter
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
@@ -27,6 +29,11 @@ class CIFEditor(QMainWindow):
         self.field_checker = CIFFieldChecker()
         self.cif_parser = CIFParser()
         config_path = os.path.dirname(__file__)
+        
+        # Initialize CIF dictionary manager and format converter
+        self.dict_manager = CIFDictionaryManager()
+        self.format_converter = CIFFormatConverter(self.dict_manager)
+        self.current_cif_version = CIFVersion.UNKNOWN
         
         # Load both field definition sets
         self.field_checker.load_field_set('3DED', os.path.join(config_path, 'field_definitions.cif_ed'))
@@ -84,7 +91,9 @@ class CIFEditor(QMainWindow):
         self.status_bar = self.statusBar()
         self.path_label = QLabel()
         self.cursor_label = QLabel()
+        self.cif_version_label = QLabel("CIF Version: Unknown")
         self.status_bar.addPermanentWidget(self.path_label)
+        self.status_bar.addPermanentWidget(self.cif_version_label)
         self.status_bar.addPermanentWidget(self.cursor_label)
         
         # Create CIF text editor component
@@ -197,6 +206,25 @@ class CIFEditor(QMainWindow):
         format_action = action_menu.addAction("Reformat File")
         format_action.triggered.connect(self.reformat_file)
 
+        # CIF Format menu
+        format_menu = menubar.addMenu("CIF Format")
+        
+        detect_version_action = format_menu.addAction("Detect CIF Version")
+        detect_version_action.triggered.connect(self.detect_cif_version)
+        
+        format_menu.addSeparator()
+        
+        convert_to_cif1_action = format_menu.addAction("Convert to CIF1")
+        convert_to_cif1_action.triggered.connect(self.convert_to_cif1)
+        
+        convert_to_cif2_action = format_menu.addAction("Convert to CIF2")
+        convert_to_cif2_action.triggered.connect(self.convert_to_cif2)
+        
+        format_menu.addSeparator()
+        
+        fix_mixed_action = format_menu.addAction("Fix Mixed Format")
+        fix_mixed_action.triggered.connect(self.fix_mixed_format)
+
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
         
@@ -297,6 +325,10 @@ class CIFEditor(QMainWindow):
             self.text_editor.setText(content)
             self.current_file = filepath
             self.modified = False
+            
+            # Detect CIF version
+            self.detect_and_update_cif_version(content)
+            
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.setWindowTitle(f"EDCIF-check - {filepath}")
@@ -779,6 +811,16 @@ class CIFEditor(QMainWindow):
     def handle_text_changed(self):
         self.modified = True
         self.update_status_bar()
+        
+        # Schedule CIF version detection (delayed to avoid constant updates)
+        if hasattr(self, 'version_detect_timer'):
+            self.version_detect_timer.stop()
+        else:
+            self.version_detect_timer = QTimer()
+            self.version_detect_timer.setSingleShot(True)
+            self.version_detect_timer.timeout.connect(lambda: self.detect_and_update_cif_version())
+        
+        self.version_detect_timer.start(1000)  # 1 second delay
     
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
@@ -822,3 +864,162 @@ class CIFEditor(QMainWindow):
     def replace_all_text(self, find_text, replace_text, case_sensitive=False):
         """Replace all occurrences of find_text with replace_text"""
         return self.cif_text_editor.replace_all_text(find_text, replace_text, case_sensitive)
+    
+    def detect_and_update_cif_version(self, content=None):
+        """Detect CIF version and update the status display"""
+        if content is None:
+            content = self.text_editor.toPlainText()
+        
+        self.current_cif_version = self.dict_manager.detect_cif_version(content)
+        self.update_cif_version_display()
+    
+    def update_cif_version_display(self):
+        """Update the CIF version display in the status bar"""
+        version_text = {
+            CIFVersion.CIF1: "CIF Version: 1.x",
+            CIFVersion.CIF2: "CIF Version: 2.0",
+            CIFVersion.MIXED: "CIF Version: Mixed (1.x/2.0)",
+            CIFVersion.UNKNOWN: "CIF Version: Unknown"
+        }
+        
+        color = {
+            CIFVersion.CIF1: "green",
+            CIFVersion.CIF2: "blue", 
+            CIFVersion.MIXED: "orange",
+            CIFVersion.UNKNOWN: "red"
+        }
+        
+        text = version_text.get(self.current_cif_version, "CIF Version: Unknown")
+        self.cif_version_label.setText(text)
+        self.cif_version_label.setStyleSheet(f"color: {color.get(self.current_cif_version, 'black')}")
+    
+    def detect_cif_version(self):
+        """Menu action to detect and display CIF version information"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        version = self.dict_manager.detect_cif_version(content)
+        self.current_cif_version = version
+        self.update_cif_version_display()
+        
+        # Show detailed information
+        version_info = {
+            CIFVersion.CIF1: "CIF version 1.x detected\nThis file uses traditional CIF1 format.",
+            CIFVersion.CIF2: "CIF version 2.0 detected\nThis file uses modern CIF2 format with UTF-8 encoding.",
+            CIFVersion.MIXED: "Mixed CIF format detected\nThis file contains both CIF1 and CIF2 elements.\nConsider using 'Fix Mixed Format' to resolve.",
+            CIFVersion.UNKNOWN: "Unknown CIF format\nCould not determine CIF version from the content."
+        }
+        
+        QMessageBox.information(self, "CIF Version Detection", 
+                              version_info.get(version, "Unknown format detected."))
+    
+    def convert_to_cif1(self):
+        """Convert current CIF content to CIF1 format"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            converted_content, changes = self.format_converter.convert_to_cif1(content)
+            if converted_content != content:
+                self.text_editor.setText(converted_content)
+                self.modified = True
+                self.current_cif_version = CIFVersion.CIF1
+                self.update_cif_version_display()
+                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
+                if len(changes) > 5:
+                    change_summary += f"\n... and {len(changes)-5} more"
+                QMessageBox.information(self, "Conversion Complete", 
+                                      f"File successfully converted to CIF1 format.\n\n{change_summary}")
+            else:
+                QMessageBox.information(self, "No Changes", 
+                                      "File is already in CIF1 format or no conversion was needed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Conversion Error", 
+                               f"Failed to convert to CIF1:\n{str(e)}")
+    
+    def convert_to_cif2(self):
+        """Convert current CIF content to CIF2 format"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            converted_content, changes = self.format_converter.convert_to_cif2(content)
+            if converted_content != content:
+                self.text_editor.setText(converted_content)
+                self.modified = True
+                self.current_cif_version = CIFVersion.CIF2
+                self.update_cif_version_display()
+                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
+                if len(changes) > 5:
+                    change_summary += f"\n... and {len(changes)-5} more"
+                QMessageBox.information(self, "Conversion Complete", 
+                                      f"File successfully converted to CIF2 format.\n" +
+                                      f"Note: Save with UTF-8 encoding.\n\n{change_summary}")
+            else:
+                QMessageBox.information(self, "No Changes", 
+                                      "File is already in CIF2 format or no conversion was needed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Conversion Error", 
+                               f"Failed to convert to CIF2:\n{str(e)}")
+    
+    def fix_mixed_format(self):
+        """Fix mixed CIF format by converting to consistent format"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        # First detect current version
+        version = self.dict_manager.detect_cif_version(content)
+        if version != CIFVersion.MIXED:
+            QMessageBox.information(self, "No Mixed Format", 
+                                  "File does not appear to have mixed CIF format.")
+            return
+        
+        # Ask user which format to convert to
+        reply = QMessageBox.question(self, "Choose Target Format",
+                                   "Convert mixed format to:\n\n" +
+                                   "Yes: CIF2 (recommended for new files)\n" +
+                                   "No: CIF1 (for legacy compatibility)\n" +
+                                   "Cancel: Abort conversion",
+                                   QMessageBox.StandardButton.Yes |
+                                   QMessageBox.StandardButton.No |
+                                   QMessageBox.StandardButton.Cancel)
+        
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+        
+        try:
+            if reply == QMessageBox.StandardButton.Yes:
+                # Convert to CIF2
+                fixed_content, changes = self.format_converter.fix_mixed_format(content, target_version=CIFVersion.CIF2)
+                target_version = CIFVersion.CIF2
+                format_name = "CIF2"
+            else:
+                # Convert to CIF1
+                fixed_content, changes = self.format_converter.fix_mixed_format(content, target_version=CIFVersion.CIF1)
+                target_version = CIFVersion.CIF1
+                format_name = "CIF1"
+            
+            if fixed_content != content:
+                self.text_editor.setText(fixed_content)
+                self.modified = True
+                self.current_cif_version = target_version
+                self.update_cif_version_display()
+                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
+                if len(changes) > 5:
+                    change_summary += f"\n... and {len(changes)-5} more"
+                QMessageBox.information(self, "Format Fixed", 
+                                      f"Mixed format successfully resolved to {format_name}.\n\n{change_summary}")
+            else:
+                QMessageBox.information(self, "No Changes", 
+                                      "No format issues were found to fix.")
+        except Exception as e:
+            QMessageBox.critical(self, "Fix Error", 
+                               f"Failed to fix mixed format:\n{str(e)}")
