@@ -684,6 +684,49 @@ class CIFEditor(QMainWindow):
                     # User wants to stop but keep changes
                     break
             
+            # Special handling for 3DED: Check for _chemical_absolute_configuration in Sohncke space groups
+            if self.current_field_set == '3DED':
+                sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
+                SG_number = None
+                lines = self.text_editor.toPlainText().splitlines()
+                for line in lines:
+                    if line.startswith("_space_group_IT_number"):
+                        parts = line.split()
+                        if len(parts) > 1:
+                            try:
+                                SG_number = int(parts[1].strip("'\""))
+                            except Exception:
+                                pass
+                        break
+                if SG_number is not None and SG_number in sohncke_groups:
+                    found = False
+                    for line in lines:
+                        if line.startswith("_chemical_absolute_configuration"):
+                            found = True
+                            break
+                    if found:
+                        result = self.check_line_with_config("_chemical_absolute_configuration", default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.", config=config)
+                        if result == RESULT_ABORT:
+                            # User wants to abort - restore initial state
+                            self.text_editor.setText(initial_state)
+                            self.setWindowTitle("EDCIF-check")
+                            QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                            return
+                        elif result == RESULT_STOP_SAVE:
+                            # User wants to stop but keep changes - proceed to completion
+                            pass
+                    else:
+                        result = self.add_missing_line_with_config("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.", config=config)
+                        if result == RESULT_ABORT:
+                            # User wants to abort - restore initial state
+                            self.text_editor.setText(initial_state)
+                            self.setWindowTitle("EDCIF-check")
+                            QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                            return
+                        elif result == RESULT_STOP_SAVE:
+                            # User wants to stop but keep changes - proceed to completion
+                            pass
+            
             # If we get here, checks completed successfully
             if config.get('reformat_after_checks', False):
                 self.reformat_file()
@@ -697,165 +740,6 @@ class CIFEditor(QMainWindow):
             self.setWindowTitle("EDCIF-check")
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
 
-    def start_checks_3ded(self):
-        """Start checking CIF fields using 3DED field definitions."""
-        # Show configuration dialog first
-        config_dialog = CheckConfigDialog(self)
-        if config_dialog.exec() != QDialog.DialogCode.Accepted:
-            return  # User cancelled
-        
-        # Get configuration settings
-        config = config_dialog.get_config()
-        
-        # Store the initial state for potential restore
-        initial_state = self.text_editor.toPlainText()
-        
-        # Get the 3DED field set
-        fields = self.field_checker.get_field_set('3DED')
-        if not fields:
-            QMessageBox.warning(self, "Warning", 
-                              "No 3DED field definitions loaded.")
-            return
-            
-        try:
-            # Process all required fields
-            for field in fields:
-                # Check each field with configuration options
-                result = self.check_line_with_config(field.name, field.default_value, 
-                                                   description=field.description, 
-                                                   config=config)
-                if result == CIFInputDialog.RESULT_ABORT:
-                    # Restore original state
-                    self.text_editor.setText(initial_state)
-                    QMessageBox.information(self, "Changes Aborted",
-                                       "All changes have been discarded.")
-                    return
-                elif result == CIFInputDialog.RESULT_STOP_SAVE:
-                    QMessageBox.information(self, "Checks Stopped",
-                                       "Changes have been saved. Remaining checks skipped.")
-                    return
-            
-            # Always check refine special details last
-            result = self.check_refine_special_details()
-            if result == MultilineInputDialog.RESULT_ABORT:
-                # Restore original state
-                self.text_editor.setText(initial_state)
-                QMessageBox.information(self, "Changes Aborted",
-                                   "All changes have been discarded.")
-                return
-            elif result == MultilineInputDialog.RESULT_STOP_SAVE:
-                QMessageBox.information(self, "Checks Stopped",
-                                   "Changes have been saved. Remaining checks skipped.")
-                return
-
-            # Check for _chemical_absolute_configuration
-            sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
-            SG_number = None
-            lines = self.text_editor.toPlainText().splitlines()
-            for line in lines:
-                if line.startswith("_space_group_IT_number"):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        try:
-                            SG_number = int(parts[1].strip("'\""))
-                        except Exception:
-                            pass
-                    break
-            if SG_number is not None and SG_number in sohncke_groups:
-                found = False
-                for line in lines:
-                    if line.startswith("_chemical_absolute_configuration"):
-                        found = True
-                        break
-                if found:
-                    self.check_line("_chemical_absolute_configuration", default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
-                else:
-                    self.add_missing_line("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.")
-            
-            # Reformat file if requested
-            if config.get('reformat_after_checks', False):
-                try:
-                    current_content = self.text_editor.toPlainText()
-                    reformatted_content = self.cif_parser.reformat_for_line_length(current_content)
-                    self.text_editor.setText(reformatted_content)
-                except Exception as e:
-                    QMessageBox.warning(self, "Reformatting Warning",
-                                       f"Checks completed successfully, but reformatting failed:\n{str(e)}")
-            
-            QMessageBox.information(self, "Checks Complete", 
-                                  "All 3DED CIF checks completed successfully.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                             f"An error occurred during checks:\n{str(e)}")
-
-    def start_checks_hp(self):
-        """Start checking CIF fields using HP (high pressure) field definitions."""
-        # Show configuration dialog first
-        config_dialog = CheckConfigDialog(self)
-        if config_dialog.exec() != QDialog.DialogCode.Accepted:
-            return  # User cancelled
-        
-        # Get configuration settings
-        config = config_dialog.get_config()
-        
-        # Store the initial state for potential restore
-        initial_state = self.text_editor.toPlainText()
-        
-        # Get the HP field set
-        fields = self.field_checker.get_field_set('HP')
-        if not fields:
-            QMessageBox.warning(self, "Warning", 
-                              "No HP field definitions loaded.")
-            return
-            
-        try:
-            # Process all required fields
-            for field in fields:
-                # Check each field with configuration options
-                result = self.check_line_with_config(field.name, field.default_value, 
-                                                   description=field.description, 
-                                                   config=config)
-                if result == CIFInputDialog.RESULT_ABORT:
-                    # Restore original state
-                    self.text_editor.setText(initial_state)
-                    QMessageBox.information(self, "Changes Aborted",
-                                       "All changes have been discarded.")
-                    return
-                elif result == CIFInputDialog.RESULT_STOP_SAVE:
-                    QMessageBox.information(self, "Checks Stopped",
-                                       "Changes have been saved. Remaining checks skipped.")
-                    return
-
-            # Always check refine special details last
-            result = self.check_refine_special_details()
-            if result == MultilineInputDialog.RESULT_ABORT:
-                # Restore original state
-                self.text_editor.setText(initial_state)
-                QMessageBox.information(self, "Changes Aborted",
-                                   "All changes have been discarded.")
-                return
-            elif result == MultilineInputDialog.RESULT_STOP_SAVE:
-                QMessageBox.information(self, "Checks Stopped",
-                                   "Changes have been saved. Remaining checks skipped.")
-                return
-            
-            # Reformat file if requested
-            if config.get('reformat_after_checks', False):
-                try:
-                    current_content = self.text_editor.toPlainText()
-                    reformatted_content = self.cif_parser.reformat_for_line_length(current_content)
-                    self.text_editor.setText(reformatted_content)
-                except Exception as e:
-                    QMessageBox.warning(self, "Reformatting Warning",
-                                       f"Checks completed successfully, but reformatting failed:\n{str(e)}")
-            
-            QMessageBox.information(self, "Checks Complete", 
-                                  "All HP CIF checks completed successfully.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                             f"An error occurred during checks:\n{str(e)}")    
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
         try:
