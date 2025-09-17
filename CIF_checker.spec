@@ -7,39 +7,83 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('src/gui/field_definitions.cif_ed', 'gui'),           # Include field definitions
-        ('src/gui/field_definitions.cif_hp', 'gui'),          # Include HP field definitions
-        ('src/gui/editor_settings.json', 'gui'),              # Include settings file
+        # GUI configuration files
+        ('src/gui/editor_settings.json', 'gui'),              # Include editor settings file
+
+        # Definition files for checks
+        ('config/field_definitions/field_definitions.cif_ed', 'field_definitions'), # Include 3D ED field definitions
+        ('config/field_definitions/field_definitions.cif_hp', 'field_definitions'), # Include HP field definitions
+        
+        # CIF Dictionary files - Essential for field validation and conversion
+        ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
+        ('dictionaries/cif_rstr.dic', 'dictionaries'),        # SHELXL restraints dictionary
+        ('dictionaries/cif_shelxl.dic', 'dictionaries'),      # SHELXL dictionary
+        
+        # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file
         ('README.md', '.'),                                    # Include readme file
     ],
     hiddenimports=[
-        # PyQt6 core modules
+        # PyQt6 core modules - Essential for GUI functionality
         'PyQt6.QtWidgets',
         'PyQt6.QtCore',
         'PyQt6.QtGui',
-        # Application modules - ensure all are found
+        
+        # Application modules - Main application structure
         'gui',
         'gui.main_window',
+        'gui.editor',
+        'gui.editor.text_editor',
+        'gui.editor.syntax_highlighter',
         'gui.dialogs',
         'gui.dialogs.input_dialog',
         'gui.dialogs.multiline_dialog', 
         'gui.dialogs.config_dialog',
-        'gui.editor',
-        'gui.editor.syntax_highlighter',
+        'gui.dialogs.field_conflict_dialog',
+        'gui.dialogs.dictionary_info_dialog',
+        
+        # Utility modules - Core functionality
         'utils',
         'utils.CIF_field_parsing',
         'utils.CIF_parser',
-        # Standard library modules that might be missed
+        'utils.cif_dictionary_manager',
+        'utils.cif_format_converter',
+        'utils.cif_core_parser',
+        'utils.cif_deprecation_manager',
+        'utils.cif2_only_extensions',
+        
+        # Third-party libraries
+        'requests',
+        'requests.adapters',
+        'requests.auth',
+        'requests.exceptions',
+        'urllib3',
+        
+        # Standard library modules that might be missed by PyInstaller
         'json',
         'os',
+        'sys',
         're',
         'typing',
+        'tempfile',
+        'pathlib',
+        'dataclasses',
+        'enum',
+        'datetime',
+        'urllib.parse',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # Exclude unused modules to reduce size
+        'tkinter',         # We use PyQt6, not tkinter
+        'matplotlib',      # Not used in this application
+        'numpy',           # Not used in this application  
+        'pandas',          # Not used in this application
+        'PIL',             # Not used in this application
+        'pytest',          # Testing framework not needed in distribution
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -60,7 +104,7 @@ exe = EXE(
     a.datas,
     [],
     name='CIF_checker',
-    debug=False,                          # Set to True for debugging
+    debug=False,                          # Set to True for debugging builds
     bootloader_ignore_signals=False,
     strip=False,                          # Don't strip symbols for better error messages
     upx=True,                            # Compress executable (set to False if issues)
@@ -72,5 +116,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='icon.ico'  # Uncomment and add icon file if available
+    # icon='icon.ico'  # Uncomment and add icon file path if available
 )

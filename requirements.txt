@@ -1,12 +1,19 @@
 # CIF Checker Application Requirements
 # For development and building standalone executable
 
-# GUI Framework
+# GUI Framework - Core requirement for the application
 PyQt6>=6.4.0
+
+# HTTP library for downloading CIF dictionaries from URLs
+requests>=2.28.0
 
 # Build tools for creating standalone executable
 pyinstaller>=5.13.0
 
-# Standard libraries (usually included with Python)
-# These are listed for completeness and for PyInstaller
-typing-extensions>=4.0.0
+# Additional libraries that may be useful for future development
+# typing-extensions>=4.0.0  # Usually included with Python 3.8+
+
+# Note: Standard library modules are automatically included:
+# - os, sys, re, json, tempfile, urllib.parse
+# - typing, dataclasses, enum, datetime
+# - pathlib (Python 3.4+)

@@ -8,12 +8,15 @@ from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont,
                         QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
+from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion
 from utils.cif_format_converter import CIFFormatConverter
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
+from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
+from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -35,15 +38,18 @@ class CIFEditor(QMainWindow):
         self.format_converter = CIFFormatConverter(self.dict_manager)
         self.current_cif_version = CIFVersion.UNKNOWN
         
-        # Load both field definition sets
-        self.field_checker.load_field_set('3DED', os.path.join(config_path, 'field_definitions.cif_ed'))
-        self.field_checker.load_field_set('HP', os.path.join(config_path, 'field_definitions.cif_hp'))
+        # Load both field definition sets from config directory
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        definitions_path = os.path.join(project_root, 'config', 'field_definitions')
+        self.field_checker.load_field_set('3DED', os.path.join(definitions_path, 'field_definitions.cif_ed'))
+        self.field_checker.load_field_set('HP', os.path.join(definitions_path, 'field_definitions.cif_hp'))
         
         # Field definition selection variables
         self.custom_field_definition_file = None
         self.current_field_set = '3DED'  # Default to 3DED
         
         self.init_ui()
+        self.update_dictionary_status()
         self.select_initial_file()
 
     def load_settings(self):
@@ -92,8 +98,10 @@ class CIFEditor(QMainWindow):
         self.path_label = QLabel()
         self.cursor_label = QLabel()
         self.cif_version_label = QLabel("CIF Version: Unknown")
+        self.dictionary_label = QLabel("Dictionary: Default")
         self.status_bar.addPermanentWidget(self.path_label)
         self.status_bar.addPermanentWidget(self.cif_version_label)
+        self.status_bar.addPermanentWidget(self.dictionary_label)
         self.status_bar.addPermanentWidget(self.cursor_label)
         
         # Create CIF text editor component
@@ -224,6 +232,9 @@ class CIFEditor(QMainWindow):
         
         fix_mixed_action = format_menu.addAction("Fix Mixed Format")
         fix_mixed_action.triggered.connect(self.fix_mixed_format)
+        
+        resolve_aliases_action = format_menu.addAction("Resolve Field Aliases")
+        resolve_aliases_action.triggered.connect(self.standardize_cif_fields)
 
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
@@ -271,6 +282,21 @@ class CIFEditor(QMainWindow):
         syntax_action.setCheckable(True)
         syntax_action.setChecked(self.cif_text_editor.settings['syntax_highlighting_enabled'])
         syntax_action.triggered.connect(self.toggle_syntax_highlighting)
+        
+        # Settings menu
+        settings_menu = menubar.addMenu("Settings")
+        
+        # Dictionary management section
+        dict_info_action = settings_menu.addAction("Dictionary Information...")
+        dict_info_action.triggered.connect(self.show_dictionary_info)
+        
+        settings_menu.addSeparator()
+        
+        load_dict_action = settings_menu.addAction("Replace Core CIF Dictionary...")
+        load_dict_action.triggered.connect(self.load_custom_dictionary)
+        
+        add_dict_action = settings_menu.addAction("Add Additional CIF Dictionary...")
+        add_dict_action.triggered.connect(self.add_additional_dictionary)
         
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
@@ -557,6 +583,16 @@ class CIFEditor(QMainWindow):
         # Parse the CIF content using the new parser
         self.cif_parser.parse_file(content)
         
+        # Detect CIF version to determine the correct field name
+        detected_version = self.dict_manager.detect_cif_version(content)
+        
+        # Determine the appropriate field name based on CIF version
+        if detected_version == CIFVersion.CIF2:
+            field_name = '_refine.special_details'
+        else:
+            # Default to CIF1 format (covers CIF1, UNKNOWN, and MIXED)
+            field_name = '_refine_special_details'
+        
         template = (
             "STRUCTURE REFINEMENT\n"
             "- Refinement method\n"
@@ -564,8 +600,8 @@ class CIFEditor(QMainWindow):
             "- Special treatments"
         )
         
-        # Get current value or use template
-        current_value = self.cif_parser.get_field_value('_refine_special_details')
+        # Get current value from the appropriate field name, or use template
+        current_value = self.cif_parser.get_field_value(field_name)
         if current_value is None:
             current_value = template
         
@@ -579,8 +615,8 @@ class CIFEditor(QMainWindow):
         elif result == QDialog.DialogCode.Accepted:
             updated_content = dialog.getText()
             
-            # Update the field in the parser
-            self.cif_parser.set_field_value('_refine_special_details', updated_content)
+            # Update the field in the parser using the appropriate field name
+            self.cif_parser.set_field_value(field_name, updated_content)
             
             # Generate updated CIF content and update the text editor
             updated_cif = self.cif_parser.generate_cif_content()
@@ -845,6 +881,39 @@ class CIFEditor(QMainWindow):
         modified = "*" if self.modified else ""
         self.path_label.setText(f"{path}{modified} | ")
 
+    def update_dictionary_status(self):
+        """Update the dictionary status label in the status bar"""
+        try:
+            # Get dictionary information
+            dict_info = self.dict_manager.get_dictionary_info()
+            total_dicts = dict_info['total_dictionaries']
+            
+            if total_dicts == 1:
+                # Single dictionary - show its name
+                dict_path = getattr(self.dict_manager.parser, 'cif_core_path', None)
+                if dict_path and dict_path != 'cif_core.dic':
+                    dict_name = os.path.basename(dict_path)
+                    self.dictionary_label.setText(f"Dictionary: {dict_name}")
+                else:
+                    self.dictionary_label.setText("Dictionary: Default")
+            else:
+                # Multiple dictionaries - show count and primary
+                primary_dict = dict_info.get('primary_dictionary', '')
+                primary_name = os.path.basename(primary_dict) if primary_dict else 'Default'
+                additional_count = total_dicts - 1
+                
+                self.dictionary_label.setText(f"Dictionaries: {primary_name} +{additional_count}")
+                
+                # Set tooltip with full list
+                loaded_dicts = self.dict_manager.get_loaded_dictionaries()
+                dict_names = [os.path.basename(path) for path in loaded_dicts]
+                tooltip_text = f"Loaded dictionaries:\\n" + "\\n".join([f"• {name}" for name in dict_names])
+                self.dictionary_label.setToolTip(tooltip_text)
+                
+        except Exception:
+            # Fallback if there's any issue
+            self.dictionary_label.setText("Dictionary: Unknown")
+
     def show_find_dialog(self):
         """Show a dialog for finding text in the editor"""
         self.cif_text_editor.show_find_dialog()
@@ -1023,3 +1092,218 @@ class CIFEditor(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Fix Error", 
                                f"Failed to fix mixed format:\n{str(e)}")
+
+    def standardize_cif_fields(self):
+        """Resolve CIF field alias conflicts with user control"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            # Check for alias conflicts first
+            conflicts = self.dict_manager.detect_field_aliases_in_cif(content)
+            
+            if not conflicts:
+                QMessageBox.information(self, "No Alias Conflicts", 
+                                      "No field alias conflicts were found.\n\n" +
+                                      "This tool only resolves cases where the same field " +
+                                      "appears in multiple forms (e.g., both _diffrn_source_type " +
+                                      "and _diffrn_source_make in the same file).")
+                return
+            
+            # Show conflict summary and let user choose resolution approach
+            conflict_summary = f"Found {len(conflicts)} field alias conflicts:\n\n"
+            for canonical, alias_list in conflicts.items():
+                conflict_summary += f"• {canonical}:\n"
+                for alias in alias_list:
+                    conflict_summary += f"    - {alias}\n"
+                conflict_summary += "\n"
+            
+            # Ask user how they want to resolve conflicts
+            reply = QMessageBox.question(self, "Field Alias Conflicts Found",
+                                       conflict_summary + 
+                                       "How would you like to resolve these conflicts?\n\n" +
+                                       "• Yes: Let me choose for each conflict individually\n" +
+                                       "• No: Auto-resolve using CIF2 format + first available values\n" +
+                                       "• Cancel: Don't resolve conflicts",
+                                       QMessageBox.StandardButton.Yes |
+                                       QMessageBox.StandardButton.No |
+                                       QMessageBox.StandardButton.Cancel)
+            
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            elif reply == QMessageBox.StandardButton.Yes:
+                # Let user resolve conflicts individually
+                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    resolutions = dialog.get_resolutions()
+                else:
+                    return  # User cancelled
+            else:
+                # Auto-resolve using CIF2 format + first available values
+                resolutions = self._auto_resolve_conflicts(conflicts, content)
+            
+            # Apply the resolutions
+            if resolutions:
+                resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
+                
+                if changes:
+                    self.text_editor.setText(resolved_content)
+                    self.modified = True
+                    
+                    change_summary = f"Successfully resolved {len(conflicts)} field alias conflicts:\n\n"
+                    for change in changes:
+                        change_summary += f"• {change}\n"
+                    
+                    QMessageBox.information(self, "Conflicts Resolved", change_summary)
+                else:
+                    QMessageBox.information(self, "No Changes Made", 
+                                          "No changes were needed to resolve the conflicts.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Conflict Resolution Error", 
+                               f"Failed to resolve field alias conflicts:\n{str(e)}")
+    
+    def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str) -> Dict[str, Tuple[str, str]]:
+        """Auto-resolve conflicts using CIF2 format and first available values"""
+        resolutions = {}
+        
+        lines = cif_content.split('\n')
+        
+        for canonical_field, alias_list in conflicts.items():
+            # Use CIF2 format (canonical field)
+            chosen_field = canonical_field
+            
+            # Find the first available value
+            chosen_value = ""
+            for alias in alias_list:
+                for line in lines:
+                    line_stripped = line.strip()
+                    if line_stripped.startswith(alias + ' '):
+                        parts = line_stripped.split(None, 1)
+                        if len(parts) > 1:
+                            chosen_value = parts[1]
+                            break
+                if chosen_value:
+                    break
+            
+            # Fallback if no value found
+            if not chosen_value:
+                chosen_value = "?"
+            
+            resolutions[canonical_field] = (chosen_field, chosen_value)
+        
+        return resolutions
+
+    def load_custom_dictionary(self):
+        """Load a custom CIF dictionary file."""
+        try:
+            file_filter = "CIF Dictionary Files (*.dic);;All Files (*.*)"
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Select CIF Dictionary File", "", file_filter)
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Test if the file can be loaded
+            from utils.cif_dictionary_manager import CIFDictionaryManager
+            from utils.cif_format_converter import CIFFormatConverter
+            
+            # Show loading message
+            self.status_bar.showMessage("Loading dictionary...")
+            
+            # Create new dictionary manager with custom path
+            new_dict_manager = CIFDictionaryManager(file_path)
+            
+            # Test that it loads correctly by accessing the mappings
+            # This will trigger the lazy loading and catch any parse errors
+            new_dict_manager._ensure_loaded()
+            
+            # Check that the dictionary actually contains mappings
+            if not new_dict_manager._cif1_to_cif2 and not new_dict_manager._cif2_to_cif1:
+                raise ValueError("The selected file does not appear to contain valid CIF dictionary mappings.")
+            
+            # If we get here, the dictionary loaded successfully
+            self.dict_manager = new_dict_manager
+            self.format_converter = CIFFormatConverter(self.dict_manager)
+            
+            # Update status displays
+            self.update_dictionary_status()
+            self.status_bar.showMessage(f"Successfully loaded dictionary: {os.path.basename(file_path)}", 5000)
+            
+            # Show success message
+            QMessageBox.information(self, "Dictionary Loaded", 
+                                  f"Successfully loaded CIF dictionary:\n{file_path}")
+                                  
+        except FileNotFoundError:
+            QMessageBox.critical(self, "File Error", 
+                               f"Dictionary file not found:\n{file_path}")
+            self.status_bar.showMessage("Dictionary loading failed", 3000)
+        except Exception as e:
+            QMessageBox.critical(self, "Dictionary Error", 
+                               f"Failed to load CIF dictionary:\n{str(e)}\n\nPlease ensure the file is a valid CIF dictionary.")
+            self.status_bar.showMessage("Dictionary loading failed", 3000)
+
+    def add_additional_dictionary(self):
+        """Add an additional CIF dictionary to extend field coverage."""
+        try:
+            file_filter = "CIF Dictionary Files (*.dic);;All Files (*.*)"
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Additional CIF Dictionary", "", file_filter)
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Show loading message
+            self.status_bar.showMessage("Adding dictionary...")
+            
+            # Add the dictionary to the existing manager
+            success = self.dict_manager.add_dictionary(file_path)
+            
+            if success:
+                # Update the format converter with the enhanced dictionary manager
+                self.format_converter = CIFFormatConverter(self.dict_manager)
+                
+                # Update status displays
+                self.update_dictionary_status()
+                
+                dict_name = os.path.basename(file_path)
+                self.status_bar.showMessage(f"Successfully added dictionary: {dict_name}", 5000)
+                
+                # Get dictionary info for the success message
+                dict_info = self.dict_manager.get_dictionary_info()
+                total_dicts = dict_info['total_dictionaries']
+                total_mappings = dict_info['total_cif1_mappings']
+                
+                QMessageBox.information(self, "Dictionary Added", 
+                                      f"Successfully added CIF dictionary:\n{file_path}\n\n"
+                                      f"Total dictionaries loaded: {total_dicts}\n"
+                                      f"Total field mappings: {total_mappings}")
+            else:
+                self.status_bar.showMessage("Failed to add dictionary", 3000)
+                                  
+        except FileNotFoundError:
+            QMessageBox.critical(self, "File Error", 
+                               f"Dictionary file not found:\n{file_path}")
+            self.status_bar.showMessage("Dictionary adding failed", 3000)
+        except ValueError as e:
+            QMessageBox.critical(self, "Dictionary Error", 
+                               f"Invalid dictionary file:\n{str(e)}")
+            self.status_bar.showMessage("Dictionary adding failed", 3000)
+        except Exception as e:
+            QMessageBox.critical(self, "Dictionary Error", 
+                               f"Failed to add CIF dictionary:\n{str(e)}\n\nPlease ensure the file is a valid CIF dictionary.")
+            self.status_bar.showMessage("Dictionary adding failed", 3000)
+
+    def show_dictionary_info(self):
+        """Show detailed dictionary information dialog."""
+        try:
+            dialog = DictionaryInfoDialog(self.dict_manager, self)
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Dictionary info dialog error: {error_details}")
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to show dictionary information:\n{str(e)}\n\nCheck console for details.")

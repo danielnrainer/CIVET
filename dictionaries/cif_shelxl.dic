@@ -1,0 +1,563 @@
+#\#CIF_2.0
+##############################################################################
+#                                                                            #
+#            CIF SHELXL RESTRAINTS DICTIONARY VERSION 1.0                   #
+#            -----------------------------------------------                  #
+#                                                                            #
+# This dictionary contains the names and definitions for reporting SHELXL-   #
+# specific restraints that are commonly used in crystal structure            #
+# refinement but are not included in the core restraints dictionary.        #
+#                                                                            #
+##############################################################################
+
+
+data_CIF_SHELXL
+
+    _dictionary.title            CIF_SHELXL
+    _dictionary.class            Instance
+    _dictionary.version          1.0.0
+    _dictionary.date             2025-09-16
+    _dictionary.uri              local/cif_shelxl.dic
+    _dictionary.ddl_conformance  3.11.09
+    _dictionary.namespace        CifShelxl
+    _description.text                   
+;
+ The items in this dictionary are designed for reporting SHELXL-specific
+ restraints that are commonly generated during refinement with SHELXL
+ programs but are not included in the standard restraints dictionary.
+ 
+ These restraints are based on common SHELXL instruction types including:
+ - RIGU: rigid bond restraints
+ - SIMU: similar ADP restraints  
+ - DELU: rigid bond restraints with different settings
+ - ISOR: isotropic restraints
+ - FLAT: planarity restraints
+ - CHIV: volume restraints
+ - CONF: conformation restraints
+;
+
+##############################################################################
+
+#==============================================================================
+# RIGU (Rigid Bond) Restraints Category
+#==============================================================================
+
+save_RESTR_RIGU
+
+    _definition.id               RESTR_RIGU
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_RIGU category specifies rigid bond restraints applied
+ during refinement. These restraints constrain the anisotropic
+ displacement parameters of bonded atoms to be similar in the
+ direction of the bond.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_rigu
+
+    loop_
+      _category_key.name
+                   '_restr_rigu.atom_site_label_1'
+                   '_restr_rigu.atom_site_label_2'
+
+save_
+
+save_restr_rigu.atom_site_label_1
+
+    _definition.id               '_restr_rigu.atom_site_label_1'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_atom_site_label_1'
+    _name.category_id            restr_rigu
+    _name.object_id              atom_site_label_1
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the first atom in the rigid bond restraint.
+;
+
+save_
+
+save_restr_rigu.atom_site_label_2
+
+    _definition.id               '_restr_rigu.atom_site_label_2'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_atom_site_label_2'
+    _name.category_id            restr_rigu
+    _name.object_id              atom_site_label_2
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the second atom in the rigid bond restraint.
+;
+
+save_
+
+save_restr_rigu.target_weight_param
+
+    _definition.id               '_restr_rigu.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_target_weight_param'
+    _name.category_id            restr_rigu
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the rigid bond restraint.
+;
+
+save_
+
+save_restr_rigu.U13_diff
+
+    _definition.id               '_restr_rigu.U13_diff'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_U13_diff'
+    _name.category_id            restr_rigu
+    _name.object_id              U13_diff
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Difference in U13 anisotropic displacement parameter component.
+;
+
+save_
+
+save_restr_rigu.U23_diff
+
+    _definition.id               '_restr_rigu.U23_diff'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_U23_diff'
+    _name.category_id            restr_rigu
+    _name.object_id              U23_diff
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Difference in U23 anisotropic displacement parameter component.
+;
+
+save_
+
+save_restr_rigu.U33_diff
+
+    _definition.id               '_restr_rigu.U33_diff'
+    loop_
+      _alias.definition_id
+          '_restr_RIGU_U33_diff'
+    _name.category_id            restr_rigu
+    _name.object_id              U33_diff
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Difference in U33 anisotropic displacement parameter component.
+;
+
+save_
+
+#==============================================================================
+# SIMU (Similar ADP) Restraints Category
+#==============================================================================
+
+save_RESTR_SIMU
+
+    _definition.id               RESTR_SIMU
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_SIMU category specifies similar ADP restraints applied
+ during refinement. These restraints constrain atoms to have
+ similar anisotropic displacement parameters.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_simu
+
+    loop_
+      _category_key.name
+                   '_restr_simu.atom_site_label_1'
+                   '_restr_simu.atom_site_label_2'
+
+save_
+
+save_restr_simu.atom_site_label_1
+
+    _definition.id               '_restr_simu.atom_site_label_1'
+    loop_
+      _alias.definition_id
+          '_restr_SIMU_atom_site_label_1'
+    _name.category_id            restr_simu
+    _name.object_id              atom_site_label_1
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the first atom in the similar ADP restraint.
+;
+
+save_
+
+save_restr_simu.atom_site_label_2
+
+    _definition.id               '_restr_simu.atom_site_label_2'
+    loop_
+      _alias.definition_id
+          '_restr_SIMU_atom_site_label_2'
+    _name.category_id            restr_simu
+    _name.object_id              atom_site_label_2
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the second atom in the similar ADP restraint.
+;
+
+save_
+
+save_restr_simu.target_weight_param
+
+    _definition.id               '_restr_simu.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_SIMU_target_weight_param'
+    _name.category_id            restr_simu
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the similar ADP restraint.
+;
+
+save_
+
+#==============================================================================
+# DELU (Rigid Bond Alternative) Restraints Category  
+#==============================================================================
+
+save_RESTR_DELU
+
+    _definition.id               RESTR_DELU
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_DELU category specifies rigid bond restraints (alternative
+ to RIGU) applied during refinement.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_delu
+
+    loop_
+      _category_key.name
+                   '_restr_delu.atom_site_label_1'
+                   '_restr_delu.atom_site_label_2'
+
+save_
+
+save_restr_delu.atom_site_label_1
+
+    _definition.id               '_restr_delu.atom_site_label_1'
+    loop_
+      _alias.definition_id
+          '_restr_DELU_atom_site_label_1'
+    _name.category_id            restr_delu
+    _name.object_id              atom_site_label_1
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the first atom in the DELU restraint.
+;
+
+save_
+
+save_restr_delu.atom_site_label_2
+
+    _definition.id               '_restr_delu.atom_site_label_2'
+    loop_
+      _alias.definition_id
+          '_restr_DELU_atom_site_label_2'
+    _name.category_id            restr_delu
+    _name.object_id              atom_site_label_2
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the second atom in the DELU restraint.
+;
+
+save_
+
+save_restr_delu.target_weight_param
+
+    _definition.id               '_restr_delu.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_DELU_target_weight_param'
+    _name.category_id            restr_delu
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the DELU restraint.
+;
+
+save_
+
+#==============================================================================
+# ISOR (Isotropic Restraints) Category
+#==============================================================================
+
+save_RESTR_ISOR
+
+    _definition.id               RESTR_ISOR
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_ISOR category specifies isotropic restraints applied
+ during refinement. These restraints constrain atoms to have
+ more isotropic anisotropic displacement parameters.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_isor
+
+    loop_
+      _category_key.name
+                   '_restr_isor.atom_site_label'
+
+save_
+
+save_restr_isor.atom_site_label
+
+    _definition.id               '_restr_isor.atom_site_label'
+    loop_
+      _alias.definition_id
+          '_restr_ISOR_atom_site_label'
+    _name.category_id            restr_isor
+    _name.object_id              atom_site_label
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the atom with isotropic restraint.
+;
+
+save_
+
+save_restr_isor.target_weight_param
+
+    _definition.id               '_restr_isor.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_ISOR_target_weight_param'
+    _name.category_id            restr_isor
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the isotropic restraint.
+;
+
+save_
+
+#==============================================================================
+# FLAT (Planarity Restraints) Category
+#==============================================================================
+
+save_RESTR_FLAT
+
+    _definition.id               RESTR_FLAT
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_FLAT category specifies planarity restraints applied
+ during refinement. These restraints constrain atoms to lie in
+ the same plane.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_flat
+
+    loop_
+      _category_key.name
+                   '_restr_flat.atom_site_label'
+
+save_
+
+save_restr_flat.atom_site_label
+
+    _definition.id               '_restr_flat.atom_site_label'
+    loop_
+      _alias.definition_id
+          '_restr_FLAT_atom_site_label'
+    _name.category_id            restr_flat
+    _name.object_id              atom_site_label
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for atoms constrained to be coplanar.
+;
+
+save_
+
+save_restr_flat.target_weight_param
+
+    _definition.id               '_restr_flat.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_FLAT_target_weight_param'
+    _name.category_id            restr_flat
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the planarity restraint.
+;
+
+save_
+
+#==============================================================================
+# CHIV (Volume Restraints) Category
+#==============================================================================
+
+save_RESTR_CHIV
+
+    _definition.id               RESTR_CHIV
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_CHIV category specifies chiral volume restraints applied
+ during refinement. These restraints constrain the chiral volume
+ around tetrahedral centers.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_chiv
+
+    loop_
+      _category_key.name
+                   '_restr_chiv.atom_site_label'
+
+save_
+
+save_restr_chiv.atom_site_label
+
+    _definition.id               '_restr_chiv.atom_site_label'
+    loop_
+      _alias.definition_id
+          '_restr_CHIV_atom_site_label'
+    _name.category_id            restr_chiv
+    _name.object_id              atom_site_label
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for the central atom in the chiral volume restraint.
+;
+
+save_
+
+save_restr_chiv.target_weight_param
+
+    _definition.id               '_restr_chiv.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_CHIV_target_weight_param'
+    _name.category_id            restr_chiv
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the chiral volume restraint.
+;
+
+save_
+
+save_restr_chiv.target_volume
+
+    _definition.id               '_restr_chiv.target_volume'
+    loop_
+      _alias.definition_id
+          '_restr_CHIV_target_volume'
+    _name.category_id            restr_chiv
+    _name.object_id              target_volume
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Target chiral volume for the restraint.
+;
+
+save_
+
+#==============================================================================
+# CONF (Conformation Restraints) Category
+#==============================================================================
+
+save_RESTR_CONF
+
+    _definition.id               RESTR_CONF
+    _definition.scope            Category
+    _definition.class            Loop
+    _definition.update           2025-09-16
+    _description.text            
+;
+ The RESTR_CONF category specifies conformation restraints applied
+ during refinement. These restraints constrain molecular geometry
+ to known conformations.
+;
+    _name.category_id            cif_shelxl
+    _name.object_id              restr_conf
+
+    loop_
+      _category_key.name
+                   '_restr_conf.atom_site_label'
+
+save_
+
+save_restr_conf.atom_site_label
+
+    _definition.id               '_restr_conf.atom_site_label'
+    loop_
+      _alias.definition_id
+          '_restr_CONF_atom_site_label'
+    _name.category_id            restr_conf
+    _name.object_id              atom_site_label
+    _type.purpose                Key
+    _type.container              Single
+    _type.contents               Text
+    _description.text
+; Label for atoms involved in the conformation restraint.
+;
+
+save_
+
+save_restr_conf.target_weight_param
+
+    _definition.id               '_restr_conf.target_weight_param'
+    loop_
+      _alias.definition_id
+          '_restr_CONF_target_weight_param'
+    _name.category_id            restr_conf
+    _name.object_id              target_weight_param
+    _type.container              Single
+    _type.contents               Real
+    _description.text
+; Weighting parameter (esd) for the conformation restraint.
+;
+
+save_

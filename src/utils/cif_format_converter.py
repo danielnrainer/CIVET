@@ -7,17 +7,20 @@ Converts between CIF1 and CIF2 formats, handling:
 - Format compliance fixing (mixed → pure)
 - Version header management
 - Data type conversions where applicable
+- CIF2-only field support (fields without CIF1 aliases)
 
 """
 
 import re
 from typing import Dict, List, Tuple, Optional
 from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion
+from .cif2_only_extensions import ExtendedCIFDictionaryManager
 
 
 class CIFFormatConverter:
     """
     Converts CIF files between different format versions and fixes compliance issues.
+    Includes support for electron diffraction extension fields.
     """
     
     def __init__(self, dictionary_manager: Optional[CIFDictionaryManager] = None):
@@ -27,7 +30,9 @@ class CIFFormatConverter:
         Args:
             dictionary_manager: Optional pre-configured dictionary manager
         """
-        self.dict_manager = dictionary_manager or CIFDictionaryManager()
+        base_manager = dictionary_manager or CIFDictionaryManager()
+        # Wrap with extended manager for ED support
+        self.dict_manager = ExtendedCIFDictionaryManager(base_manager)
     
     def convert_to_cif2(self, cif_content: str) -> Tuple[str, List[str]]:
         """
@@ -42,6 +47,7 @@ class CIFFormatConverter:
         lines = cif_content.split('\n')
         converted_lines = []
         changes = []
+        unknown_fields = []  # Track unknown fields
         
         # Add CIF2 header if not present
         header_added = False
@@ -66,7 +72,7 @@ class CIFFormatConverter:
             elif in_loop and line.strip().startswith('_'):
                 # This is a loop field definition
                 loop_field_count += 1
-                converted_line = self._convert_line_to_cif2(line)
+                converted_line = self._convert_line_to_cif2(line, unknown_fields)
             elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
                 # This might be loop data (not a field definition)
                 # Check if we've seen field definitions and now have data
@@ -75,23 +81,27 @@ class CIFFormatConverter:
                     converted_line = line
                 else:
                     # Still in field definitions
-                    converted_line = self._convert_line_to_cif2(line)
-            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip().startswith('_') and not line.strip().startswith('_') or line.strip() == 'loop_'):
-                # End of loop (empty line, new data block, or new non-loop field)
+                    converted_line = self._convert_line_to_cif2(line, unknown_fields)
+            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip() == 'loop_'):
+                # End of loop (empty line, new data block, or new loop)
                 in_loop = False
                 loop_field_count = 0
                 if line.strip().startswith('_'):
-                    converted_line = self._convert_line_to_cif2(line)
+                    converted_line = self._convert_line_to_cif2(line, unknown_fields)
                 else:
                     converted_line = line
             else:
                 # Regular line processing
-                converted_line = self._convert_line_to_cif2(line)
+                converted_line = self._convert_line_to_cif2(line, unknown_fields)
             
             if converted_line != original_line:
                 changes.append(f"Line {i+1+(2 if header_added else 0)}: {original_line.strip()} → {converted_line.strip()}")
             
             converted_lines.append(converted_line)
+        
+        # Add warnings for unknown fields
+        if unknown_fields:
+            changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
         
         return '\n'.join(converted_lines), changes
     
@@ -108,6 +118,7 @@ class CIFFormatConverter:
         lines = cif_content.split('\n')
         converted_lines = []
         changes = []
+        unknown_fields = []  # Track unknown fields
         
         # Track loop state for proper field conversion within loops
         in_loop = False
@@ -136,7 +147,7 @@ class CIFFormatConverter:
             elif in_loop and line.strip().startswith('_'):
                 # This is a loop field definition
                 loop_field_count += 1
-                converted_line = self._convert_line_to_cif1(line)
+                converted_line = self._convert_line_to_cif1(line, unknown_fields)
             elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
                 # This might be loop data (not a field definition)
                 # Check if we've seen field definitions and now have data
@@ -145,23 +156,27 @@ class CIFFormatConverter:
                     converted_line = line
                 else:
                     # Still in field definitions
-                    converted_line = self._convert_line_to_cif1(line)
-            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip().startswith('_') and not line.strip().startswith('_') or line.strip() == 'loop_'):
-                # End of loop (empty line, new data block, or new non-loop field)
+                    converted_line = self._convert_line_to_cif1(line, unknown_fields)
+            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip() == 'loop_'):
+                # End of loop (empty line, new data block, or new loop)
                 in_loop = False
                 loop_field_count = 0
                 if line.strip().startswith('_'):
-                    converted_line = self._convert_line_to_cif1(line)
+                    converted_line = self._convert_line_to_cif1(line, unknown_fields)
                 else:
                     converted_line = line
             else:
                 # Regular line processing
-                converted_line = self._convert_line_to_cif1(line)
+                converted_line = self._convert_line_to_cif1(line, unknown_fields)
             
             if converted_line != original_line:
                 changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
             
             converted_lines.append(converted_line)
+        
+        # Add warnings for unknown fields
+        if unknown_fields:
+            changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
         
         return '\n'.join(converted_lines), changes
     
@@ -183,12 +198,13 @@ class CIFFormatConverter:
         else:
             raise ValueError(f"Cannot convert to {target_version}")
     
-    def _convert_line_to_cif2(self, line: str) -> str:
+    def _convert_line_to_cif2(self, line: str, unknown_fields: List[str] = None) -> str:
         """
         Convert a single line to CIF2 format.
         
         Args:
             line: Line to convert
+            unknown_fields: List to track unknown fields (optional)
             
         Returns:
             Converted line
@@ -198,25 +214,34 @@ class CIFFormatConverter:
             return line
         
         # Check if line starts with a field name (allow hyphens, dots, brackets, etc.)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s+(.*)$', line)
+        # Handle both cases: field with value and field without value (loop definitions)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s*(.*)$', line)
         if not field_match:
             return line
         
         indent, field_name, rest = field_match.groups()
         
-        # Convert field name using pattern-based mapping
+        # Check if field is known in dictionary
+        if unknown_fields is not None and not self.dict_manager.is_known_field(field_name):
+            unknown_fields.append(field_name)
+        
+        # Convert field name using dictionary lookup
         converted_field = self._convert_field_to_cif2(field_name)
         if converted_field != field_name:
-            return f"{indent}{converted_field} {rest}"
+            if rest.strip():  # Has value after field name
+                return f"{indent}{converted_field} {rest}"
+            else:  # Field name only (loop definition)
+                return f"{indent}{converted_field}"
         
         return line
     
-    def _convert_line_to_cif1(self, line: str) -> str:
+    def _convert_line_to_cif1(self, line: str, unknown_fields: List[str] = None) -> str:
         """
         Convert a single line to CIF1 format.
         
         Args:
             line: Line to convert
+            unknown_fields: List to track unknown fields (optional)
             
         Returns:
             Converted line
@@ -226,16 +251,24 @@ class CIFFormatConverter:
             return line
         
         # Check if line starts with a CIF field name (allow dots, hyphens, brackets, etc.)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s+(.*)$', line)
+        # Handle both cases: field with value and field without value (loop definitions)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s*(.*)$', line)
         if not field_match:
             return line
         
         indent, field_name, rest = field_match.groups()
         
-        # Convert field name using pattern-based mapping
+        # Check if field is known in dictionary
+        if unknown_fields is not None and not self.dict_manager.is_known_field(field_name):
+            unknown_fields.append(field_name)
+        
+        # Convert field name using dictionary lookup
         converted_field = self._convert_field_to_cif1(field_name)
         if converted_field != field_name:
-            return f"{indent}{converted_field} {rest}"
+            if rest.strip():  # Has value after field name
+                return f"{indent}{converted_field} {rest}"
+            else:  # Field name only (loop definition)
+                return f"{indent}{converted_field}"
         
         return line
     
@@ -247,53 +280,16 @@ class CIFFormatConverter:
             field_name: CIF1 field name (e.g., '_cell_length_a')
             
         Returns:
-            CIF2 field name (e.g., '_cell.length_a') based on dictionary aliases
+            CIF2 field name (e.g., '_cell.length_a') based on dictionary lookups
         """
-        # First try to get the canonical name from the dictionary
-        canonical_name = self.dict_manager.get_canonical_name(field_name)
+        # Use dictionary lookup for accurate conversion
+        cif2_equivalent = self.dict_manager.get_cif2_equivalent(field_name)
         
-        # If we found a canonical name that's different, use it
-        if canonical_name != field_name.lower():
-            return canonical_name
-        
-        # Fallback: try to identify category patterns in the field name
-        # This handles cases where the field might not be in the dictionary
-        # but follows standard CIF category.item patterns
-        
-        # Try to identify category patterns in the field name
-        # Handle compound categories like 'publ_section', 'citation_author', etc.
-        if field_name.count('_') >= 2:
-            field_without_prefix = field_name[1:]  # Remove initial underscore
+        if cif2_equivalent:
+            return cif2_equivalent
             
-            # Check for compound categories first (longer matches take priority)
-            compound_categories = [
-                'publ_section', 'citation_author', 'citation_editor', 'database_code',
-                'computing_data_collection', 'computing_cell_refinement', 
-                'computing_data_reduction', 'computing_structure_solution',
-                'computing_structure_refinement', 'computing_molecular_graphics',
-                'computing_publication_material', 'diffrn_source', 'diffrn_detector',
-                'diffrn_radiation', 'diffrn_reflns', 'diffrn_standards', 
-                'diffrn_orient_matrix', 'diffrn_measurement', 'exptl_crystal',
-                'exptl_absorpt', 'geom_bond', 'geom_angle', 'geom_torsion', 'geom_hbond',
-                'chemical_formula', 'atom_site', 'atom_type', 'space_group'
-            ]
-            
-            # Try compound categories first
-            for compound_cat in compound_categories:
-                if field_without_prefix.startswith(compound_cat + '_'):
-                    category = compound_cat
-                    item = field_without_prefix[len(compound_cat) + 1:]  # +1 for underscore
-                    if self._should_use_dot_notation(category):
-                        return f'_{category}.{item}'
-                    break
-            else:
-                # Fall back to simple category (split on first underscore)
-                parts = field_without_prefix.split('_', 1)
-                if len(parts) == 2:
-                    category, item = parts
-                    if self._should_use_dot_notation(category):
-                        return f'_{category}.{item}'
-        
+        # If not found in dictionary, return original field name unchanged
+        # (This preserves unknown/custom fields)
         return field_name
     
     def _convert_field_to_cif1(self, field_name: str) -> str:
@@ -304,19 +300,16 @@ class CIFFormatConverter:
             field_name: CIF2 field name (e.g., '_cell.length_a')
             
         Returns:
-            CIF1 field name (e.g., '_cell_length_a') based on dictionary aliases
+            CIF1 field name (e.g., '_cell_length_a') based on dictionary lookups
         """
-        # First try to get the canonical name from the dictionary
-        canonical_name = self.dict_manager.get_canonical_name(field_name)
+        # Use dictionary lookup for accurate conversion
+        cif1_equivalent = self.dict_manager.get_cif1_equivalent(field_name)
         
-        # If we found a canonical name that's different and uses underscores, use it
-        if canonical_name != field_name.lower() and '.' not in canonical_name:
-            return canonical_name
-        
-        # Fallback: convert dots to underscores for CIF1 format
-        if '.' in field_name:
-            return field_name.replace('.', '_')
-        
+        if cif1_equivalent:
+            return cif1_equivalent
+            
+        # If not found in dictionary, return original field name unchanged
+        # (This preserves unknown/custom fields)
         return field_name
     
     def _should_use_dot_notation(self, category: str) -> bool:

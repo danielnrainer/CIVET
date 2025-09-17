@@ -1,4 +1,3 @@
 *.pyc
-cif_core.dic
 build/
 dist/
