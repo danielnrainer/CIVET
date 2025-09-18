@@ -21,7 +21,7 @@ _diffrn_radiation_wavelength.value    0.0251
 _diffrn_source.device     'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
 
 # _diffrn_source.make: Details of electron source type
-_diffrn_source.make          'LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+_diffrn_source.make        'JEOL JSM-2300ED, LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
 
 # _diffrn_source.voltage: Accelerating voltage in kV
 _diffrn_source.voltage          200
@@ -38,8 +38,11 @@ _diffrn_detector.description         'hybrid pixel array detector'  # suggestion
 # _diffrn_detector.make: Specific detector model
 _diffrn_detector.make           'Rigaku HyPix-ED'  # suggestions: 'Rigaku HyPix-ED', 'Rigaku HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
 
-# _diffrn_measurement.device: Primary instrument used
-_diffrn_measurement.device      'electron diffractometer'  # suggestions: 'electron diffractometer', 'transmission electron microscope'
+# _diffrn_measurement.device_class: Primary instrument used
+_diffrn_measurement.device_class      'electron diffractometer'  # suggestions: 'electron diffractometer', 'transmission electron microscope'
+
+# _diffrn_measurement.device_make: The make, model or name of the goniometer device used. This is a bit odd for TEM based instruments, but maybe instrument name is good enough
+_diffrn_measurement.device_make      'Rigaku XtaLAB Synergy-ED'  
 
 # _diffrn_measurement.method: Data collection method
 _diffrn_measurement.method      'continuous rotation electron diffraction'  # options: 'continuous rotation electron diffraction', 'serial electron diffraction'
@@ -50,8 +53,8 @@ _diffrn_measurement.specimen_support 'lacey carbon copper grid, 200 mesh'
 # _exptl.special_details: holder make and T-control if applicable (lack of different CIF field)
 _exptl.special_details 'Gatan Elsa cryo-transfer holder model 698. Temperature controller model 1905'
 
-# _exptl.crystal_preparation: Sample preparation method
-_exptl.crystal_preparation 'suspension in ethanol, dropcast on grid, evaporation in air'
+# _exptl_crystal.preparation: Sample preparation method
+_exptl_crystal.preparation 'suspension in ethanol, dropcast on grid, evaporation in air'
 
 # _exptl.crystals_number: Number of crystals used
 _exptl.crystals_number    1

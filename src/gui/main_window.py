@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
+from utils.cif2_only_extensions import ExtendedCIFDictionaryManager
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
@@ -38,7 +39,8 @@ class CIFEditor(QMainWindow):
         config_path = os.path.dirname(__file__)
         
         # Initialize CIF dictionary manager and format converter
-        self.dict_manager = CIFDictionaryManager()
+        base_dict_manager = CIFDictionaryManager()
+        self.dict_manager = ExtendedCIFDictionaryManager(base_dict_manager)
         self.format_converter = CIFFormatConverter(self.dict_manager)
         self.current_cif_version = CIFVersion.UNKNOWN
         

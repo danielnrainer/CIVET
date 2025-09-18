@@ -33,6 +33,13 @@ class IssueCategory(Enum):
     UNKNOWN_FIELD = "Unknown Fields"
 
 
+class AutoFixType(Enum):
+    """Types of automatic fixes available"""
+    YES = "yes"                         # Direct dictionary mapping available
+    CIF2_MANUAL_MAPPING = "CIF2 manual mapping"  # CIF2-only extension mapping
+    NO = "no"                          # No automatic fix available
+
+
 @dataclass
 class ValidationIssue:
     """Represents a single validation issue"""
@@ -41,8 +48,12 @@ class ValidationIssue:
     field_names: List[str]  # All related field names
     description: str
     suggested_fix: str
-    severity: str = "warning"  # "info", "warning", "error"
-    auto_fixable: bool = True
+    auto_fix_type: AutoFixType = AutoFixType.NO
+    
+    @property
+    def auto_fixable(self) -> bool:
+        """Check if issue can be automatically fixed"""
+        return self.auto_fix_type in [AutoFixType.YES, AutoFixType.CIF2_MANUAL_MAPPING]
 
 
 @dataclass
@@ -135,16 +146,46 @@ class FieldRulesValidator:
         """
         self.dict_manager = dict_manager
         self.format_converter = format_converter
+    
+    def _determine_auto_fix_type(self, field_name: str, preferred_format: str = "CIF1") -> AutoFixType:
+        """
+        Determine what type of automatic fix is available for a field.
+        
+        Args:
+            field_name: The field name to check
+            preferred_format: Target format ("CIF1" or "CIF2")
+        
+        Returns:
+            AutoFixType indicating the fix availability
+        """
+        # Check if there's a CIF2-only mapping first (for proper categorization)
+        if hasattr(self.dict_manager, 'is_cif2_only_extension'):
+            if self.dict_manager.is_cif2_only_extension(field_name):
+                return AutoFixType.CIF2_MANUAL_MAPPING
+        
+        # Check if there's an official dictionary mapping
+        if preferred_format == "CIF1":
+            official_equiv = self.dict_manager.get_cif1_equivalent(field_name)
+        else:
+            official_equiv = self.dict_manager.get_cif2_equivalent(field_name)
+        
+        if official_equiv:
+            return AutoFixType.YES
+        
+        # If no conversion available
+        return AutoFixType.NO
         
     def validate_field_rules(self, 
                            field_rules_content: str, 
-                           cif_content: Optional[str] = None) -> ValidationResult:
+                           cif_content: Optional[str] = None,
+                           target_format: str = "CIF2") -> ValidationResult:
         """
         Validate field rules and return detailed results
         
         Args:
             field_rules_content: Content of field rules file
             cif_content: Content of CIF file to analyze format (optional)
+            target_format: Target format for validation ("CIF1" or "CIF2")
             
         Returns:
             ValidationResult with all issues found
@@ -162,7 +203,7 @@ class FieldRulesValidator:
         issues = []
         
         # 1. Check for mixed format issues
-        mixed_format_issues = self._find_mixed_format_issues(def_fields, cif_format)
+        mixed_format_issues = self._find_mixed_format_issues(def_fields, target_format)
         issues.extend(mixed_format_issues)
         
         # 2. Check for duplicate/alias issues
@@ -228,14 +269,14 @@ class FieldRulesValidator:
                 
                 if equivalent:
                     suggested_fix = f"Convert to {preferred_format} format: {equivalent}"
+                    auto_fix_type = self._determine_auto_fix_type(field, preferred_format)
                     issues.append(ValidationIssue(
                         issue_type=IssueType.MIXED_FORMAT,
                         category=IssueCategory.MIXED_FORMAT,
                         field_names=[field],
                         description=f"Field {field} is in {field_format} format, but based on the current CIF file {preferred_format} is preferred",
                         suggested_fix=suggested_fix,
-                        severity="warning",
-                        auto_fixable=True
+                        auto_fix_type=auto_fix_type
                     ))
         
         return issues
@@ -259,8 +300,7 @@ class FieldRulesValidator:
                     field_names=[field],
                     description=f"Field {field} appears {count} times",
                     suggested_fix=f"Remove {count-1} duplicate occurrence(s) of {field}",
-                    severity="warning",
-                    auto_fixable=True
+                    auto_fix_type=AutoFixType.YES  # Duplicate removal is always fixable
                 ))
                 processed.add(field)
         
@@ -314,8 +354,7 @@ class FieldRulesValidator:
                     field_names=alias_group,
                     description=f"Multiple aliases found: {', '.join(alias_group)}",
                     suggested_fix=f"Keep only {preferred}, remove others",
-                    severity="warning",
-                    auto_fixable=True
+                    auto_fix_type=AutoFixType.YES  # Alias deduplication is always fixable
                 ))
         
         return issues
@@ -332,12 +371,10 @@ class FieldRulesValidator:
                     potential_cif1 = field.replace('.', '_')
                     if self.dict_manager.is_known_field(potential_cif1):
                         suggested_fix = f"Use known field: {potential_cif1}"
-                        severity = "info"
-                        auto_fixable = True
+                        auto_fix_type = AutoFixType.YES
                     else:
                         suggested_fix = "Verify field name or add to custom dictionary"
-                        severity = "warning"
-                        auto_fixable = False
+                        auto_fix_type = self._determine_auto_fix_type(field)
                 else:
                     # CIF1 format - try CIF2 equivalent
                     potential_cif2 = None
@@ -347,20 +384,16 @@ class FieldRulesValidator:
                             potential_cif2 = f"_{parts[0]}.{'_'.join(parts[1:])}"
                             if self.dict_manager.is_known_field(potential_cif2):
                                 suggested_fix = f"Use known field: {potential_cif2}"
-                                severity = "info"
-                                auto_fixable = True
+                                auto_fix_type = AutoFixType.YES
                             else:
                                 suggested_fix = "Verify field name or add to custom dictionary"
-                                severity = "warning"
-                                auto_fixable = False
+                                auto_fix_type = self._determine_auto_fix_type(field)
                         else:
                             suggested_fix = "Verify field name or add to custom dictionary"
-                            severity = "warning"
-                            auto_fixable = False
+                            auto_fix_type = self._determine_auto_fix_type(field)
                     else:
                         suggested_fix = "Verify field name or add to custom dictionary"
-                        severity = "warning"
-                        auto_fixable = False
+                        auto_fix_type = self._determine_auto_fix_type(field)
                 
                 issues.append(ValidationIssue(
                     issue_type=IssueType.UNKNOWN_FIELD,
@@ -368,8 +401,7 @@ class FieldRulesValidator:
                     field_names=[field],
                     description=f"Unknown field: {field}",
                     suggested_fix=suggested_fix,
-                    severity=severity,
-                    auto_fixable=auto_fixable
+                    auto_fix_type=auto_fix_type
                 ))
         
         return issues
@@ -426,16 +458,14 @@ class FieldRulesValidator:
         # Determine the replacement based on target format
         if target_format == "CIF1":
             # Convert to CIF1 format
-            if field in self.dict_manager._cif2_to_cif1:
-                replacement = self.dict_manager._cif2_to_cif1[field]
-            else:
+            replacement = self.dict_manager.get_cif1_equivalent(field)
+            if not replacement:
                 # Convert dots to underscores for generic conversion
                 replacement = field.replace('.', '_')
         else:  # CIF2
             # Convert to CIF2 format
-            if field in self.dict_manager._cif1_to_cif2:
-                replacement = self.dict_manager._cif1_to_cif2[field]
-            else:
+            replacement = self.dict_manager.get_cif2_equivalent(field)
+            if not replacement:
                 return content, None
         
         # Replace all occurrences of the field

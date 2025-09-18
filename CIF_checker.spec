@@ -11,9 +11,9 @@ a = Analysis(
         ('src/gui/editor_settings.json', 'gui'),              # Include editor settings file
 
         # Definition files for checks
-        ('config/field_rules/3ded.cif_rules', 'field_rules'), # Include 3D ED field rules
-        ('config/field_rules/hp.cif_rules', 'field_rules'), # Include HP field rules
-        ('config/field_rules/cleanups.cif_rules', 'field_rules'), # Include cleanup operations
+        ('field_rules/3ded.cif_rules', 'field_rules'), # Include 3D ED field rules
+        ('field_rules/hp.cif_rules', 'field_rules'), # Include HP field rules
+        ('field_rules/cleanups.cif_rules', 'field_rules'), # Include cleanup operations
         
         # CIF Dictionary files - Essential for field validation and conversion
         ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
@@ -37,6 +37,7 @@ a = Analysis(
         'gui.editor',
         'gui.editor.text_editor',
         'gui.editor.syntax_highlighter',
+        'gui.widgets',
         'gui.dialogs',
         'gui.dialogs.input_dialog',
         'gui.dialogs.multiline_dialog', 

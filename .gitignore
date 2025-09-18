@@ -25,3 +25,4 @@ Thumbs.db
 *.temp
 build/
 dist/
+field_rules/3ded_cif1.cif_rules

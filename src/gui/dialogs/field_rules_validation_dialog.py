@@ -21,7 +21,7 @@ from PyQt6.QtGui import QFont, QIcon
 
 # Add parent directories to path to import from utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory
+from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory, AutoFixType
 
 
 class IssueTreeWidget(QTreeWidget):
@@ -29,7 +29,7 @@ class IssueTreeWidget(QTreeWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setHeaderLabels(["Issue", "Severity", "Auto-Fix"])
+        self.setHeaderLabels(["CIF Field", "Explanation", "Auto-Fix"])
         self.setRootIsDecorated(True)
         self.setAlternatingRowColors(True)
         self.itemChanged.connect(self.on_item_changed)
@@ -64,17 +64,16 @@ class IssueTreeWidget(QTreeWidget):
             
             # Add individual issues
             for i, issue in enumerate(issues):
-                issue_text = self._format_issue_text(issue)
-                severity_text = issue.severity.upper()
-                auto_fix_text = "Yes" if issue.auto_fixable else "No"
+                field_text, explanation_text = self._format_issue_text(issue)
+                auto_fix_text = self._format_auto_fix_text(issue.auto_fix_type)
                 
-                issue_item = QTreeWidgetItem([issue_text, severity_text, auto_fix_text])
+                issue_item = QTreeWidgetItem([field_text, explanation_text, auto_fix_text])
                 issue_item.setData(0, Qt.ItemDataRole.UserRole, (category, i))  # Store issue reference
                 
-                # Add checkbox for selection - only for auto-fixable issues
+                # Add checkbox for selection - only for fixable issues
                 issue_item.setFlags(issue_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                if issue.auto_fixable:
-                    issue_item.setCheckState(0, Qt.CheckState.Checked)  # Pre-select auto-fixable issues
+                if issue.auto_fix_type != AutoFixType.NO:
+                    issue_item.setCheckState(0, Qt.CheckState.Checked)  # Pre-select fixable issues
                     issue_item.setToolTip(0, "This issue can be automatically fixed - check to include in fixes")
                     # Add to selected issues
                     issue_id = f"{category.value}_{i}"
@@ -85,17 +84,18 @@ class IssueTreeWidget(QTreeWidget):
                     issue_item.setToolTip(0, "This issue cannot be automatically fixed and requires manual attention")
                 
                 # Color code by auto-fixable status
-                if issue.auto_fixable:
+                if issue.auto_fix_type != AutoFixType.NO:
                     issue_item.setForeground(0, self.palette().color(self.palette().ColorRole.WindowText))
                 else:
                     issue_item.setForeground(0, self.palette().color(self.palette().ColorRole.Mid))
                 
-                # Color code severity in second column
-                if issue.severity == "error":
-                    issue_item.setForeground(1, self.palette().color(self.palette().ColorRole.BrightText))
-                    issue_item.setBackground(1, self.palette().color(self.palette().ColorRole.Dark))
-                elif issue.severity == "warning":
-                    issue_item.setForeground(1, self.palette().color(self.palette().ColorRole.Dark))
+                # Color code auto-fix type in third column
+                if issue.auto_fix_type == AutoFixType.YES:
+                    issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Dark))
+                elif issue.auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
+                    issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Link))
+                else:
+                    issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Mid))
                 
                 category_item.addChild(issue_item)
             
@@ -107,15 +107,28 @@ class IssueTreeWidget(QTreeWidget):
         self.resizeColumnToContents(1)
         self.resizeColumnToContents(2)
     
-    def _format_issue_text(self, issue: ValidationIssue) -> str:
-        """Format issue for display in tree"""
+    def _format_issue_text(self, issue: ValidationIssue) -> Tuple[str, str]:
+        """Format issue for display in tree - returns (field_text, explanation_text)"""
         if len(issue.field_names) == 1:
-            return f"{issue.field_names[0]}: {issue.description}"
+            field_text = issue.field_names[0]
+            explanation_text = issue.description
         else:
             fields_text = ", ".join(issue.field_names[:3])
             if len(issue.field_names) > 3:
                 fields_text += f" (and {len(issue.field_names) - 3} more)"
-            return f"{fields_text}: {issue.description}"
+            field_text = fields_text
+            explanation_text = issue.description
+        
+        return field_text, explanation_text
+    
+    def _format_auto_fix_text(self, auto_fix_type: AutoFixType) -> str:
+        """Format auto-fix type for display"""
+        if auto_fix_type == AutoFixType.YES:
+            return "yes"
+        elif auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
+            return "CIF2 manual mapping"
+        else:
+            return "no"
     
     def on_item_changed(self, item, column):
         """Handle item check state changes"""
@@ -148,7 +161,7 @@ class IssueTreeWidget(QTreeWidget):
         return selected
     
     def select_all_auto_fixable(self):
-        """Select all auto-fixable issues"""
+        """Select all auto-fixable issues (both official and CIF2 manual mappings)"""
         iterator = QTreeWidgetItemIterator(self)
         while iterator.value():
             item = iterator.value()
@@ -265,11 +278,13 @@ class FieldRulesValidationDialog(QDialog):
         
         self.cif1_radio = QRadioButton("CIF1 format (e.g., _cell_length_a)")
         self.cif1_radio.setToolTip("Convert mixed formats to CIF1 style with underscores")
+        self.cif1_radio.toggled.connect(self.on_format_changed)
         self.format_button_group.addButton(self.cif1_radio, 1)
         format_layout.addWidget(self.cif1_radio)
         
         self.cif2_radio = QRadioButton("CIF2 format (e.g., _cell.length_a)")
         self.cif2_radio.setToolTip("Convert mixed formats to CIF2 style with dots")
+        self.cif2_radio.toggled.connect(self.on_format_changed)
         self.cif2_radio.setChecked(True)  # Default to CIF2
         self.format_button_group.addButton(self.cif2_radio, 2)
         format_layout.addWidget(self.cif2_radio)
@@ -381,6 +396,26 @@ class FieldRulesValidationDialog(QDialog):
         issues_group = QGroupBox("Validation Issues")
         issues_layout = QVBoxLayout()
         
+        # Quick conversion buttons
+        conversion_layout = QHBoxLayout()
+        
+        self.convert_official_btn = QPushButton("🔄 Convert Official Mappings")
+        self.convert_official_btn.setToolTip("Select and convert all fields with official dictionary mappings (\"yes\" items)")
+        self.convert_official_btn.clicked.connect(self.convert_official_mappings)
+        conversion_layout.addWidget(self.convert_official_btn)
+        
+        self.convert_cif2_only_btn = QPushButton("🔶 Convert CIF2-Only Mappings")
+        self.convert_cif2_only_btn.setToolTip("Select and convert all fields with CIF2-only extension mappings (\"CIF2 manual mapping\" items)")
+        self.convert_cif2_only_btn.clicked.connect(self.convert_cif2_only_mappings)
+        conversion_layout.addWidget(self.convert_cif2_only_btn)
+        
+        self.convert_all_fixable_btn = QPushButton("⚡ Convert All Auto-Fixable")
+        self.convert_all_fixable_btn.setToolTip("Select and convert all auto-fixable fields (both \"yes\" and \"CIF2 manual mapping\" items)")
+        self.convert_all_fixable_btn.clicked.connect(self.convert_all_fixable)
+        conversion_layout.addWidget(self.convert_all_fixable_btn)
+        
+        issues_layout.addLayout(conversion_layout)
+        
         # Selection controls with clearer labels
         selection_layout = QHBoxLayout()
         
@@ -484,7 +519,7 @@ class FieldRulesValidationDialog(QDialog):
         """Populate the dialog with validation data"""
         # Update summary
         total_issues = len(self.validation_result.issues)
-        auto_fixable = sum(1 for issue in self.validation_result.issues if issue.auto_fixable)
+        auto_fixable = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type != AutoFixType.NO)
         
         if self.field_rules_path:
             file_info = f"<b>File:</b> {os.path.basename(self.field_rules_path)}<br>"
@@ -506,6 +541,9 @@ class FieldRulesValidationDialog(QDialog):
         
         # Populate issues tree
         self.issues_tree.populate_issues(self.validation_result)
+        
+        # Update conversion button counts
+        self.update_conversion_button_counts()
         
         # Update button states
         if total_issues == 0:
@@ -540,17 +578,25 @@ class FieldRulesValidationDialog(QDialog):
         <p><b>Description:</b> {issue.description}</p>
         <p><b>Affected Fields:</b> {', '.join(issue.field_names)}</p>
         <p><b>Suggested Fix:</b> {issue.suggested_fix}</p>
-        <p><b>Severity:</b> {issue.severity.upper()}</p>
-        <p><b>Auto-Fixable:</b> {'Yes' if issue.auto_fixable else 'No'}</p>
+        <p><b>Auto-Fix Type:</b> {self._format_auto_fix_text(issue.auto_fix_type)}</p>
         """
         
         self.details_text.setHtml(details_html)
+    
+    def _format_auto_fix_text(self, auto_fix_type: AutoFixType) -> str:
+        """Format auto-fix type for display"""
+        if auto_fix_type == AutoFixType.YES:
+            return "yes"
+        elif auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
+            return "CIF2 manual mapping"
+        else:
+            return "no"
     
     def update_selection_count(self):
         """Update the selection count display"""
         if hasattr(self, 'selection_count_label'):
             selected_count = len(self.issues_tree.selected_issues)
-            total_fixable = sum(1 for issue in self.validation_result.issues if issue.auto_fixable)
+            total_fixable = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type != AutoFixType.NO)
             
             if selected_count == 0:
                 self.selection_count_label.setText("No issues selected")
@@ -569,6 +615,88 @@ class FieldRulesValidationDialog(QDialog):
         self.issues_tree.select_none()
         self.update_selection_count()
     
+    def on_format_changed(self):
+        """Handle format radio button changes - refresh the validation table"""
+        if hasattr(self, 'validation_result') and hasattr(self, 'field_rules_content') and hasattr(self, 'validator'):
+            # Re-run validation with the new target format
+            target_format = "CIF2" if self.cif2_radio.isChecked() else "CIF1"
+            
+            # Create a new validation result with the new target format
+            new_validation_result = self.validator.validate_field_rules(
+                self.field_rules_content, cif_content=None, target_format=target_format
+            )
+            
+            # Update the validation result and refresh the display
+            self.validation_result = new_validation_result
+            self.populate_data()
+    
+    def convert_official_mappings(self):
+        """Select and convert all fields with official dictionary mappings"""
+        self._select_by_auto_fix_type([AutoFixType.YES])
+        self.apply_selected_fixes()
+    
+    def convert_cif2_only_mappings(self):
+        """Select and convert all fields with CIF2-only extension mappings"""
+        self._select_by_auto_fix_type([AutoFixType.CIF2_MANUAL_MAPPING])
+        self.apply_selected_fixes()
+    
+    def convert_all_fixable(self):
+        """Select and convert all auto-fixable fields (both official and CIF2-only)"""
+        self._select_by_auto_fix_type([AutoFixType.YES, AutoFixType.CIF2_MANUAL_MAPPING])
+        self.apply_selected_fixes()
+    
+    def _select_by_auto_fix_type(self, auto_fix_types):
+        """Select issues with the specified auto-fix types"""
+        # Clear current selection
+        self.issues_tree.selected_issues.clear()
+        
+        # Select issues with matching auto-fix types
+        issues_by_category = self.validation_result.issues_by_category
+        
+        for category, issues in issues_by_category.items():
+            for i, issue in enumerate(issues):
+                if issue.auto_fix_type in auto_fix_types:
+                    issue_id = f"{category.value}_{i}"
+                    self.issues_tree.selected_issues.add(issue_id)
+        
+        # Update the UI checkboxes
+        self._update_tree_checkboxes()
+        self.update_selection_count()
+    
+    def _update_tree_checkboxes(self):
+        """Update the checkbox states in the tree to match selected_issues"""
+        iterator = QTreeWidgetItemIterator(self.issues_tree)
+        while iterator.value():
+            item = iterator.value()
+            if item.parent() is not None:  # Only for issue items, not category items
+                category_data = item.data(0, Qt.ItemDataRole.UserRole)
+                if category_data:
+                    category, index = category_data
+                    issue_id = f"{category.value}_{index}"
+                    
+                    if issue_id in self.issues_tree.selected_issues:
+                        item.setCheckState(0, Qt.CheckState.Checked)
+                    else:
+                        item.setCheckState(0, Qt.CheckState.Unchecked)
+            iterator += 1
+    
+    def update_conversion_button_counts(self):
+        """Update the conversion button texts with current counts"""
+        # Count issues by auto-fix type
+        official_count = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type == AutoFixType.YES)
+        cif2_only_count = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING)
+        total_fixable = official_count + cif2_only_count
+        
+        # Update button texts with counts
+        self.convert_official_btn.setText(f"🔄 Convert Official Mappings ({official_count})")
+        self.convert_cif2_only_btn.setText(f"🔶 Convert CIF2-Only Mappings ({cif2_only_count})")
+        self.convert_all_fixable_btn.setText(f"⚡ Convert All Auto-Fixable ({total_fixable})")
+        
+        # Enable/disable buttons based on counts
+        self.convert_official_btn.setEnabled(official_count > 0)
+        self.convert_cif2_only_btn.setEnabled(cif2_only_count > 0)
+        self.convert_all_fixable_btn.setEnabled(total_fixable > 0)
+    
     def apply_selected_fixes(self):
         """Apply fixes for all selected issues"""
         if not self.validator:
@@ -583,7 +711,7 @@ class FieldRulesValidationDialog(QDialog):
             return
         
         # Show confirmation dialog
-        fixable_count = len([issue for issue in selected_issues if issue.auto_fixable])
+        fixable_count = len([issue for issue in selected_issues if issue.auto_fix_type != AutoFixType.NO])
         non_fixable_count = len(selected_issues) - fixable_count
         
         msg = f"Apply automatic fixes for {fixable_count} selected issues?"
@@ -598,7 +726,7 @@ class FieldRulesValidationDialog(QDialog):
         
         try:
             # Only fix the auto-fixable selected issues
-            fixable_issues = [issue for issue in selected_issues if issue.auto_fixable]
+            fixable_issues = [issue for issue in selected_issues if issue.auto_fix_type != AutoFixType.NO]
             
             if fixable_issues:
                 # Determine target format from radio buttons
@@ -635,7 +763,7 @@ class FieldRulesValidationDialog(QDialog):
             return
         
         selected_issues = self.issues_tree.get_selected_issues(self.validation_result)
-        fixable_issues = [issue for issue in selected_issues if issue.auto_fixable]
+        fixable_issues = [issue for issue in selected_issues if issue.auto_fix_type != AutoFixType.NO]
         
         if not fixable_issues:
             QMessageBox.information(self, "No Fixable Issues", 

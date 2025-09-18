@@ -24,12 +24,41 @@ from typing import Dict, List, Optional
 CIF2_ONLY_FIELD_MAPPINGS = {
     # Refinement fields (CIF2-only, no CIF1 alias in dictionary)
     '_refine.diffraction_theory': '_refine_diffraction_theory',
+    '_refine.diffraction_theory_details': '_refine_diffraction_theory_details',
+    '_refine_diff.potential_max': '_refine_diff_potential_max',
+    '_refine_diff.potential_min': '_refine_diff_potential_min',
+    '_refine_diff.potential_RMS': '_refine_diff_potential_RMS',
+    '_refine_ls.abs_structure_z-score': '_refine_ls_abs_structure_z-score',
+    '_refine_ls.sample_thickness': '_refine_ls_sample_thickness',
+    '_refine_ls.sample_shape_expression': '_refine_ls_sample_shape_expression',
+    '_refine_ls.sample_shape_details': '_refine_ls_sample_shape_details',
     
     # Measurement fields (CIF2-only, no CIF1 alias in dictionary)
+    '_diffrn_measurement.method_precession': '_diffrn_measurement_method_precession',
     '_diffrn_measurement.rotation_mode': '_diffrn_measurement_rotation_mode',
-    
+    '_diffrn_measurement.sample_tracking': '_diffrn_measurement_sample_tracking',
+    '_diffrn_measurement.sample_tracking_method': '_diffrn_measurement_sample_tracking_method',
     # Source fields (for electron diffraction applications)
+    '_diffrn_source.convergence_angle': '_diffrn_source_convergence_angle',
+    '_diffrn_source.device': '_diffrn_source',
     '_diffrn_source.ed_diffracting_area_selection': '_diffrn_source_ed_diffracting_area_selection',
+    # Radiation and illumination fields
+    '_diffrn_radiation.illumination_mode': '_diffrn_radiation_illumination_mode',
+    # Precession fields
+    '_diffrn.precession_semi_angle': '_diffrn_precession_semi_angle',
+    
+    # Computing fields
+    '_computing.sample_tracking': '_computing_sample_tracking',
+    
+    # Experimental fields
+    '_exptl_crystal.mosaicity': '_exptl_crystal_mosaicity',
+    '_exptl_crystal.mosaic_method': '_exptl_crystal_mosaic_method',
+    '_exptl_crystal.mosaic_block_size': '_exptl_crystal_mosaic_block_size',
+    
+    # Flux and dose fields
+    '_diffrn.flux_density': '_diffrn_flux_density',
+    '_diffrn.total_dose': '_diffrn_total_dose',
+    '_diffrn.total_exposure_time': '_diffrn_total_exposure_time',
 }
 
 # Reverse mappings (CIF1 -> CIF2)
