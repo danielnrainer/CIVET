@@ -15,6 +15,7 @@ import os
 import re
 import json
 import requests
+import sys
 import tempfile
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass
@@ -23,6 +24,27 @@ from datetime import datetime
 from urllib.parse import urlparse
 from .cif_core_parser import CIFCoreParser
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
+
+
+def get_resource_path(relative_path: str) -> str:
+    """
+    Get the absolute path to a resource file.
+    Works in both development and PyInstaller environments.
+    
+    Args:
+        relative_path: Relative path to the resource file
+        
+    Returns:
+        Absolute path to the resource file
+    """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # Development environment - use the project root
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    
+    return os.path.join(base_path, relative_path)
 
 
 # COMCIFS Dictionary URLs - Hard-coded stable URLs
@@ -158,6 +180,10 @@ class CIFDictionaryManager:
         Args:
             cif_core_path: Path to cif_core.dic file. If None, uses default location.
         """
+        if cif_core_path is None:
+            # Use resource path function to find bundled dictionary
+            cif_core_path = get_resource_path('dictionaries/cif_core.dic')
+            
         self.parser = CIFCoreParser(cif_core_path)
         self._loaded = False
         self._cif1_to_cif2: Optional[Dict[str, str]] = None
@@ -201,26 +227,32 @@ class CIFDictionaryManager:
         
     def _load_default_dictionaries(self):
         """Load essential dictionaries by default"""
-        from pathlib import Path
-        
-        project_root = Path(__file__).parent.parent.parent
-        dictionaries_dir = project_root / "dictionaries"
+        # Use resource path function to find bundled dictionaries
+        dictionaries_dir = get_resource_path("dictionaries")
         
         # Load restraints dictionary by default
-        restraints_dict = dictionaries_dir / "cif_rstr.dic"
-        if restraints_dict.exists():
+        restraints_dict = os.path.join(dictionaries_dir, "cif_rstr.dic")
+        if os.path.exists(restraints_dict):
             try:
-                self.add_dictionary(str(restraints_dict))
+                self.add_dictionary(restraints_dict)
             except Exception as e:
                 print(f"Warning: Could not load restraints dictionary: {e}")
         
         # Load SHELXL restraints dictionary by default  
-        shelxl_dict = dictionaries_dir / "cif_shelxl.dic"
-        if shelxl_dict.exists():
+        shelxl_dict = os.path.join(dictionaries_dir, "cif_shelxl.dic")
+        if os.path.exists(shelxl_dict):
             try:
-                self.add_dictionary(str(shelxl_dict))
+                self.add_dictionary(shelxl_dict)
             except Exception as e:
                 print(f"Warning: Could not load SHELXL dictionary: {e}")
+        
+        # Load twinning dictionary by default
+        twinning_dict = os.path.join(dictionaries_dir, "cif_twin.dic")
+        if os.path.exists(twinning_dict):
+            try:
+                self.add_dictionary(twinning_dict)
+            except Exception as e:
+                print(f"Warning: Could not load twinning dictionary: {e}")
         
     def _ensure_loaded(self):
         """Ensure all dictionaries are loaded and merged (lazy loading)"""

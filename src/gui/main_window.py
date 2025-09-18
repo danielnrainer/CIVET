@@ -8,10 +8,11 @@ from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont,
                         QFontMetrics, QTextCursor, QTextDocument)
 import os
 import json
+import sys
 from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
-from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion
+from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
@@ -44,11 +45,10 @@ class CIFEditor(QMainWindow):
         # Initialize field definition validator
         self.field_rules_validator = FieldRulesValidator(self.dict_manager, self.format_converter)
         
-        # Load field definition set from config directory
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        definitions_path = os.path.join(project_root, 'config', 'field_rules')
-        self.field_checker.load_field_set('3DED', os.path.join(definitions_path, '3ded.cif_rules'))
-        self.field_checker.load_field_set('HP', os.path.join(definitions_path, 'hp.cif_rules'))
+        # Load field definition set from field_rules directory
+        field_rules_dir = get_resource_path('field_rules')
+        self.field_checker.load_field_set('3DED', os.path.join(field_rules_dir, '3ded.cif_rules'))
+        self.field_checker.load_field_set('HP', os.path.join(field_rules_dir, 'hp.cif_rules'))
         
         # Field definition selection variables
         self.custom_field_rules_file = None
@@ -370,8 +370,7 @@ class CIFEditor(QMainWindow):
             self.setWindowTitle(f"EDCIF-check - {filepath}")
             
             # Prompt for dictionary suggestions after opening CIF file
-            if not initial:  # Don't prompt during initial app startup
-                self.prompt_for_dictionary_suggestions(content)
+            self.prompt_for_dictionary_suggestions(content)
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open file:\n{e}")

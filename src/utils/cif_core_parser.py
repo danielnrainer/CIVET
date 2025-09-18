@@ -8,8 +8,30 @@ Handles both single-line and loop-based alias definitions.
 
 import re
 import os
+import sys
 from typing import Dict, List, Set, Optional, Tuple, NamedTuple
 from pathlib import Path
+
+
+def get_resource_path(relative_path: str) -> str:
+    """
+    Get the absolute path to a resource file.
+    Works in both development and PyInstaller environments.
+    
+    Args:
+        relative_path: Relative path to the resource file
+        
+    Returns:
+        Absolute path to the resource file
+    """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # Development environment - use the project root
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    
+    return os.path.join(base_path, relative_path)
 
 
 class FieldAlias(NamedTuple):
@@ -28,9 +50,8 @@ class CIFCoreParser:
     
     def __init__(self, cif_core_path: Optional[str] = None):
         if cif_core_path is None:
-            # Default to dictionaries/cif_core.dic
-            project_root = Path(__file__).parent.parent.parent
-            cif_core_path = project_root / "dictionaries" / "cif_core.dic"
+            # Use resource path function to find bundled dictionary
+            cif_core_path = get_resource_path("dictionaries/cif_core.dic")
         
         self.cif_core_path = Path(cif_core_path)
         self._cif1_to_cif2: Optional[Dict[str, str]] = None
