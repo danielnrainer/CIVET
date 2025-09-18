@@ -1,0 +1,22 @@
+# Custom Field Definitions for cleanup
+# This file demonstrates DELETE and EDIT operations to clean up problematic CIF fields
+# Without a keyword, a standard check is performed
+# Examples below:
+# =============================================================================
+# DELETE: _exptl_crystal    # Sometimes used incorrectly
+# EDIT: _diffrn_ambient_environment   vacuum    # Correctly populate this field
+# _chemical_oxdiff_usercomment ?  # might want to edit this field
+
+
+# =============================================================================
+# DELETE Operations - Remove unwanted or misleading fields entirely
+# =============================================================================
+
+
+
+# =============================================================================
+# EDIT Operations - Replace values with corrected ones
+# =============================================================================
+
+
+

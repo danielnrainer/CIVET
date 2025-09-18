@@ -11,13 +11,15 @@ a = Analysis(
         ('src/gui/editor_settings.json', 'gui'),              # Include editor settings file
 
         # Definition files for checks
-        ('config/field_definitions/field_definitions.cif_ed', 'field_definitions'), # Include 3D ED field definitions
-        ('config/field_definitions/field_definitions.cif_hp', 'field_definitions'), # Include HP field definitions
+        ('config/field_rules/3ded.cif_rules', 'field_rules'), # Include 3D ED field rules
+        ('config/field_rules/hp.cif_rules', 'field_rules'), # Include HP field rules
+        ('config/field_rules/cleanups.cif_rules', 'field_rules'), # Include cleanup operations
         
         # CIF Dictionary files - Essential for field validation and conversion
         ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
         ('dictionaries/cif_rstr.dic', 'dictionaries'),        # SHELXL restraints dictionary
         ('dictionaries/cif_shelxl.dic', 'dictionaries'),      # SHELXL dictionary
+        ('dictionaries/cif_twin.dic', 'dictionaries'),        # Twinning dictionary
         
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file
@@ -41,6 +43,8 @@ a = Analysis(
         'gui.dialogs.config_dialog',
         'gui.dialogs.field_conflict_dialog',
         'gui.dialogs.dictionary_info_dialog',
+        'gui.dialogs.dictionary_suggestion_dialog',  # New dictionary suggestion dialog
+        'gui.dialogs.field_rules_validation_dialog', # New field validation dialog
         
         # Utility modules - Core functionality
         'utils',
@@ -51,6 +55,8 @@ a = Analysis(
         'utils.cif_core_parser',
         'utils.cif_deprecation_manager',
         'utils.cif2_only_extensions',
+        'utils.dictionary_suggestion_manager',  # New dictionary suggestion system
+        'utils.field_rules_validator',  # New field rules validation system
         
         # Third-party libraries
         'requests',

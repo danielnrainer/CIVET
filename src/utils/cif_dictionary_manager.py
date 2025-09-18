@@ -22,6 +22,7 @@ from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
 from .cif_core_parser import CIFCoreParser
+from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
 
 
 # COMCIFS Dictionary URLs - Hard-coded stable URLs
@@ -166,6 +167,9 @@ class CIFDictionaryManager:
         self._additional_parsers: List[CIFCoreParser] = []
         self._dictionary_infos: List[DictionaryInfo] = []
         
+        # Dictionary suggestion system
+        self._suggestion_manager = DictionarySuggestionManager()
+        
         # Initialize primary dictionary info
         primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core.dic')
         source_type = DictionarySource.BUNDLED if 'dictionaries/cif_core.dic' in str(primary_path) else DictionarySource.FILE
@@ -221,6 +225,10 @@ class CIFDictionaryManager:
     def _ensure_loaded(self):
         """Ensure all dictionaries are loaded and merged (lazy loading)"""
         if not self._loaded:
+            # Initialize caches
+            self._field_cache = {}
+            self._alias_map = {}
+            
             # Start with the primary dictionary
             self._cif1_to_cif2, self._cif2_to_cif1 = self.parser.parse_dictionary()
             
@@ -297,7 +305,7 @@ class CIFDictionaryManager:
         cif2_fields = 0
         
         # Find all field names in the content (including hyphens and special chars)
-        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)', re.MULTILINE)
+        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
         
         for match in field_pattern.finditer(content):
             field_name = match.group(2)
@@ -364,8 +372,71 @@ class CIFDictionaryManager:
             True if field is in the dictionary
         """
         self._ensure_loaded()
-        return (field_name in self._cif1_to_cif2 or 
-                field_name in self._cif2_to_cif1)
+        
+        # Check field cache first (main dictionary)
+        field_name_lower = field_name.lower().strip()
+        if hasattr(self, '_field_cache') and field_name_lower in self._field_cache:
+            return True
+            
+        # Check alias mappings
+        if hasattr(self, '_alias_map') and field_name_lower in self._alias_map:
+            return True
+            
+        # Check CIF format conversion mappings
+        if (field_name in self._cif1_to_cif2 or 
+            field_name in self._cif2_to_cif1):
+            return True
+        
+        # For CIF2 format fields (with dots), also check if the CIF1 equivalent exists
+        if '.' in field_name:
+            cif1_equivalent = field_name.replace('.', '_')
+            if (cif1_equivalent in self._cif1_to_cif2 or 
+                cif1_equivalent in self._cif2_to_cif1):
+                return True
+        
+        # For CIF1 format fields (with underscores), check if CIF2 equivalent exists
+        elif '_' in field_name[1:]:  # Skip first underscore
+            parts = field_name[1:].split('_')
+            if len(parts) >= 2:
+                cif2_equivalent = f"_{parts[0]}.{'_'.join(parts[1:])}"
+                if (cif2_equivalent in self._cif1_to_cif2 or 
+                    cif2_equivalent in self._cif2_to_cif1):
+                    return True
+        
+        # As a fallback, directly search the dictionary file
+        # This handles cases where fields exist but aren't in the parsed mappings
+        return self._search_field_in_dictionary_file(field_name)
+    
+    def _search_field_in_dictionary_file(self, field_name: str) -> bool:
+        """
+        Search for a field name directly in the CIF core dictionary file.
+        This is a fallback when the field isn't in the parsed mappings.
+        """
+        cif_core_path = getattr(self.parser, 'cif_core_path', None)
+        if not cif_core_path or not os.path.exists(cif_core_path):
+            return False
+        
+        try:
+            with open(cif_core_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Search for the field definition pattern
+            import re
+            # Look for _definition.id lines containing our field
+            pattern = rf"_definition\.id\s+['\"]?{re.escape(field_name)}['\"]?"
+            if re.search(pattern, content, re.IGNORECASE):
+                return True
+                
+            # Also check for save frames with the field name
+            pattern = rf"save_{re.escape(field_name.replace('.', r'\.')).replace('_', r'[_\.]')}"
+            if re.search(pattern, content, re.IGNORECASE):
+                return True
+                
+            return False
+            
+        except Exception as e:
+            # If file search fails, return False
+            return False
                 
     def get_canonical_name(self, field_name: str) -> str:
         """
@@ -526,11 +597,12 @@ class CIFDictionaryManager:
         Returns:
             FieldInfo object or None if not found
         """
-        if not os.path.exists(self.cif_core_path):
+        cif_core_path = getattr(self.parser, 'cif_core_path', None)
+        if not cif_core_path or not os.path.exists(cif_core_path):
             return None
         
         try:
-            with open(self.cif_core_path, 'r', encoding='utf-8') as f:
+            with open(cif_core_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
             # Look for the field definition in the dictionary
@@ -615,7 +687,7 @@ class CIFDictionaryManager:
         
         if version == CIFVersion.MIXED:
             # Find mixed usage patterns (including hyphens and special chars)
-            field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)', re.MULTILINE)
+            field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
             
             cif1_fields = []
             cif2_fields = []
@@ -955,32 +1027,107 @@ class CIFDictionaryManager:
             # Return at least basic info about the primary dictionary
             return [self._dictionary_infos[0]] if self._dictionary_infos else []
     
-    def detect_field_aliases_in_cif(self, cif_content: str) -> Dict[str, List[str]]:
+    def suggest_dictionaries_for_cif(self, cif_content: str) -> List[DictionarySuggestion]:
         """
-        Detect fields in CIF content that are aliases of each other (actual duplicates within the same file).
-        
-        Only flags cases where the SAME CIF file contains multiple aliases of the same field,
-        e.g., both _diffrn_source_type and _diffrn_source_make in the same file.
+        Analyze CIF content and suggest relevant COMCIFS dictionaries to load.
         
         Args:
             cif_content: CIF file content as string
             
         Returns:
-            Dictionary mapping canonical field names to lists of aliases found in the CIF
-            (only returns entries where multiple aliases are actually present)
+            List of DictionarySuggestion objects for specialized dictionaries
+        """
+        return self._suggestion_manager.analyze_cif_content(cif_content)
+    
+    def get_suggestion_summary(self, cif_content: str) -> str:
+        """
+        Get a human-readable summary of dictionary suggestions for CIF content.
+        
+        Args:
+            cif_content: CIF file content as string
+            
+        Returns:
+            Formatted string summary of suggested dictionaries
+        """
+        suggestions = self.suggest_dictionaries_for_cif(cif_content)
+        return self._suggestion_manager.get_suggestion_summary(suggestions)
+    
+    def detect_cif_format(self, cif_content: str) -> str:
+        """
+        Detect whether CIF content is in CIF1 or CIF2 format.
+        
+        Args:
+            cif_content: CIF file content as string
+            
+        Returns:
+            'CIF1' or 'CIF2' based on field naming patterns
+        """
+        return self._suggestion_manager.detect_cif_format(cif_content)
+    
+    def detect_field_aliases_in_cif(self, cif_content: str) -> Dict[str, List[str]]:
+        """
+        Detect fields in CIF content that are aliases of each other OR direct duplicates.
+        
+        Flags cases where:
+        1. The SAME CIF file contains multiple aliases of the same field (e.g., _cell_length_a and _cell.length_a)
+        2. The same exact field appears multiple times (e.g., _diffrn.ambient_temperature appears twice)
+        
+        Args:
+            cif_content: CIF file content as string
+            
+        Returns:
+            Dictionary mapping canonical field names to lists of aliases/duplicates found in the CIF
+            (only returns entries where multiple instances are actually present)
         """
         self._ensure_loaded()
         
-        # Extract all field names from CIF content
-        field_pattern = r'_[a-zA-Z][a-zA-Z0-9_\.\[\]()]*'
-        found_fields = set(re.findall(field_pattern, cif_content))
+        # Extract all field names from CIF content (including duplicates) 
+        # Exclude field references within multi-line text blocks
+        all_found_fields = self._extract_fields_excluding_text_blocks(cif_content)
+        
+        # First check for direct duplicates (same field appearing multiple times)
+        field_counts = {}
+        for field in all_found_fields:
+            field_counts[field] = field_counts.get(field, 0) + 1
+        
+        # Find unique fields for alias detection
+        unique_fields = set(all_found_fields)
         
         # Group fields by their canonical (CIF2) form
         canonical_to_aliases = {}
         
-        for field in found_fields:
+        # Handle direct duplicates first
+        for field, count in field_counts.items():
+            if count > 1:
+                # Skip deprecated fields - they should not participate in conflict detection
+                if self.is_field_deprecated(field):
+                    continue
+                    
+                # Determine canonical form for this field
+                canonical = None
+                
+                # Check if field is in CIF1 format and has a CIF2 equivalent
+                if field in self._cif1_to_cif2:
+                    canonical = self._cif1_to_cif2[field]
+                # Check if field is already in CIF2 format
+                elif field in self._cif2_to_cif1:
+                    canonical = field
+                # For unknown fields, use the field itself as canonical
+                else:
+                    canonical = field
+                
+                if canonical not in canonical_to_aliases:
+                    canonical_to_aliases[canonical] = set()
+                canonical_to_aliases[canonical].add(field)
+        
+        # Then handle alias conflicts
+        for field in unique_fields:
             # Skip deprecated fields - they should not participate in conflict detection
             if self.is_field_deprecated(field):
+                continue
+                
+            # Skip fields already handled as direct duplicates
+            if field_counts.get(field, 0) > 1:
                 continue
                 
             # Determine canonical form for this field
@@ -999,12 +1146,17 @@ class CIFDictionaryManager:
                     canonical_to_aliases[canonical] = set()
                 canonical_to_aliases[canonical].add(field)
         
-        # Only return canonical fields that have multiple actual aliases present in the CIF
+        # Only return canonical fields that have multiple actual aliases/duplicates present in the CIF
         actual_conflicts = {}
         for canonical, alias_set in canonical_to_aliases.items():
             if len(alias_set) > 1:
-                # This canonical field has multiple different aliases present - this is a real conflict
+                # This canonical field has multiple different aliases/duplicates present - this is a real conflict
                 actual_conflicts[canonical] = list(alias_set)
+            elif len(alias_set) == 1:
+                # Check if this single field appears multiple times
+                single_field = list(alias_set)[0]
+                if field_counts.get(single_field, 0) > 1:
+                    actual_conflicts[canonical] = [single_field] * field_counts[single_field]
         
         return actual_conflicts
     
@@ -1024,8 +1176,8 @@ class CIFDictionaryManager:
         self._ensure_loaded()
         
         # Extract all field names from CIF content
-        field_pattern = r'_[a-zA-Z][a-zA-Z0-9_\.\[\]()]*'
-        found_fields = set(re.findall(field_pattern, cif_content))
+        # Exclude field references within multi-line text blocks
+        found_fields = set(self._extract_fields_excluding_text_blocks(cif_content))
         
         cif1_count = 0
         cif2_count = 0
@@ -1045,7 +1197,7 @@ class CIFDictionaryManager:
     
     def resolve_field_aliases(self, cif_content: str, prefer_cif2: bool = True) -> Tuple[str, List[str]]:
         """
-        Resolve field aliases in CIF content by keeping only one form of each field.
+        Resolve field aliases and direct duplicates in CIF content by keeping only one form of each field.
         
         Args:
             cif_content: CIF file content as string
@@ -1065,6 +1217,19 @@ class CIFDictionaryManager:
             if len(alias_list) <= 1:
                 continue
                 
+            # Check if this is a direct duplicate (same field name multiple times)
+            unique_fields = set(alias_list)
+            if len(unique_fields) == 1:
+                # Direct duplicate - same field appearing multiple times
+                duplicate_field = list(unique_fields)[0]
+                duplicate_count = len(alias_list)
+                
+                # Remove all but the first occurrence of the duplicate field
+                cleaned_content = self._remove_duplicate_field_occurrences(cleaned_content, duplicate_field, keep_first=True)
+                changes.append(f"Removed {duplicate_count-1} duplicate occurrence(s) of '{duplicate_field}'")
+                continue
+                
+            # Handle alias conflicts (different field names that mean the same thing)
             # Decide which field to keep
             if prefer_cif2:
                 # Try to keep the CIF2 form (canonical field) if it's present in the file
@@ -1076,9 +1241,9 @@ class CIFDictionaryManager:
                     first_alias = alias_list[0]
                     preferred_field = canonical_field
                     fields_to_remove = alias_list[:]
-                    # Replace the first occurrence instead of removing it
+                    # Replace the first occurrence with text-block awareness instead of removing it
                     old_content = cleaned_content
-                    cleaned_content = cleaned_content.replace(first_alias, preferred_field, 1)
+                    cleaned_content = self._replace_field_text_block_aware(cleaned_content, first_alias, preferred_field, 1)
                     if old_content != cleaned_content:
                         changes.append(f"Converted '{first_alias}' to '{preferred_field}'")
                     # Remove the rest
@@ -1107,6 +1272,250 @@ class CIFDictionaryManager:
                     changes.append(f"Removed duplicate field '{field_to_remove}' (alias of '{preferred_field}')")
         
         return cleaned_content, changes
+    
+    def _extract_fields_excluding_text_blocks(self, cif_content: str) -> List[str]:
+        """
+        Extract CIF field names from content while excluding field references
+        within semicolon-delimited multi-line text blocks.
+        
+        Args:
+            cif_content: CIF file content as string
+            
+        Returns:
+            List of field names that are actual CIF fields, not text references
+        """
+        lines = cif_content.split('\n')
+        field_matches = []
+        in_text_block = False
+        
+        field_pattern = re.compile(r'^\s*(_[a-zA-Z][a-zA-Z0-9_\.\[\]()/]*)')
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Check for start/end of multi-line text block
+            if stripped == ';':
+                in_text_block = not in_text_block
+                continue
+            
+            # Skip field detection inside text blocks
+            if in_text_block:
+                continue
+            
+            # Look for fields in non-text-block lines
+            match = field_pattern.match(line)
+            if match:
+                field_matches.append(match.group(1))
+        
+        return field_matches
+    
+    def _replace_field_text_block_aware(self, cif_content: str, old_field: str, new_field: str, max_replacements: int = -1) -> str:
+        """
+        Replace field names in CIF content while avoiding replacements inside 
+        semicolon-delimited multi-line text blocks.
+        
+        CRITICAL: This method was created to fix a major bug where simple string.replace()
+        was inserting field names into text blocks during CIF format conversion.
+        Always use this method instead of string.replace() for field name replacements.
+        
+        Args:
+            cif_content: CIF file content as string
+            old_field: Field name to replace
+            new_field: New field name
+            max_replacements: Maximum number of replacements to make (-1 for all)
+            
+        Returns:
+            CIF content with field names replaced (outside text blocks only)
+            
+        Example problem this fixes:
+            _publ_section.references
+            ;
+            Crystal structure at _diffrn_ambient_temperature
+            ;
+            # Without this method, the field name in the text would be replaced!
+        """
+        lines = cif_content.split('\n')
+        result_lines = []
+        in_text_block = False
+        replacements_made = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Check for start/end of multi-line text block
+            if stripped == ';':
+                in_text_block = not in_text_block
+                result_lines.append(line)
+                continue
+            
+            # Skip replacement inside text blocks
+            if in_text_block:
+                result_lines.append(line)
+                continue
+            
+            # Replace field names outside text blocks
+            if max_replacements == -1 or replacements_made < max_replacements:
+                if old_field in line:
+                    # Check if it's actually a field definition (starts with the field name)
+                    if line.strip().startswith(old_field + ' ') or line.strip() == old_field:
+                        line = line.replace(old_field, new_field, 1)
+                        replacements_made += 1
+                    elif line.strip().startswith(old_field):
+                        # Handle cases where field name is at start of line
+                        line = line.replace(old_field, new_field, 1)
+                        replacements_made += 1
+            
+            result_lines.append(line)
+        
+        return '\n'.join(result_lines)
+    
+    def _convert_fields_within_text_blocks(self, cif_content: str, target_format: str) -> Tuple[str, List[str]]:
+        """
+        Convert field references within semicolon-delimited text blocks to target format.
+        This handles field name conversions within text without treating them as duplicates.
+        
+        Args:
+            cif_content: CIF file content
+            target_format: 'CIF1' or 'CIF2'
+            
+        Returns:
+            Tuple of (updated_content, list_of_changes)
+        """
+        lines = cif_content.split('\n')
+        updated_lines = []
+        changes = []
+        in_text_block = False
+        
+        # Pattern to find field references in text
+        field_reference_pattern = re.compile(r'(_[a-zA-Z][a-zA-Z0-9_\.\[\]()/]*)')
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Track text block boundaries
+            if stripped == ';':
+                in_text_block = not in_text_block
+                updated_lines.append(line)
+                continue
+            
+            # Process field references within text blocks
+            if in_text_block:
+                original_line = line
+                updated_line = line
+                
+                # Find all field references in this line
+                for match in field_reference_pattern.finditer(line):
+                    field_ref = match.group(1)
+                    converted_field = self._convert_single_field(field_ref, target_format)
+                    
+                    if converted_field != field_ref:
+                        updated_line = updated_line.replace(field_ref, converted_field, 1)
+                        changes.append(f"Text block reference: '{field_ref}' -> '{converted_field}'")
+                
+                updated_lines.append(updated_line)
+            else:
+                updated_lines.append(line)
+        
+        return '\n'.join(updated_lines), changes
+    
+    def _convert_single_field(self, field_name: str, target_format: str) -> str:
+        """
+        Convert a single field name to target format.
+        
+        Args:
+            field_name: Field name to convert
+            target_format: 'CIF1' or 'CIF2'
+            
+        Returns:
+            Converted field name
+        """
+        self._ensure_loaded()
+        
+        if target_format.upper() == 'CIF2':
+            # Convert CIF1 to CIF2
+            if field_name in self._cif1_to_cif2:
+                return self._cif1_to_cif2[field_name]
+        else:
+            # Convert CIF2 to CIF1  
+            if field_name in self._cif2_to_cif1:
+                return self._cif2_to_cif1[field_name]
+        
+        return field_name  # No conversion needed
+    
+    def _remove_duplicate_field_occurrences(self, cif_content: str, field_name: str, keep_first: bool = True) -> str:
+        """
+        Remove duplicate occurrences of the same field name from CIF content.
+        
+        Args:
+            cif_content: CIF file content
+            field_name: Field name to deduplicate
+            keep_first: If True, keep first occurrence; if False, keep last
+            
+        Returns:
+            CIF content with duplicates removed
+        """
+        lines = cif_content.split('\n')
+        result_lines = []
+        in_loop = False
+        loop_fields = []
+        field_positions = []
+        
+        # First pass: identify all occurrences of the field
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            
+            if line_stripped.startswith('loop_'):
+                in_loop = True
+                loop_fields = []
+                result_lines.append(line)
+                continue
+            
+            if in_loop:
+                if line_stripped.startswith('_') and not line_stripped.startswith('#'):
+                    loop_fields.append(line_stripped)
+                    if line_stripped == field_name:
+                        field_positions.append((i, 'loop', len(loop_fields) - 1))
+                    result_lines.append(line)
+                elif line_stripped == '' or line_stripped.startswith('#'):
+                    result_lines.append(line)
+                elif loop_fields:  # Data line in loop
+                    result_lines.append(line)
+                else:
+                    in_loop = False
+                    result_lines.append(line)
+            else:
+                if line_stripped.startswith(field_name + ' ') or line_stripped == field_name:
+                    field_positions.append((i, 'single', -1))
+                result_lines.append(line)
+        
+        # If only one or no occurrences, return unchanged
+        if len(field_positions) <= 1:
+            return cif_content
+        
+        # Determine which occurrences to remove
+        if keep_first:
+            positions_to_remove = field_positions[1:]  # Remove all but first
+        else:
+            positions_to_remove = field_positions[:-1]  # Remove all but last
+        
+        # Second pass: remove the unwanted occurrences
+        for line_idx, occurrence_type, field_idx in reversed(positions_to_remove):
+            if occurrence_type == 'single':
+                # Remove single field line (and potentially its value on next line)
+                if line_idx < len(result_lines):
+                    del result_lines[line_idx]
+                    # Check if next line is a value line (not starting with _ or loop_ or #)
+                    if (line_idx < len(result_lines) and 
+                        not result_lines[line_idx].strip().startswith('_') and
+                        not result_lines[line_idx].strip().startswith('loop_') and
+                        not result_lines[line_idx].strip().startswith('#') and
+                        result_lines[line_idx].strip() != ''):
+                        del result_lines[line_idx]
+            # Note: Loop field removal is more complex and would require restructuring the entire loop
+            # For now, we'll focus on single field occurrences
+        
+        return '\n'.join(result_lines)
+    
     
     def _remove_field_from_cif(self, cif_content: str, field_to_remove: str) -> str:
         """
@@ -1241,9 +1650,8 @@ class CIFDictionaryManager:
         all_changes = []
         converted_content = cif_content
         
-        # Extract all field names from CIF content
-        field_pattern = r'_[a-zA-Z][a-zA-Z0-9_\.\[\]()]*'
-        found_fields = list(set(re.findall(field_pattern, cif_content)))
+        # 1. Convert actual CIF fields (excluding text blocks)
+        found_fields = list(set(self._extract_fields_excluding_text_blocks(cif_content)))
         
         if target_format.upper() == 'CIF2':
             # Convert all CIF1 fields to CIF2
@@ -1251,7 +1659,7 @@ class CIFDictionaryManager:
                 if field in self._cif1_to_cif2:
                     cif2_field = self._cif1_to_cif2[field]
                     old_content = converted_content
-                    converted_content = converted_content.replace(field, cif2_field)
+                    converted_content = self._replace_field_text_block_aware(converted_content, field, cif2_field)
                     if old_content != converted_content:
                         all_changes.append(f"Converted '{field}' to '{cif2_field}'")
         
@@ -1263,9 +1671,14 @@ class CIFDictionaryManager:
                     if cif1_alternatives:
                         cif1_field = cif1_alternatives[0]  # Use first alternative
                         old_content = converted_content
-                        converted_content = converted_content.replace(field, cif1_field)
+                        converted_content = self._replace_field_text_block_aware(converted_content, field, cif1_field)
                         if old_content != converted_content:
                             all_changes.append(f"Converted '{field}' to '{cif1_field}'")
+        
+        # 2. Convert field references within text blocks  
+        text_block_content, text_block_changes = self._convert_fields_within_text_blocks(converted_content, target_format)
+        converted_content = text_block_content
+        all_changes.extend(text_block_changes)
         
         return converted_content, all_changes
     
@@ -1434,6 +1847,7 @@ class CIFDictionaryManager:
     def _add_field_to_cif(self, cif_content: str, field_name: str, field_value: str) -> str:
         """
         Add a field and its value to CIF content.
+        Ensures fields are not inserted into multi-line text blocks.
         
         Args:
             cif_content: CIF file content
@@ -1446,18 +1860,39 @@ class CIFDictionaryManager:
         lines = cif_content.split('\n')
         
         # Find a good place to insert the field
-        # Look for the data_ block and add after it
+        # Look for the data_ block and add after it, avoiding text blocks
         insert_index = len(lines)
+        in_text_block = False
+        found_data_block = False
         
         for i, line in enumerate(lines):
+            stripped = line.strip()
+            
+            # Track text block boundaries
+            if stripped == ';':
+                in_text_block = not in_text_block
+                continue
+                
+            # Skip insertion points inside text blocks
+            if in_text_block:
+                continue
+                
             if line.strip().startswith('data_'):
-                # Look for the end of any existing single fields before loops
-                for j in range(i + 1, len(lines)):
-                    line_j = lines[j].strip()
-                    if line_j.startswith('loop_') or not line_j or line_j.startswith('#'):
-                        insert_index = j
+                found_data_block = True
+                continue
+                
+            if found_data_block:
+                # Look for the end of any existing single fields before loops/blocks
+                if (stripped.startswith('loop_') or 
+                    stripped.startswith('_') or
+                    not stripped or 
+                    stripped.startswith('#')):
+                    # This is a safe insertion point (not in text block)
+                    if stripped.startswith('loop_') or not stripped or stripped.startswith('#'):
+                        insert_index = i
                         break
-                break
+                    # If it's a field line, continue looking
+                    continue
         
         # Format the field value
         if ' ' in field_value or ',' in field_value or field_value.startswith("'"):

@@ -1,10 +1,53 @@
 # CIF Checker
 
-A comprehensive CIF (Crystallographic Information File) editor and validator with advanced format conversion capabilities and multi-dictionary support.
+A comprehensive CIF (Crystallographic Information File) editor and validator with advanced format conversion capabilities, multi-dictionary support, and intelligent dictionary suggestions.
 
 ## Overview
 
-CIF Checker is designed primarily for 3D electron diffraction (3DED) and high-pressure crystallography workflows, providing robust validation, format conversion, and field management for crystallographic data files. The application supports both CIF1 and CIF2 formats with intelligent field mapping and deprecation handling.
+CIF Checker is designed primarily for 3D electron diffraction (3DED) and high-pressure crystallography workflows, providing robust validation, format conversion, and field management for crystallographic data files. The application supports both CIF1 and CIF2 formats with intelligent field mapping, deprecation handling, and automatic dictionary recommendations based on content analysis.
+
+## 🚀 Latest Features (September 2025)
+
+### Smart Dictionary Suggestions System
+**NEW**: Intelligent analysis of CIF content to suggest relevant specialized dictionaries:
+- **Automatic Detection**: Recognizes modulated structures, twinning, powder diffraction, magnetic structures, and more
+- **Smart Prompting**: Automatically prompts users when opening CIF files that could benefit from additional dictionaries
+- **One-Click Downloads**: Direct download and integration of COMCIFS dictionaries from official repositories
+- **Confidence Scoring**: Shows confidence levels and specific fields that triggered suggestions
+- **Format Aware**: Works with both CIF1 and CIF2 field naming conventions
+
+### Enhanced Dictionary Management
+- **Multi-Repository Support**: Integrates with official COMCIFS GitHub repositories
+- **Progress Tracking**: Visual progress bars for dictionary downloads
+- **Status Updates**: Real-time feedback during dictionary loading
+- **Smart Caching**: Efficient handling of multiple specialized dictionaries
+
+## 🚨 Recent Critical Updates (September 2025)
+
+### Text-Block Insertion Bug Fix
+**FIXED**: Critical bug where field conversions were inserting field names into semicolon-delimited text blocks (e.g., `_publ_section.references`). This affected both:
+- `convert_cif_format()` method (CIF1↔CIF2 conversion)
+- `resolve_field_aliases()` method (duplicate field resolution)
+
+**Solution**: Implemented text-block-aware field replacement using `_replace_field_text_block_aware()` method that preserves all content within `; ... ;` text blocks.
+
+### Enhanced Field Detection
+- Improved field pattern recognition to avoid false positives from comments
+- Fixed underscores in comments being detected as field names
+- Enhanced validation for legitimate CIF field patterns
+
+### Dictionary Management Improvements
+- Enhanced field lookup with file-based validation
+- Better handling of CIF1/CIF2 field mappings
+- Improved deprecation and replacement field detection
+- **NEW**: Smart dictionary suggestions based on CIF content analysis
+
+### Automatic Dictionary Suggestions  
+- **Content Analysis**: Analyze CIF content and automatically suggest relevant specialized dictionaries
+- **Smart Detection**: Recognizes modulated structures, twinning, powder diffraction, magnetic structures, and more
+- **Format Aware**: Handles both CIF1 and CIF2 field naming conventions
+- **User Friendly**: Shows confidence levels and trigger fields that caused suggestions
+- **Seamless Integration**: One-click download and integration with existing workflow
 
 ## Key Features
 
@@ -70,21 +113,24 @@ The spec file is pre-configured to include all necessary dependencies, dictionar
 ## Supported File Types
 
 - **CIF Files**: `.cif`, `.fcf` (standard crystallographic formats)
-- **Field Definitions**: `.cif_ed`, `.cif_hp`, `.cif_defs` (field validation sets)
+- **Field Rules**: `.cif_rules` (standardized field validation and operation files)
 - **Dictionary Files**: `.dic` (CIF dictionary files)
 
-## Field Definition Sets
+## Field Rules Sets
 
 ### Built-in Sets
-- **3DED (3D Electron Diffraction)**: Optimized for electron diffraction studies
-- **HP (High Pressure)**: Specialized for high-pressure crystallography
+- **3DED (3D Electron Diffraction)**: Optimized for electron diffraction studies (`3ded.cif_rules`)
+- **HP (High Pressure)**: Specialized for high-pressure crystallography (`hp.cif_rules`)
 - **All Fields**: Comprehensive validation using all available dictionary fields
 
+### Consistent Naming Convention
+All field rule files use the standardized `.cif_rules` extension for clear identification and consistency. This makes it easy to distinguish field validation files from other CIF-related files.
+
 ### Custom Sets
-Create custom field definition files for specialized workflows:
+Create custom field rules files for specialized workflows using the `.cif_rules` extension:
 
 ```
-# Custom field definitions example
+# Custom field rules example
 _chemical_formula_sum ? # Chemical formula of the compound
 _space_group_name_H-M_alt 'P 1' # Space group in Hermann-Mauguin notation
 _cell_length_a ? # Unit cell parameter a
@@ -93,13 +139,34 @@ _diffrn_source_type 'electron beam' # Type of radiation source
 
 ## Advanced Features
 
-### Dictionary Download
-The application can automatically download CIF dictionaries from online repositories:
-- CIF Core Dictionary (COMCIFS)
-- Powder Diffraction Dictionary
-- Magnetic Structure Dictionary
-- Image CIF Dictionary
-- And more...
+### Dictionary Download & Suggestions
+The application features an intelligent dictionary suggestion system that:
+- **Analyzes CIF Content**: Automatically detects specialized field patterns
+- **Suggests Relevant Dictionaries**: Recommends dictionaries based on detected content types
+- **Downloads Automatically**: Can download CIF dictionaries from official COMCIFS repositories:
+  - CIF Core Dictionary (COMCIFS)
+  - Modulated Structures Dictionary (cif_ms.dic)
+  - Twinning Dictionary (cif_twin.dic)
+  - Powder Diffraction Dictionary (cif_pow.dic)
+  - Magnetic Structure Dictionary (cif_mag.dic)
+  - Image CIF Dictionary (cif_img.dic)
+  - Electron Diffraction Dictionary (cif_ed.dic)
+  - And more...
+
+#### Dictionary Suggestion Examples
+```
+# Modulated Structure Detection
+_cell_modulation_dimension 1        → Suggests: Modulated Structures Dictionary
+_space_group_ssg_name 'P1(α0γ)'    → Confidence: 100%
+
+# Twinning Detection  
+_twin_individual_id 1               → Suggests: Twinning Dictionary
+_twin_individual_mass_fraction 0.6  → Confidence: 100%
+
+# Powder Diffraction Detection
+_pd_meas_2theta_range_min 5.0       → Suggests: Powder Dictionary
+_pd_proc_ls_prof_R_factor 0.045     → Confidence: 100%
+```
 
 ### Format Conversion Examples
 ```
@@ -114,6 +181,81 @@ _cell_measurement_temperature 293       →    _diffrn.ambient_temperature 293
 
 ### Field Conflict Resolution
 The application automatically detects when multiple aliases of the same field are present and helps resolve conflicts by suggesting the preferred modern form.
+
+## Technical Architecture & Recent Fixes
+
+### Core Components
+- **`CIFDictionaryManager`**: Central dictionary management and field conversion logic with smart suggestion capabilities
+- **`DictionarySuggestionManager`**: Intelligent content analysis and dictionary recommendation engine
+- **`FieldDefinitionValidator`**: Validates field definition files and extracts field patterns
+- **`CIFFieldChecker`**: Main validation engine for field completeness checking
+- **`FieldRulesValidator`**: Advanced field rules validation system
+- **`DictionarySuggestionDialog`**: User interface for dictionary recommendations with download functionality
+
+### Critical Bug Fixes (September 2025)
+
+#### 1. Text-Block Insertion Bug
+**Problem**: During CIF1→CIF2 conversion, field names were being replaced everywhere in the file, including inside semicolon-delimited text blocks like `_publ_section.references`. For example:
+```
+# BEFORE (broken):
+_publ_section.references
+;
+Crystal structure at _diffrn_ambient_temperature 
+;
+# After conversion: _diffrn.ambient_temperature would be inserted into the text!
+```
+
+**Root Cause**: Both `convert_cif_format()` and `resolve_field_aliases()` methods used simple `string.replace()` operations that didn't respect text block boundaries.
+
+**Solution**: Implemented `_replace_field_text_block_aware()` method that:
+- Detects semicolon-delimited text blocks (`; ... ;`)
+- Only replaces field names outside protected text regions
+- Preserves all content inside text blocks exactly as-is
+
+#### 2. False Field Detection in Comments
+**Problem**: Field extraction regex was matching underscores in comments and non-field contexts.
+
+**Solution**: Enhanced regex patterns to only match legitimate CIF field names starting with underscore followed by alphanumeric characters.
+
+#### 3. Enhanced Dictionary Field Lookup
+**Problem**: Field validation was not comprehensive enough for complex field patterns.
+
+**Solution**: Added file-based field validation and improved field pattern matching.
+
+### Development Environment Setup
+```bash
+# For development work:
+git clone https://github.com/danielnrainer/CIF_checker.git
+cd CIF_checker
+
+# Install in development mode
+pip install -e .
+pip install -r requirements.txt
+
+# Key files for debugging:
+src/utils/cif_dictionary_manager.py    # Core conversion logic
+src/utils/field_definition_validator.py # Field pattern validation
+src/gui/main_window.py                 # Main GUI application
+```
+
+### Testing the Text-Block Fix
+```python
+# Test case to verify the fix works:
+from src.utils.cif_dictionary_manager import CIFDictionaryManager
+
+test_cif = '''
+_diffrn_ambient_temperature 293.15
+_publ_section_references
+;
+Crystal structure at ambient temperature.
+Reference with _diffrn_ambient_temperature in text.
+;
+'''
+
+manager = CIFDictionaryManager()
+result, changes = manager.convert_cif_format(test_cif, 'CIF2')
+# Should convert field outside text block but preserve text block content
+```
 
 ## System Requirements
 

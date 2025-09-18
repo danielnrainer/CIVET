@@ -213,9 +213,9 @@ class CIFFormatConverter:
         if line.strip().startswith('#') or not line.strip():
             return line
         
-        # Check if line starts with a field name (allow hyphens, dots, brackets, etc.)
+        # Check if line starts with a field name (allow hyphens, dots, brackets, slashes, etc.)
         # Handle both cases: field with value and field without value (loop definitions)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s*(.*)$', line)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$', line)
         if not field_match:
             return line
         
@@ -250,9 +250,9 @@ class CIFFormatConverter:
         if line.strip().startswith('#') or not line.strip():
             return line
         
-        # Check if line starts with a CIF field name (allow dots, hyphens, brackets, etc.)
+        # Check if line starts with a CIF field name (allow dots, hyphens, brackets, slashes, etc.)
         # Handle both cases: field with value and field without value (loop definitions)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)\s*(.*)$', line)
+        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$', line)
         if not field_match:
             return line
         
@@ -436,7 +436,7 @@ class CIFFormatConverter:
                     warnings.append("CIF2 triple-quoted strings detected - will be converted to text fields")
         
         # Check for unknown field mappings
-        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()]*)', re.MULTILINE)
+        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
         unmapped_fields = []
         
         for match in field_pattern.finditer(cif_content):

@@ -1,3 +1,27 @@
+# Python cache files
 *.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# PyInstaller build files
+build/
+dist/
+*.spec.bak
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
 build/
 dist/

@@ -13,10 +13,13 @@ from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion
 from utils.cif_format_converter import CIFFormatConverter
+from utils.field_rules_validator import FieldRulesValidator
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
 from .dialogs.field_conflict_dialog import FieldConflictDialog
+from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
+from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -38,14 +41,17 @@ class CIFEditor(QMainWindow):
         self.format_converter = CIFFormatConverter(self.dict_manager)
         self.current_cif_version = CIFVersion.UNKNOWN
         
-        # Load both field definition sets from config directory
+        # Initialize field definition validator
+        self.field_rules_validator = FieldRulesValidator(self.dict_manager, self.format_converter)
+        
+        # Load field definition set from config directory
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        definitions_path = os.path.join(project_root, 'config', 'field_definitions')
-        self.field_checker.load_field_set('3DED', os.path.join(definitions_path, 'field_definitions.cif_ed'))
-        self.field_checker.load_field_set('HP', os.path.join(definitions_path, 'field_definitions.cif_hp'))
+        definitions_path = os.path.join(project_root, 'config', 'field_rules')
+        self.field_checker.load_field_set('3DED', os.path.join(definitions_path, '3ded.cif_rules'))
+        self.field_checker.load_field_set('HP', os.path.join(definitions_path, 'hp.cif_rules'))
         
         # Field definition selection variables
-        self.custom_field_definition_file = None
+        self.custom_field_rules_file = None
         self.current_field_set = '3DED'  # Default to 3DED
         
         self.init_ui()
@@ -121,7 +127,7 @@ class CIFEditor(QMainWindow):
         field_selection_layout = QVBoxLayout(field_selection_group)
         
         # Create radio button group for field definition selection
-        self.field_definition_group = QButtonGroup()
+        self.field_rules_group = QButtonGroup()
         
         # Radio buttons for built-in field definitions
         radio_layout = QHBoxLayout()
@@ -130,25 +136,20 @@ class CIFEditor(QMainWindow):
         self.radio_3ded.setChecked(True)  # Default selection
         self.radio_3ded.toggled.connect(lambda checked: self.set_field_set('3DED') if checked else None)
         
-        self.radio_hp = QRadioButton("HP")
-        self.radio_hp.toggled.connect(lambda checked: self.set_field_set('HP') if checked else None)
-        
         self.radio_custom = QRadioButton("Custom File")
         self.radio_custom.toggled.connect(lambda checked: self.set_field_set('Custom') if checked else None)
         
         # Add radio buttons to group and layout
-        self.field_definition_group.addButton(self.radio_3ded)
-        self.field_definition_group.addButton(self.radio_hp)
-        self.field_definition_group.addButton(self.radio_custom)
+        self.field_rules_group.addButton(self.radio_3ded)
+        self.field_rules_group.addButton(self.radio_custom)
         
         radio_layout.addWidget(self.radio_3ded)
-        radio_layout.addWidget(self.radio_hp)
         radio_layout.addWidget(self.radio_custom)
         
         # Custom file selection layout
         custom_file_layout = QHBoxLayout()
         self.custom_file_button = QPushButton("Select Custom File...")
-        self.custom_file_button.clicked.connect(self.select_custom_field_file)
+        self.custom_file_button.clicked.connect(self.select_custom_field_rules_file)
         self.custom_file_button.setEnabled(False)  # Initially disabled
         
         self.custom_file_label = QLabel("No custom file selected")
@@ -298,6 +299,15 @@ class CIFEditor(QMainWindow):
         add_dict_action = settings_menu.addAction("Add Additional CIF Dictionary...")
         add_dict_action.triggered.connect(self.add_additional_dictionary)
         
+        suggest_dict_action = settings_menu.addAction("Suggest Dictionaries for Current CIF...")
+        suggest_dict_action.triggered.connect(self.suggest_dictionaries)
+        
+        settings_menu.addSeparator()
+        
+        # Field definition validation
+        validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
+        validate_field_defs_action.triggered.connect(self.validate_field_rules)
+        
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
 
@@ -358,6 +368,11 @@ class CIFEditor(QMainWindow):
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.setWindowTitle(f"EDCIF-check - {filepath}")
+            
+            # Prompt for dictionary suggestions after opening CIF file
+            if not initial:  # Don't prompt during initial app startup
+                self.prompt_for_dictionary_suggestions(content)
+                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open file:\n{e}")
 
@@ -635,7 +650,7 @@ class CIFEditor(QMainWindow):
         # Enable/disable custom file button based on selection
         if field_set_name == 'Custom':
             self.custom_file_button.setEnabled(True)
-            if not self.custom_field_definition_file:
+            if not self.custom_field_rules_file:
                 self.custom_file_label.setText("Please select a custom file")
                 self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
         else:
@@ -643,41 +658,126 @@ class CIFEditor(QMainWindow):
             self.custom_file_label.setText("No custom file selected")
             self.custom_file_label.setStyleSheet("color: gray; font-style: italic;")
     
-    def select_custom_field_file(self):
+    def select_custom_field_rules_file(self):
         """Open file dialog to select a custom field definition file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Field Definition File",
             "",
-            "Field Definition Files (*.cif_ed *.cif_hp *.cif_defs);;All Files (*)"
+            "Field Rules Files (*.cif_rules);;All Files (*)"
         )
         
         if file_path:
-            try:
-                # Try to load the custom field definition file
-                self.field_checker.load_field_set('Custom', file_path)
-                self.custom_field_definition_file = file_path
-                
-                # Update the label to show the selected file
-                file_name = os.path.basename(file_path)
-                self.custom_file_label.setText(f"Using: {file_name}")
-                self.custom_file_label.setStyleSheet("color: green; font-weight: bold;")
-                
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error Loading Custom File",
-                    f"Failed to load field definition file:\n{str(e)}\n\n"
-                    "Please ensure the file is in the correct format."
+            self._load_custom_field_rules_file(file_path)
+    
+    def _load_custom_field_rules_file(self, file_path: str, skip_validation: bool = False):
+        """Load a custom field definition file with optional validation."""
+        try:
+            # Read the file content for validation
+            with open(file_path, 'r', encoding='utf-8') as f:
+                field_rules_content = f.read()
+            
+            # Offer validation if not skipping
+            if not skip_validation:
+                reply = QMessageBox.question(
+                    self, "Validate Field Definitions",
+                    "Would you like to validate this field definition file for common issues?\n\n"
+                    "This can help identify and fix:\n"
+                    "• Mixed CIF1/CIF2 formats\n"
+                    "• Duplicate/alias fields\n"
+                    "• Unknown fields\n\n"
+                    "Recommended for better compatibility.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
                 )
-                self.custom_file_label.setText("Error loading file")
-                self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Get CIF content for format analysis if available
+                    cif_content = self.text_editor.toPlainText() if hasattr(self, 'text_editor') else None
+                    
+                    # Validate the field definitions
+                    validation_result = self.field_rules_validator.validate_field_rules(
+                        field_rules_content, cif_content
+                    )
+                    
+                    if validation_result.has_issues:
+                        # Show validation dialog
+                        dialog = FieldRulesValidationDialog(
+                            validation_result, field_rules_content, file_path, 
+                            self.field_rules_validator, self
+                        )
+                        
+                        # Connect validation completion signal
+                        dialog.validation_completed.connect(
+                            lambda fixed_content, changes: self._on_validation_completed(
+                                file_path, fixed_content, changes
+                            )
+                        )
+                        
+                        if dialog.exec() == QDialog.DialogCode.Accepted:
+                            # Check if fixes were applied
+                            if dialog.fixed_content:
+                                # Use the fixed content instead
+                                field_rules_content = dialog.fixed_content
+                    else:
+                        QMessageBox.information(
+                            self, "Validation Complete",
+                            "✅ No issues found in the field definition file!"
+                        )
+            
+            # Try to load the field definition file
+            self.field_checker.load_field_set('Custom', file_path)
+            self.custom_field_rules_file = file_path
+            
+            # Update the label to show the selected file
+            file_name = os.path.basename(file_path)
+            self.custom_file_label.setText(f"Using: {file_name}")
+            self.custom_file_label.setStyleSheet("color: green; font-weight: bold;")
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Loading Custom File",
+                f"Failed to load field definition file:\n{str(e)}\n\n"
+                "Please ensure the file is in the correct format."
+            )
+            self.custom_file_label.setText("Error loading file")
+            self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
+    
+    def _on_validation_completed(self, file_path: str, fixed_content: str, changes: List[str]):
+        """Handle completion of field definition validation."""
+        try:
+            # Write the fixed content to a temporary file and load it
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.cif_rules', delete=False, encoding='utf-8') as temp_file:
+                temp_file.write(fixed_content)
+                temp_path = temp_file.name
+            
+            # Load the fixed content
+            self.field_checker.load_field_set('Custom', temp_path)
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            # Show success message
+            QMessageBox.information(
+                self, "Field Definitions Updated",
+                f"Field definitions loaded with {len(changes)} fixes applied:\n\n" +
+                "\n".join(f"• {change}" for change in changes[:5]) +
+                (f"\n• ... and {len(changes) - 5} more" if len(changes) > 5 else "")
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to load fixed field definitions: {str(e)}"
+            )
     
     def start_checks(self):
         """Start checking CIF fields using the selected field definition set."""
         # Validate field set selection
         if self.current_field_set == 'Custom':
-            if not self.custom_field_definition_file:
+            if not self.custom_field_rules_file:
                 QMessageBox.warning(
                     self,
                     "No Custom File Selected",
@@ -696,6 +796,10 @@ class CIFEditor(QMainWindow):
                 )
                 return
         
+        # Mandatory validation before starting checks (if not done already)
+        if not self._ensure_field_rules_validated():
+            return  # User cancelled or validation failed
+        
         # Show configuration dialog first
         config_dialog = CheckConfigDialog(self)
         if config_dialog.exec() != QDialog.DialogCode.Accepted:
@@ -707,106 +811,209 @@ class CIFEditor(QMainWindow):
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
-        # Get the selected field set
-        fields = self.field_checker.get_field_set(self.current_field_set)
-        if not fields:
-            QMessageBox.warning(
-                self,
-                "Warning", 
-                f"No {self.current_field_set} field definitions loaded."
-            )
+        # Single field set processing
+        success = self._process_single_field_set(config, initial_state)
+        if not success:
             return
         
-        # Update window title to show which field set is being used
-        field_set_display = {
-            '3DED': '3D ED',
-            'HP': 'HP',
-            'Custom': f'Custom ({os.path.basename(self.custom_field_definition_file) if self.custom_field_definition_file else "Unknown"})'
-        }
+        # If we get here, checks completed successfully
+        if config.get('reformat_after_checks', False):
+            self.reformat_file()
         
-        self.setWindowTitle(f"EDCIF-check - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
-        
-        # Parse the current CIF content
-        content = self.text_editor.toPlainText()
-        self.cif_parser.parse_file(content)
-        
-        # Start the checking process
+        self.setWindowTitle("EDCIF-check")
+        QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+
+    def _process_single_field_set(self, config, initial_state):
+        """Process a single field set (3DED, HP, or Custom)."""
         try:
+            # Get the selected field set
+            fields = self.field_checker.get_field_set(self.current_field_set)
+            if not fields:
+                QMessageBox.warning(self, "Warning", f"No {self.current_field_set} field definitions loaded.")
+                return False
+            
+            # Update window title to show which field set is being used
+            field_set_display = {
+                '3DED': '3D ED',
+                'HP': 'HP',
+                'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
+            }
+            
+            self.setWindowTitle(f"EDCIF-check - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
+            
+            # Parse the current CIF content
+            content = self.text_editor.toPlainText()
+            self.cif_parser.parse_file(content)
+            
+            # For custom sets, handle DELETE/EDIT operations first
+            if self.current_field_set == 'Custom':
+                current_content = content
+                operations_applied = []
+                
+                for field_def in fields:
+                    if hasattr(field_def, 'action'):
+                        if field_def.action == 'DELETE':
+                            lines = current_content.splitlines()
+                            lines, deleted = self.field_checker._delete_field(lines, field_def.name)
+                            if deleted:
+                                operations_applied.append(f"DELETED: {field_def.name}")
+                                current_content = '\n'.join(lines)
+                        elif field_def.action == 'EDIT':
+                            lines = current_content.splitlines()
+                            lines, edited = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
+                            if edited:
+                                operations_applied.append(f"EDITED: {field_def.name} -> {field_def.default_value}")
+                                current_content = '\n'.join(lines)
+                
+                # Update content after DELETE/EDIT operations
+                if operations_applied:
+                    self.text_editor.setText(current_content)
+                    ops_summary = '\n'.join(operations_applied)
+                    QMessageBox.information(self, "Operations Applied", 
+                                          f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
+            
+            # Process CHECK actions (standard field checking)
             for field_def in fields:
+                # Skip DELETE/EDIT actions as they're already processed
+                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT']:
+                    continue
+                    
                 result = self.check_line_with_config(
                     field_def.name,
                     field_def.default_value,
-                    False,  # multiline - will be auto-detected
+                    False,
                     field_def.description,
                     config
                 )
                 
-                # Handle special result codes
                 if result == RESULT_ABORT:
-                    # User wants to abort - restore initial state
                     self.text_editor.setText(initial_state)
                     self.setWindowTitle("EDCIF-check")
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return
+                    return False
                 elif result == RESULT_STOP_SAVE:
-                    # User wants to stop but keep changes
                     break
             
-            # Special handling for 3DED: Check for _chemical_absolute_configuration in Sohncke space groups
+            # Apply special 3DED handling if needed
             if self.current_field_set == '3DED':
-                sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
-                SG_number = None
-                lines = self.text_editor.toPlainText().splitlines()
-                for line in lines:
-                    if line.startswith("_space_group_IT_number"):
-                        parts = line.split()
-                        if len(parts) > 1:
-                            try:
-                                SG_number = int(parts[1].strip("'\""))
-                            except Exception:
-                                pass
-                        break
-                if SG_number is not None and SG_number in sohncke_groups:
-                    found = False
-                    for line in lines:
-                        if line.startswith("_chemical_absolute_configuration"):
-                            found = True
-                            break
-                    if found:
-                        result = self.check_line_with_config("_chemical_absolute_configuration", default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.", config=config)
-                        if result == RESULT_ABORT:
-                            # User wants to abort - restore initial state
-                            self.text_editor.setText(initial_state)
-                            self.setWindowTitle("EDCIF-check")
-                            QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                            return
-                        elif result == RESULT_STOP_SAVE:
-                            # User wants to stop but keep changes - proceed to completion
-                            pass
-                    else:
-                        result = self.add_missing_line_with_config("_chemical_absolute_configuration", lines, default_value='dyn', multiline=False, description="Specify if/how absolute structure was determined.", config=config)
-                        if result == RESULT_ABORT:
-                            # User wants to abort - restore initial state
-                            self.text_editor.setText(initial_state)
-                            self.setWindowTitle("EDCIF-check")
-                            QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                            return
-                        elif result == RESULT_STOP_SAVE:
-                            # User wants to stop but keep changes - proceed to completion
-                            pass
+                self._apply_3ded_special_checks(config, initial_state)
             
-            # If we get here, checks completed successfully
-            if config.get('reformat_after_checks', False):
-                self.reformat_file()
-            
-            self.setWindowTitle("EDCIF-check")
-            QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+            return True
             
         except Exception as e:
-            # Error occurred - restore initial state
             self.text_editor.setText(initial_state)
             self.setWindowTitle("EDCIF-check")
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
+            return False
+    
+    def _apply_3ded_special_checks(self, config, initial_state):
+        """Apply special 3DED checks for space groups and absolute configuration."""
+        sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
+        SG_number = None
+        lines = self.text_editor.toPlainText().splitlines()
+        
+        # Find space group number
+        for line in lines:
+            if line.startswith("_space_group_IT_number"):
+                parts = line.split()
+                if len(parts) > 1:
+                    try:
+                        SG_number = int(parts[1].strip("'\""))
+                    except Exception:
+                        pass
+                break
+        
+        # Check if we need absolute configuration handling
+        if SG_number is not None and SG_number in sohncke_groups:
+            found = False
+            for line in lines:
+                if line.startswith("_chemical_absolute_configuration"):
+                    found = True
+                    break
+            
+            if found:
+                result = self.check_line_with_config(
+                    "_chemical_absolute_configuration", 
+                    default_value='dyn', 
+                    multiline=False, 
+                    description="Specify if/how absolute structure was determined.", 
+                    config=config
+                )
+                if result == RESULT_ABORT:
+                    self.text_editor.setText(initial_state)
+                    self.setWindowTitle("EDCIF-check")
+                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                    return False
+                elif result == RESULT_STOP_SAVE:
+                    return True
+            else:
+                result = self.add_missing_line_with_config(
+                    "_chemical_absolute_configuration", 
+                    lines, 
+                    default_value='dyn', 
+                    multiline=False, 
+                    description="Specify if/how absolute structure was determined.", 
+                    config=config
+                )
+                if result == RESULT_ABORT:
+                    self.text_editor.setText(initial_state)
+                    self.setWindowTitle("EDCIF-check")
+                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                    return False
+                elif result == RESULT_STOP_SAVE:
+                    return True
+            
+            # Check for z-score if configuration is 'dyn'
+            lines = self.text_editor.toPlainText().splitlines()  # Re-get lines after potential changes
+            chemical_absolute_config_value = None
+            for line in lines:
+                if line.startswith("_chemical_absolute_configuration") or line.startswith("_chemical.absolute_configuration"):
+                    parts = line.split()
+                    if len(parts) > 1:
+                        chemical_absolute_config_value = parts[1].strip("'\"")
+                        break
+            
+            if chemical_absolute_config_value == 'dyn':
+                # Check if _refine_ls.abs_structure_z-score exists
+                found_z_score = False
+                for line in lines:
+                    if line.startswith("_refine_ls.abs_structure_z-score"):
+                        found_z_score = True
+                        break
+                
+                if found_z_score:
+                    result = self.check_line_with_config(
+                        "_refine_ls.abs_structure_z-score", 
+                        default_value='', 
+                        multiline=False, 
+                        description="Z-score for absolute structure determination from dynamical refinement.", 
+                        config=config
+                    )
+                    if result == RESULT_ABORT:
+                        self.text_editor.setText(initial_state)
+                        self.setWindowTitle("EDCIF-check")
+                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                        return False
+                    elif result == RESULT_STOP_SAVE:
+                        return True
+                else:
+                    result = self.add_missing_line_with_config(
+                        "_refine_ls.abs_structure_z-score", 
+                        lines, 
+                        default_value='', 
+                        multiline=False, 
+                        description="Z-score for absolute structure determination from dynamical refinement.", 
+                        config=config
+                    )
+                    if result == RESULT_ABORT:
+                        self.text_editor.setText(initial_state)
+                        self.setWindowTitle("EDCIF-check")
+                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                        return False
+                    elif result == RESULT_STOP_SAVE:
+                        return True
+        
+        return True
 
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
@@ -1307,3 +1514,186 @@ class CIFEditor(QMainWindow):
             print(f"Dictionary info dialog error: {error_details}")
             QMessageBox.critical(self, "Error", 
                                f"Failed to show dictionary information:\n{str(e)}\n\nCheck console for details.")
+    
+    def suggest_dictionaries(self):
+        """Analyze current CIF content and suggest relevant dictionaries."""
+        try:
+            # Get current CIF content
+            cif_content = self.text_editor.toPlainText().strip()
+            
+            if not cif_content:
+                QMessageBox.information(self, "No CIF Content", 
+                                      "Please open or write a CIF file first to get dictionary suggestions.")
+                return
+            
+            # Analyze CIF and get suggestions
+            suggestions = self.dict_manager.suggest_dictionaries_for_cif(cif_content)
+            cif_format = self.dict_manager.detect_cif_format(cif_content)
+            
+            # Status update callback
+            def update_status(message: str):
+                """Update the status bar with a message."""
+                self.status_bar.showMessage(message, 5000)
+                self.update_dictionary_status()
+            
+            # Show suggestions dialog with dictionary manager for downloading
+            show_dictionary_suggestions(
+                suggestions, 
+                cif_format, 
+                None,  # Deprecated load_callback
+                self.dict_manager,  # Dictionary manager for downloading
+                update_status,  # Status update callback
+                self
+            )
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Dictionary suggestion error: {error_details}")
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to analyze CIF for dictionary suggestions:\n{str(e)}\n\nCheck console for details.")
+    
+    def prompt_for_dictionary_suggestions(self, cif_content: str):
+        """Prompt user to get dictionary suggestions when opening a CIF file."""
+        try:
+            # Quick check if there are any potential suggestions
+            suggestions = self.dict_manager.suggest_dictionaries_for_cif(cif_content)
+            
+            if not suggestions:
+                return  # No suggestions available, don't prompt
+            
+            # Ask user if they want to see dictionary suggestions
+            reply = QMessageBox.question(
+                self, 
+                "Dictionary Suggestions Available",
+                f"This CIF file appears to contain specialized data that could benefit from additional dictionaries.\n\n"
+                f"Found {len(suggestions)} dictionary suggestion(s) that may enhance field validation and recognition.\n\n"
+                "Would you like to see the suggestions?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Use existing suggest_dictionaries method to show the dialog
+                self.suggest_dictionaries()
+                
+        except Exception as e:
+            # Don't show error for this - it's just a convenience prompt
+            print(f"Dictionary suggestion prompt error: {e}")
+    
+    
+    def _ensure_field_rules_validated(self) -> bool:
+        """
+        Ensure field definitions are validated before starting checks.
+        Returns True if validation passed or was skipped, False if cancelled.
+        """
+        # Only validate custom field definitions (built-in ones are assumed correct)
+        if self.current_field_set != 'Custom' or not self.custom_field_rules_file:
+            return True
+        
+        try:
+            # Read the field definition file
+            with open(self.custom_field_rules_file, 'r', encoding='utf-8') as f:
+                field_rules_content = f.read()
+            
+            # Get CIF content for format analysis
+            cif_content = self.text_editor.toPlainText() if hasattr(self, 'text_editor') else None
+            
+            # Validate the field definitions
+            validation_result = self.field_rules_validator.validate_field_rules(
+                field_rules_content, cif_content
+            )
+            
+            if validation_result.has_issues:
+                reply = QMessageBox.question(
+                    self, "Field Definition Issues Found",
+                    f"Issues found in field definitions that may affect checking:\n\n"
+                    f"• {len(validation_result.issues)} issues detected\n"
+                    f"• Target CIF format: {validation_result.cif_format_detected}\n\n"
+                    "It's recommended to fix these issues before starting checks.\n"
+                    "Would you like to review and fix them now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Show validation dialog
+                    dialog = FieldRulesValidationDialog(
+                        validation_result, field_rules_content, self.custom_field_rules_file,
+                        self.field_rules_validator, self
+                    )
+                    
+                    # Connect validation completion signal
+                    dialog.validation_completed.connect(
+                        lambda fixed_content, changes: self._on_validation_completed(
+                            self.custom_field_rules_file, fixed_content, changes
+                        )
+                    )
+                    
+                    return dialog.exec() == QDialog.DialogCode.Accepted
+                
+                # User chose to proceed without fixing
+                return True
+            
+            # No issues found
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Validation Error",
+                f"Failed to validate field definitions:\n{str(e)}\n\n"
+                "Proceeding without validation."
+            )
+            return True
+    
+    def validate_field_rules(self):
+        """Manual field definition validation (Settings menu)."""
+        if self.current_field_set == 'Custom' and self.custom_field_rules_file:
+            # Validate the current custom field definition file
+            self._validate_field_rules_file(self.custom_field_rules_file)
+        else:
+            # Ask user to select a file to validate
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Field Definition File to Validate", "",
+                "Field Rules Files (*.cif_rules);;All Files (*)"
+            )
+            
+            if file_path:
+                self._validate_field_rules_file(file_path)
+    
+    def _validate_field_rules_file(self, file_path: str):
+        """Validate a specific field definition file."""
+        try:
+            # Read the file content
+            with open(file_path, 'r', encoding='utf-8') as f:
+                field_rules_content = f.read()
+            
+            # Get CIF content for format analysis if available
+            cif_content = self.text_editor.toPlainText() if hasattr(self, 'text_editor') else None
+            
+            # Validate the field definitions
+            validation_result = self.field_rules_validator.validate_field_rules(
+                field_rules_content, cif_content
+            )
+            
+            # Show validation dialog
+            dialog = FieldRulesValidationDialog(
+                validation_result, field_rules_content, file_path,
+                self.field_rules_validator, self
+            )
+            
+            # Connect validation completion signal if this is the current custom file
+            if file_path == self.custom_field_rules_file:
+                dialog.validation_completed.connect(
+                    lambda fixed_content, changes: self._on_validation_completed(
+                        file_path, fixed_content, changes
+                    )
+                )
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Validation Error",
+                f"Failed to validate field definition file:\n{str(e)}"
+            )
