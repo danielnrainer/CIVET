@@ -278,14 +278,11 @@ class FieldRulesValidationDialog(QDialog):
         
         self.cif1_radio = QRadioButton("CIF1 format (e.g., _cell_length_a)")
         self.cif1_radio.setToolTip("Convert mixed formats to CIF1 style with underscores")
-        self.cif1_radio.toggled.connect(self.on_format_changed)
         self.format_button_group.addButton(self.cif1_radio, 1)
         format_layout.addWidget(self.cif1_radio)
         
         self.cif2_radio = QRadioButton("CIF2 format (e.g., _cell.length_a)")
         self.cif2_radio.setToolTip("Convert mixed formats to CIF2 style with dots")
-        self.cif2_radio.toggled.connect(self.on_format_changed)
-        self.cif2_radio.setChecked(True)  # Default to CIF2
         self.format_button_group.addButton(self.cif2_radio, 2)
         format_layout.addWidget(self.cif2_radio)
         
@@ -382,6 +379,13 @@ class FieldRulesValidationDialog(QDialog):
         
         buttons_group.setLayout(buttons_layout)
         layout.addWidget(buttons_group)
+        
+        # Connect radio button signals after UI is fully set up
+        self.cif1_radio.toggled.connect(self.on_format_changed)
+        self.cif2_radio.toggled.connect(self.on_format_changed)
+        
+        # Set default format after signals are connected
+        self.cif2_radio.setChecked(True)
         
         self.setLayout(layout)
     
@@ -539,8 +543,9 @@ class FieldRulesValidationDialog(QDialog):
         
         self.summary_label.setText(summary_text)
         
-        # Populate issues tree
-        self.issues_tree.populate_issues(self.validation_result)
+        # Populate issues tree (only if it exists)
+        if hasattr(self, 'issues_tree'):
+            self.issues_tree.populate_issues(self.validation_result)
         
         # Update conversion button counts
         self.update_conversion_button_counts()
@@ -550,6 +555,11 @@ class FieldRulesValidationDialog(QDialog):
             self.apply_fixes_btn.setEnabled(False)
             self.select_all_btn.setEnabled(False)
             self.select_none_btn.setEnabled(False)
+        else:
+            # Enable selection buttons when there are issues
+            self.select_all_btn.setEnabled(True)
+            self.select_none_btn.setEnabled(True)
+            # Apply fixes button will be enabled/disabled in update_selection_count()
         
         # Update selection count
         self.update_selection_count()
@@ -594,7 +604,8 @@ class FieldRulesValidationDialog(QDialog):
     
     def update_selection_count(self):
         """Update the selection count display"""
-        if hasattr(self, 'selection_count_label'):
+        if (hasattr(self, 'selection_count_label') and hasattr(self, 'issues_tree') and 
+            hasattr(self, 'validation_result')):
             selected_count = len(self.issues_tree.selected_issues)
             total_fixable = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type != AutoFixType.NO)
             
@@ -607,17 +618,20 @@ class FieldRulesValidationDialog(QDialog):
 
     def select_all_auto_fixable(self):
         """Select all auto-fixable issues"""
-        self.issues_tree.select_all_auto_fixable()
-        self.update_selection_count()
+        if hasattr(self, 'issues_tree'):
+            self.issues_tree.select_all_auto_fixable()
+            self.update_selection_count()
     
     def select_none(self):
         """Deselect all issues"""
-        self.issues_tree.select_none()
-        self.update_selection_count()
+        if hasattr(self, 'issues_tree'):
+            self.issues_tree.select_none()
+            self.update_selection_count()
     
     def on_format_changed(self):
         """Handle format radio button changes - refresh the validation table"""
-        if hasattr(self, 'validation_result') and hasattr(self, 'field_rules_content') and hasattr(self, 'validator'):
+        if (hasattr(self, 'validation_result') and hasattr(self, 'field_rules_content') and 
+            hasattr(self, 'validator') and hasattr(self, 'issues_tree')):
             # Re-run validation with the new target format
             target_format = "CIF2" if self.cif2_radio.isChecked() else "CIF1"
             

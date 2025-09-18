@@ -44,6 +44,11 @@ CIF2_ONLY_FIELD_MAPPINGS = {
     '_diffrn_source.ed_diffracting_area_selection': '_diffrn_source_ed_diffracting_area_selection',
     # Radiation and illumination fields
     '_diffrn_radiation.illumination_mode': '_diffrn_radiation_illumination_mode',
+    '_diffrn_radiation_wavelength.type': '_diffrn_radiation_wavelength_type',
+    
+    # Space group fields  
+    '_space_group.name_h-m_full': '_space_group_name_H-M_full',
+    
     # Precession fields
     '_diffrn.precession_semi_angle': '_diffrn_precession_semi_angle',
     
@@ -59,6 +64,7 @@ CIF2_ONLY_FIELD_MAPPINGS = {
     '_diffrn.flux_density': '_diffrn_flux_density',
     '_diffrn.total_dose': '_diffrn_total_dose',
     '_diffrn.total_exposure_time': '_diffrn_total_exposure_time',
+
 }
 
 # Reverse mappings (CIF1 -> CIF2)

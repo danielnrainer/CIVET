@@ -24,6 +24,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from .cif_core_parser import CIFCoreParser
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
+from .cif2_only_extensions import CIF2_ONLY_FIELD_MAPPINGS
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -414,7 +415,12 @@ class CIFDictionaryManager:
         if hasattr(self, '_alias_map') and field_name_lower in self._alias_map:
             return True
             
-        # Check CIF format conversion mappings
+        # Check CIF format conversion mappings (case-insensitive)
+        if (field_name.lower() in self._cif1_to_cif2 or 
+            field_name.lower() in self._cif2_to_cif1):
+            return True
+        
+        # Also check exact case match for backwards compatibility
         if (field_name in self._cif1_to_cif2 or 
             field_name in self._cif2_to_cif1):
             return True
@@ -422,7 +428,9 @@ class CIFDictionaryManager:
         # For CIF2 format fields (with dots), also check if the CIF1 equivalent exists
         if '.' in field_name:
             cif1_equivalent = field_name.replace('.', '_')
-            if (cif1_equivalent in self._cif1_to_cif2 or 
+            if (cif1_equivalent.lower() in self._cif1_to_cif2 or 
+                cif1_equivalent.lower() in self._cif2_to_cif1 or
+                cif1_equivalent in self._cif1_to_cif2 or 
                 cif1_equivalent in self._cif2_to_cif1):
                 return True
         
@@ -431,7 +439,9 @@ class CIFDictionaryManager:
             parts = field_name[1:].split('_')
             if len(parts) >= 2:
                 cif2_equivalent = f"_{parts[0]}.{'_'.join(parts[1:])}"
-                if (cif2_equivalent in self._cif1_to_cif2 or 
+                if (cif2_equivalent.lower() in self._cif1_to_cif2 or 
+                    cif2_equivalent.lower() in self._cif2_to_cif1 or
+                    cif2_equivalent in self._cif1_to_cif2 or 
                     cif2_equivalent in self._cif2_to_cif1):
                     return True
         
@@ -530,6 +540,15 @@ class CIFDictionaryManager:
     def is_field_deprecated(self, field_name: str) -> bool:
         """Check if a field is deprecated"""
         self._ensure_loaded()
+        
+        # Fields that should NOT be considered deprecated despite what the dictionary says
+        non_deprecated_whitelist = {
+            '_diffrn_source',  # Has valid CIF2 equivalent, not deprecated
+        }
+        
+        if field_name in non_deprecated_whitelist:
+            return False
+        
         return self.parser.is_field_deprecated(field_name)
     
     def get_non_deprecated_aliases(self, cif2_field: str) -> List[str]:
@@ -592,29 +611,104 @@ class CIFDictionaryManager:
             return field_info.deprecated
         return False
     
-    def get_modern_equivalent(self, old_field_name: str) -> Optional[str]:
+    def _normalize_field_variations(self, field_name: str) -> List[str]:
         """
-        Get the modern CIF2 equivalent of an old CIF1 field name.
+        Generate possible variations of a field name to handle case sensitivity
+        and format differences between user input and dictionary parsing.
+        
+        Args:
+            field_name: Original field name
+            
+        Returns:
+            List of possible field name variations to try
+        """
+        variations = [field_name]  # Always include original
+        
+        # Handle the specific pattern where CIF parsing might normalize:
+        # _symmetry_space_group_name_Hall -> _symmetry.space_group_name_hall
+        # _symmetry_Int_Tables_number -> _symmetry.int_tables_number
+        if field_name.startswith('_symmetry_'):
+            # Convert underscore format to dot format with lowercase
+            dot_format = field_name.replace('_symmetry_', '_symmetry.', 1).lower()
+            variations.append(dot_format)
+            
+            # Also try the exact case but with dot
+            dot_format_case = field_name.replace('_symmetry_', '_symmetry.', 1)
+            variations.append(dot_format_case)
+        
+        # Handle the reverse: if it starts with _symmetry., try underscore versions
+        elif field_name.startswith('_symmetry.'):
+            # Convert dot format to underscore format
+            underscore_format = field_name.replace('_symmetry.', '_symmetry_', 1)
+            variations.append(underscore_format)
+            
+            # Try different case variations
+            variations.append(underscore_format.lower())
+            variations.append(underscore_format.upper())
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_variations = []
+        for var in variations:
+            if var not in seen:
+                seen.add(var)
+                unique_variations.append(var)
+        
+        return unique_variations
+
+    def get_modern_equivalent(self, old_field_name: str, prefer_format: str = "CIF1") -> Optional[str]:
+        """
+        Get the modern equivalent of a deprecated/replaced field name.
         
         Args:
             old_field_name: Old/deprecated field name
+            prefer_format: Preferred format for the result ("CIF1" or "CIF2")
             
         Returns:
             Modern field name or None if no equivalent exists
         """
-        field_info = self.get_field_info(old_field_name)
-        if not field_info:
-            return None
+        self._ensure_loaded()
         
-        # If this field is deprecated, look for non-deprecated aliases
-        if field_info.deprecated:
+        # Generate field name variations to handle case sensitivity and format differences
+        field_variations = self._normalize_field_variations(old_field_name)
+        
+        # Try each variation to find a working mapping
+        for field_variant in field_variations:
+            if prefer_format == "CIF1":
+                # Try to get CIF2 equivalent first, then find its CIF1 alias
+                cif2_equiv = self.get_cif2_equivalent(field_variant)
+                if cif2_equiv:
+                    # Check if it's in our CIF2-only extensions mapping
+                    if cif2_equiv in CIF2_ONLY_FIELD_MAPPINGS:
+                        cif1_extension = CIF2_ONLY_FIELD_MAPPINGS[cif2_equiv]
+                        if not self.is_field_deprecated(cif1_extension):
+                            return cif1_extension
+                    
+                    # Now find the CIF1 alias for this CIF2 field
+                    cif1_alias = self.get_cif1_equivalent(cif2_equiv)
+                    if cif1_alias and cif1_alias != old_field_name:
+                        # Make sure the CIF1 alias is not deprecated
+                        if not self.is_field_deprecated(cif1_alias):
+                            return cif1_alias
+                    # If no CIF1 alias, return the CIF2 field if it's not deprecated
+                    if not self.is_field_deprecated(cif2_equiv):
+                        return cif2_equiv
+            else:
+                # Prefer CIF2 format
+                cif2_equiv = self.get_cif2_equivalent(field_variant)
+                if cif2_equiv and not self.is_field_deprecated(cif2_equiv):
+                    return cif2_equiv
+        
+        # Fallback: look for non-deprecated aliases within the same field definition
+        field_info = self.get_field_info(old_field_name)
+        if field_info and field_info.deprecated:
             for alias in field_info.aliases:
                 alias_info = self.get_field_info(alias)
                 if alias_info and not alias_info.deprecated:
                     return alias_info.name
         
-        # Return the field itself if it's not deprecated
-        if not field_info.deprecated:
+        # If field is not deprecated, return itself
+        if field_info and not field_info.deprecated:
             return field_info.name
         
         return None

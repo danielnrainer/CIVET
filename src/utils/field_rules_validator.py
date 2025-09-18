@@ -24,6 +24,7 @@ class IssueType(Enum):
     DUPLICATE_ALIAS = "duplicate_alias"
     UNKNOWN_FIELD = "unknown_field"
     FORMAT_INCONSISTENCY = "format_inconsistency"
+    DEPRECATED_FIELD = "deprecated_field"
 
 
 class IssueCategory(Enum):
@@ -31,6 +32,7 @@ class IssueCategory(Enum):
     MIXED_FORMAT = "Mixed Format Fields"
     DUPLICATE_ALIAS = "Duplicate/Alias Fields"
     UNKNOWN_FIELD = "Unknown Fields"
+    DEPRECATED_FIELD = "Deprecated Fields"
 
 
 class AutoFixType(Enum):
@@ -210,7 +212,11 @@ class FieldRulesValidator:
         duplicate_issues = self._find_duplicate_alias_issues(def_fields)
         issues.extend(duplicate_issues)
         
-        # 3. Check for unknown fields
+        # 3. Check for deprecated fields
+        deprecated_issues = self._find_deprecated_field_issues(def_fields)
+        issues.extend(deprecated_issues)
+        
+        # 4. Check for unknown fields
         unknown_issues = self._find_unknown_field_issues(def_fields)
         issues.extend(unknown_issues)
         
@@ -359,6 +365,36 @@ class FieldRulesValidator:
         
         return issues
     
+    def _find_deprecated_field_issues(self, fields: List[str]) -> List[ValidationIssue]:
+        """Find fields that are deprecated and suggest modern replacements"""
+        issues = []
+        
+        for field in fields:
+            if self.dict_manager.is_field_deprecated(field):
+                # Get the non-deprecated replacement (prefer CIF2 for field rules)
+                modern_replacement = self.dict_manager.get_modern_equivalent(field, prefer_format="CIF2")
+                
+                if modern_replacement:
+                    issues.append(ValidationIssue(
+                        issue_type=IssueType.DEPRECATED_FIELD,
+                        category=IssueCategory.DEPRECATED_FIELD,
+                        field_names=[field],
+                        description=f"Field {field} is deprecated",
+                        suggested_fix=f"Replace with modern equivalent: {modern_replacement}",
+                        auto_fix_type=AutoFixType.YES  # Deprecated field replacement is always fixable
+                    ))
+                else:
+                    issues.append(ValidationIssue(
+                        issue_type=IssueType.DEPRECATED_FIELD,
+                        category=IssueCategory.DEPRECATED_FIELD,
+                        field_names=[field],
+                        description=f"Field {field} is deprecated",
+                        suggested_fix="Remove deprecated field (no modern equivalent available)",
+                        auto_fix_type=AutoFixType.NO  # No automatic fix if no replacement
+                    ))
+        
+        return issues
+    
     def _find_unknown_field_issues(self, fields: List[str]) -> List[ValidationIssue]:
         """Find fields that are not recognized by any dictionary"""
         issues = []
@@ -444,6 +480,11 @@ class FieldRulesValidator:
                 if change:
                     changes_made.append(change)
                     
+            elif issue.issue_type == IssueType.DEPRECATED_FIELD:
+                fixed_content, change = self._fix_deprecated_field(fixed_content, issue)
+                if change:
+                    changes_made.append(change)
+                    
             elif issue.issue_type == IssueType.UNKNOWN_FIELD and issue.auto_fixable:
                 fixed_content, change = self._fix_unknown_field(fixed_content, issue)
                 if change:
@@ -524,5 +565,38 @@ class FieldRulesValidator:
             
             if new_content != content:
                 return new_content, f"Replaced unknown field {field} with {replacement}"
+        
+        return content, None
+    
+    def _fix_deprecated_field(self, content: str, issue: ValidationIssue) -> Tuple[str, Optional[str]]:
+        """Fix deprecated field issue by replacing with modern equivalent"""
+        field = issue.field_names[0]
+        
+        # Extract the replacement from the suggested fix
+        if "Replace with modern equivalent:" in issue.suggested_fix:
+            replacement = issue.suggested_fix.split(": ")[1]
+            
+            # Use regex to replace the field name, being careful about word boundaries
+            # to avoid replacing partial matches
+            pattern = r'\b' + re.escape(field) + r'\b'
+            new_content = re.sub(pattern, replacement, content)
+            
+            if new_content != content:
+                return new_content, f"Replaced deprecated field {field} with modern equivalent {replacement}"
+        elif "Remove deprecated field" in issue.suggested_fix:
+            # If no replacement is available, remove the field line
+            lines = content.split('\n')
+            new_lines = []
+            removed = False
+            
+            for line in lines:
+                # Check if this line defines the deprecated field
+                if line.strip().startswith(field + ':') or line.strip().startswith(f"# {field}:"):
+                    removed = True
+                    continue  # Skip this line
+                new_lines.append(line)
+            
+            if removed:
+                return '\n'.join(new_lines), f"Removed deprecated field {field}"
         
         return content, None

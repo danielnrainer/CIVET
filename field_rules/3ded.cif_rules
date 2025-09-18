@@ -84,7 +84,7 @@ _computing.sample_tracking  ?
 _diffrn_radiation.illumination_mode   parallel   # options: parallel, convergent
 
 # _diffrn_source.size: Measure of the beam size at the sample. For SAED, this should be the beam width corresponding to the aperture size (at the sample), and not the total beam width.
-_diffrn_source.size  'SAED aperture diameter 100 um, corresponding to a diameter of about 2 um at the image plane.'
+_diffrn_source.size  'SAED nominal aperture diameter 100 um, corresponding to a diameter of about 2 um at the image plane.'
 
 #_diffrn_measurement.method_precession: yes/no if the measurement was performed by precessing the beam.
 _diffrn_measurement.method_precession  no

@@ -238,6 +238,9 @@ class CIFEditor(QMainWindow):
         
         resolve_aliases_action = format_menu.addAction("Resolve Field Aliases")
         resolve_aliases_action.triggered.connect(self.standardize_cif_fields)
+        
+        check_deprecated_action = format_menu.addAction("Check Deprecated Fields")
+        check_deprecated_action.triggered.connect(self.check_deprecated_fields)
 
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
@@ -518,6 +521,42 @@ class CIFEditor(QMainWindow):
         if config is None:
             config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
         
+        # Check if this field is deprecated
+        if self.dict_manager.is_field_deprecated(prefix):
+            modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="CIF1")
+            if modern_equivalent:
+                # Show deprecated field warning with suggestion
+                reply = QMessageBox.question(
+                    self, 
+                    "Deprecated Field Warning",
+                    f"The field '{prefix}' is deprecated.\n\n"
+                    f"Modern equivalent: '{modern_equivalent}'\n\n"
+                    f"Would you like to replace it with the modern equivalent?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Replace deprecated field with modern equivalent
+                    return self._replace_deprecated_field(prefix, modern_equivalent)
+                elif reply == QMessageBox.StandardButton.Cancel:
+                    return QDialog.DialogCode.Rejected
+                # If No, continue with the deprecated field
+            else:
+                # No modern equivalent available
+                reply = QMessageBox.question(
+                    self,
+                    "Deprecated Field Warning", 
+                    f"The field '{prefix}' is deprecated and has no modern equivalent.\n\n"
+                    f"It's recommended to remove this field.\n\n"
+                    f"Continue with deprecated field?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.No:
+                    return QDialog.DialogCode.Rejected
+        
         removable_chars = "'"
         lines = self.text_editor.toPlainText().splitlines()
         
@@ -591,6 +630,38 @@ class CIFEditor(QMainWindow):
         
         # Otherwise, use the normal missing line dialog
         return self.add_missing_line(prefix, lines, default_value, multiline, description)
+    
+    def _replace_deprecated_field(self, deprecated_field, modern_field):
+        """Replace a deprecated field with its modern equivalent in the CIF content"""
+        content = self.text_editor.toPlainText()
+        lines = content.splitlines()
+        
+        field_replaced = False
+        for i, line in enumerate(lines):
+            if line.startswith(deprecated_field):
+                # Extract the value from the deprecated field
+                parts = line.split(maxsplit=1)
+                if len(parts) > 1:
+                    value = parts[1]
+                    lines[i] = f"{modern_field} {value}"
+                    field_replaced = True
+                    break
+        
+        if field_replaced:
+            self.text_editor.setText("\n".join(lines))
+            QMessageBox.information(
+                self, 
+                "Field Updated", 
+                f"Successfully replaced deprecated field '{deprecated_field}' with '{modern_field}'"
+            )
+            return QDialog.DialogCode.Accepted
+        else:
+            QMessageBox.warning(
+                self, 
+                "Field Not Found", 
+                f"Could not find deprecated field '{deprecated_field}' to replace"
+            )
+            return QDialog.DialogCode.Rejected
     
     def check_refine_special_details(self):
         """Check and edit _refine_special_details field, creating it if needed."""
@@ -827,6 +898,37 @@ class CIFEditor(QMainWindow):
     def _process_single_field_set(self, config, initial_state):
         """Process a single field set (3DED, HP, or Custom)."""
         try:
+            # Special handling for 3DED: Check CIF format compatibility
+            if self.current_field_set == '3DED':
+                # Detect CIF format of current file
+                content = self.text_editor.toPlainText()
+                cif_format = self.dict_manager.detect_cif_format(content)
+                
+                # Load appropriate 3DED rules based on CIF format
+                field_rules_dir = get_resource_path('field_rules')
+                if cif_format.upper() == 'CIF1':
+                    # Load CIF1 version of 3DED rules
+                    cif1_rules_path = os.path.join(field_rules_dir, '3ded_cif1.cif_rules')
+                    if os.path.exists(cif1_rules_path):
+                        self.field_checker.load_field_set('3DED', cif1_rules_path)
+                        QMessageBox.information(
+                            self, 
+                            "CIF Format Compatibility", 
+                            f"Detected CIF1 format. Automatically switched to CIF1-compatible 3D ED field rules."
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, 
+                            "Compatibility Issue", 
+                            f"CIF1 format detected, but CIF1-compatible 3D ED rules not found.\n"
+                            f"Using default CIF2 rules which may cause validation issues."
+                        )
+                else:
+                    # Load default CIF2 version of 3DED rules
+                    default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
+                    if os.path.exists(default_rules_path):
+                        self.field_checker.load_field_set('3DED', default_rules_path)
+            
             # Get the selected field set
             fields = self.field_checker.get_field_set(self.current_field_set)
             if not fields:
@@ -1403,6 +1505,100 @@ class CIFEditor(QMainWindow):
             resolutions[canonical_field] = (chosen_field, chosen_value)
         
         return resolutions
+
+    def check_deprecated_fields(self):
+        """Check for deprecated fields in the current CIF file and offer to replace them"""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            # Parse CIF content to find all fields
+            lines = content.splitlines()
+            found_deprecated = []
+            
+            for line_num, line in enumerate(lines, 1):
+                line_stripped = line.strip()
+                if line_stripped.startswith('_') and ' ' in line_stripped:
+                    field_name = line_stripped.split()[0]
+                    if self.dict_manager.is_field_deprecated(field_name):
+                        modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="CIF1")
+                        found_deprecated.append({
+                            'field': field_name,
+                            'line_num': line_num,
+                            'line': line_stripped,
+                            'modern': modern_equiv
+                        })
+            
+            if not found_deprecated:
+                QMessageBox.information(self, "No Deprecated Fields", 
+                                      "No deprecated fields were found in the current CIF file.")
+                return
+            
+            # Build summary of deprecated fields
+            summary = f"Found {len(found_deprecated)} deprecated field(s):\n\n"
+            for item in found_deprecated:
+                summary += f"• Line {item['line_num']}: {item['field']}\n"
+                if item['modern']:
+                    summary += f"  → Modern equivalent: {item['modern']}\n"
+                else:
+                    summary += f"  → No modern equivalent (consider removal)\n"
+                summary += "\n"
+            
+            # Check if any fields can actually be replaced
+            replaceable_count = sum(1 for item in found_deprecated if item['modern'])
+            
+            if replaceable_count == 0:
+                QMessageBox.information(
+                    self, 
+                    "Deprecated Fields Found",
+                    summary + "None of these deprecated fields have modern equivalents available.\n\n" +
+                    "Consider reviewing and potentially removing these fields manually."
+                )
+                return
+            
+            # Ask user what to do
+            reply = QMessageBox.question(
+                self, 
+                "Deprecated Fields Found",
+                summary + f"Would you like to replace the {replaceable_count} deprecated field(s) " +
+                "that have modern equivalents?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Replace deprecated fields
+                updated_content = content
+                changes_made = []
+                
+                # Process in reverse order to maintain line numbers
+                for item in reversed(found_deprecated):
+                    if item['modern']:
+                        old_line = item['line']
+                        parts = old_line.split(None, 1)
+                        if len(parts) > 1:
+                            new_line = f"{item['modern']} {parts[1]}"
+                            updated_content = updated_content.replace(old_line, new_line)
+                            changes_made.append(f"Replaced {item['field']} → {item['modern']}")
+                
+                if changes_made:
+                    self.text_editor.setText(updated_content)
+                    self.modified = True
+                    
+                    change_summary = f"Successfully updated {len(changes_made)} deprecated field(s):\n\n"
+                    for change in changes_made:
+                        change_summary += f"• {change}\n"
+                    
+                    QMessageBox.information(self, "Fields Updated", change_summary)
+                else:
+                    QMessageBox.information(self, "No Changes Made", 
+                                          "No fields could be automatically replaced.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Deprecated Field Check Error", 
+                               f"Failed to check for deprecated fields:\n{str(e)}")
 
     def load_custom_dictionary(self):
         """Load a custom CIF dictionary file."""

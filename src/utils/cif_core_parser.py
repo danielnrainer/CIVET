@@ -248,7 +248,17 @@ class CIFCoreParser:
         """Check if a field is deprecated or replaced (obsolete)"""
         if not self._parsed:
             self.parse_dictionary()
-        return field_name in self._deprecated_fields or field_name in self._replaced_fields
+        
+        # Check exact case first
+        if field_name in self._deprecated_fields or field_name in self._replaced_fields:
+            return True
+            
+        # Check case-insensitive by comparing lowercase versions
+        field_lower = field_name.lower()
+        deprecated_lower = {f.lower() for f in self._deprecated_fields}
+        replaced_lower = {f.lower() for f in self._replaced_fields}
+        
+        return field_lower in deprecated_lower or field_lower in replaced_lower
         
     def get_field_aliases_info(self, cif2_field: str) -> List[FieldAlias]:
         """Get all alias information for a CIF2 field including deprecation status"""
