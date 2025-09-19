@@ -75,10 +75,10 @@ _refine.diffraction_theory_details  ?
 _diffrn_measurement.sample_tracking  no
 
 # _diffrn_measurement.sample_tracking_method: description of the method used for crystal tracking if applicable
-_diffrn_measurement.sample_tracking_method    ?
+_diffrn_measurement.sample_tracking_method    .
 
 # _computing.sample_tracking: Reference for sample tracking during collection if applicable
-_computing.sample_tracking  ?
+_computing.sample_tracking  .
 
 # _diffrn_radiation.illumination_mode: optical configuration of incident beam at the sample, i.e. distinction between TEM and STEM
 _diffrn_radiation.illumination_mode   parallel   # options: parallel, convergent
@@ -90,7 +90,7 @@ _diffrn_source.size  'SAED nominal aperture diameter 100 um, corresponding to a 
 _diffrn_measurement.method_precession  no
 
 # _diffrn.precession_semi_angle: Angle (in degrees) at the sample of the tilt from the normal direction of a radiation beam moved in a precessional scan.
-_diffrn.precession_semi_angle ?
+_diffrn.precession_semi_angle   .
 
 # _refine_diff.potential_max: Maximum electrostatic potential value in a difference Fourier map.
 _refine_diff.potential_max  ?
@@ -100,9 +100,6 @@ _refine_diff.potential_min  ?
 
 # _refine_diff.potential_RMS: Root mean square electrostatic potential value in a difference Fourier map.
 _refine_diff.potential_RMS  ?
-
-# _refine_ls.abs_structure_z-score: Z-score for absolute structure determination (Klar et al, Nature Chem. 15, 848-855)
-_refine_ls.abs_structure_z-score ?
 
 # _exptl_crystal.mosaicity: Mosaicity in degrees
 _exptl_crystal.mosaicity  ?
@@ -117,13 +114,13 @@ _exptl_crystal.mosaic_block_size  ?
 _diffrn_source.convergence_angle  ?
 
 # _refine_ls.sample_thickness: Refined sample thickness as determined by dynamical refinement
-_refine_ls.sample_thickness  ?
+_refine_ls.sample_thickness  .
 
 # _refine_ls.sample_shape_expression: Expression used to determine sample thickness during dynamical refinement
-_refine_ls.sample_shape_expression  ?
+_refine_ls.sample_shape_expression  .
 
 # _refine_ls.sample_shape_details: Further details on how the sample shape/thickness are approximated
-_refine_ls.sample_shape_details ?
+_refine_ls.sample_shape_details    .
 
 # _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2
 _diffrn.flux_density: ?

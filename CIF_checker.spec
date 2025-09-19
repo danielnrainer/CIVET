@@ -12,6 +12,7 @@ a = Analysis(
 
         # Definition files for checks
         ('field_rules/3ded.cif_rules', 'field_rules'), # Include 3D ED field rules
+        ('field_rules/3ded_cif1.cif_rules', 'field_rules'), # Include 3D ED field rules in CIF1 format
         ('field_rules/hp.cif_rules', 'field_rules'), # Include HP field rules
         ('field_rules/cleanups.cif_rules', 'field_rules'), # Include cleanup operations
         

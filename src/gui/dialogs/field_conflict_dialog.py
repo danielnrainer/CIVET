@@ -193,11 +193,12 @@ class FieldConflictDialog(QDialog):
         
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
+        cancel_btn.setDefault(True)  # Set Cancel as default instead of Apply
         button_layout.addWidget(cancel_btn)
         
         apply_btn = QPushButton("Apply Resolutions")
         apply_btn.clicked.connect(self.accept)
-        apply_btn.setDefault(True)
+        # Removed setDefault(True) from apply button
         button_layout.addWidget(apply_btn)
         
         layout.addLayout(button_layout)

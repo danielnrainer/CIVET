@@ -388,6 +388,9 @@ class FieldRulesValidationDialog(QDialog):
         self.cif2_radio.setChecked(True)
         
         self.setLayout(layout)
+        
+        # Set the "Close" button as the default button instead of "Apply Selected Fixes"
+        self.close_btn.setDefault(True)
     
     def setup_issues_tab(self, tab_widget):
         """Setup the validation issues tab"""

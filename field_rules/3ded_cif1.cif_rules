@@ -5,6 +5,9 @@
 # _diffrn_ambient_temperature: Sample temperature during data collection (in K)
 _diffrn_ambient_temperature     293(5)
 
+# _cell_measurement_temperature: Sample temperature during data collection (in K)
+_cell_measurement_temperature     293(5)
+
 # _diffrn_ambient_environment: Sample environment during measurement
 _diffrn_ambient_environment     vacuum  # options: vacuum, helium, nitrogen, air
 
@@ -14,8 +17,8 @@ _exptl_crystal_colour           'white (bulk)'
 # _exptl_crystal_description: Visual description of the crystal habit
 _exptl_crystal_description  'irregular'   # suggestions: 'plate', 'needle', 'block', 'prism', ...
 
-# _cell_measurement_wavelength: Electron wavelength in Å
-_cell_measurement_wavelength    0.0251
+# _diffrn_radiation_wavelength: Electron wavelength in Å
+_diffrn_radiation_wavelength    0.0251
 
 # _diffrn_source: Primary description of the electron source
 _diffrn_source     'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
@@ -75,10 +78,10 @@ _refine_diffraction_theory_details  ?
 _diffrn_measurement_sample_tracking  no
 
 # _diffrn_measurement_sample_tracking_method: description of the method used for crystal tracking if applicable
-_diffrn_measurement_sample_tracking_method    ?
+_diffrn_measurement_sample_tracking_method    .
 
 # _computing_sample_tracking: Reference for sample tracking during collection if applicable
-_computing_sample_tracking  ?
+_computing_sample_tracking  .
 
 # _diffrn_radiation_illumination_mode: optical configuration of incident beam at the sample, i.e. distinction between TEM and STEM
 _diffrn_radiation_illumination_mode   parallel   # options: parallel, convergent
@@ -90,7 +93,7 @@ _diffrn_source_size  'SAED nominal aperture diameter 100 um, corresponding to a 
 _diffrn_measurement_method_precession  no
 
 # _diffrn_precession_semi_angle: Angle (in degrees) at the sample of the tilt from the normal direction of a radiation beam moved in a precessional scan.
-_diffrn_precession_semi_angle ?
+_diffrn_precession_semi_angle  .
 
 # _refine_diff_potential_max: Maximum electrostatic potential value in a difference Fourier map.
 _refine_diff_potential_max  ?
@@ -100,9 +103,6 @@ _refine_diff_potential_min  ?
 
 # _refine_diff_potential_RMS: Root mean square electrostatic potential value in a difference Fourier map.
 _refine_diff_potential_RMS  ?
-
-# _refine_ls_abs_structure_z-score: Z-score for absolute structure determination (Klar et al, Nature Chem. 15, 848-855)
-_refine_ls_abs_structure_z-score ?
 
 # _exptl_crystal_mosaicity: Mosaicity in degrees
 _exptl_crystal_mosaicity  ?
@@ -117,13 +117,13 @@ _exptl_crystal_mosaic_block_size  ?
 _diffrn_source_convergence_angle  ?
 
 # _refine_ls_sample_thickness: Refined sample thickness as determined by dynamical refinement
-_refine_ls_sample_thickness  ?
+_refine_ls_sample_thickness  .
 
 # _refine_ls_sample_shape_expression: Expression used to determine sample thickness during dynamical refinement
-_refine_ls_sample_shape_expression  ?
+_refine_ls_sample_shape_expression  .
 
 # _refine_ls_sample_shape_details: Further details on how the sample shape/thickness are approximated
-_refine_ls_sample_shape_details ?
+_refine_ls_sample_shape_details .
 
 # _diffrn_flux_density: Beam flux density, for electrons in e-/Å^2
 _diffrn_flux_density ?

@@ -172,7 +172,7 @@ class CIFEditor(QMainWindow):
         # Create buttons
         start_checks_button = QPushButton("Start Checks")
         start_checks_button.clicked.connect(self.start_checks)
-        refine_details_button = QPushButton("Edit Refinement Details")
+        refine_details_button = QPushButton("Edit Refinement Special Details")
         refine_details_button.clicked.connect(self.check_refine_special_details)
         format_button = QPushButton("Reformat File")
         format_button.clicked.connect(self.reformat_file)
@@ -211,7 +211,7 @@ class CIFEditor(QMainWindow):
         start_checks_action = action_menu.addAction("Start Checks")
         start_checks_action.triggered.connect(self.start_checks)
         
-        refine_details_action = action_menu.addAction("Edit Refinement Details")
+        refine_details_action = action_menu.addAction("Edit Refinement Special Details")
         refine_details_action.triggered.connect(self.check_refine_special_details)
         
         format_action = action_menu.addAction("Reformat File")
@@ -241,6 +241,12 @@ class CIFEditor(QMainWindow):
         
         check_deprecated_action = format_menu.addAction("Check Deprecated Fields")
         check_deprecated_action.triggered.connect(self.check_deprecated_fields)
+        
+        format_menu.addSeparator()
+        
+        add_compatibility_action = format_menu.addAction("Add Legacy Compatibility Fields")
+        add_compatibility_action.triggered.connect(self.add_legacy_compatibility_fields)
+        add_compatibility_action.setToolTip("Add deprecated fields alongside modern equivalents for validation tool compatibility")
 
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
@@ -676,8 +682,26 @@ class CIFEditor(QMainWindow):
         # Determine the appropriate field name based on CIF version
         if detected_version == CIFVersion.CIF2:
             field_name = '_refine.special_details'
+        elif detected_version == CIFVersion.MIXED:
+            # For MIXED format, check which field actually exists in the content
+            if self.cif_parser.get_field_value('_refine.special_details') is not None:
+                field_name = '_refine.special_details'
+            elif self.cif_parser.get_field_value('_refine_special_details') is not None:
+                field_name = '_refine_special_details'
+            else:
+                # Neither exists, so decide based on the predominant format
+                # Check if this looks more like CIF2 by counting modern vs legacy fields
+                all_fields = list(self.cif_parser.fields.keys())
+                cif2_fields = [f for f in all_fields if '.' in f]
+                cif1_fields = [f for f in all_fields if '.' not in f]
+                
+                # If more CIF2 fields, use CIF2 naming
+                if len(cif2_fields) >= len(cif1_fields):
+                    field_name = '_refine.special_details'
+                else:
+                    field_name = '_refine_special_details'
         else:
-            # Default to CIF1 format (covers CIF1, UNKNOWN, and MIXED)
+            # Default to CIF1 format (covers CIF1, UNKNOWN)
             field_name = '_refine_special_details'
         
         template = (
@@ -938,7 +962,6 @@ class CIFEditor(QMainWindow):
             # Update window title to show which field set is being used
             field_set_display = {
                 '3DED': '3D ED',
-                'HP': 'HP',
                 'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
             }
             
@@ -1028,15 +1051,28 @@ class CIFEditor(QMainWindow):
         
         # Check if we need absolute configuration handling
         if SG_number is not None and SG_number in sohncke_groups:
+            # Detect CIF format to use appropriate field names
+            content = self.text_editor.toPlainText()
+            detected_version = self.dict_manager.detect_cif_version(content)
+            
+            # Determine field names based on CIF format
+            if detected_version == CIFVersion.CIF2:
+                abs_config_field = "_chemical.absolute_configuration"
+                z_score_field = "_refine_ls.abs_structure_z-score"
+            else:
+                # Use CIF1 format for CIF1, MIXED, and UNKNOWN
+                abs_config_field = "_chemical_absolute_configuration"
+                z_score_field = "_refine_ls_abs_structure_z-score"
+            
             found = False
             for line in lines:
-                if line.startswith("_chemical_absolute_configuration"):
+                if line.startswith(abs_config_field):
                     found = True
                     break
             
             if found:
                 result = self.check_line_with_config(
-                    "_chemical_absolute_configuration", 
+                    abs_config_field, 
                     default_value='dyn', 
                     multiline=False, 
                     description="Specify if/how absolute structure was determined.", 
@@ -1051,7 +1087,7 @@ class CIFEditor(QMainWindow):
                     return True
             else:
                 result = self.add_missing_line_with_config(
-                    "_chemical_absolute_configuration", 
+                    abs_config_field, 
                     lines, 
                     default_value='dyn', 
                     multiline=False, 
@@ -1070,23 +1106,23 @@ class CIFEditor(QMainWindow):
             lines = self.text_editor.toPlainText().splitlines()  # Re-get lines after potential changes
             chemical_absolute_config_value = None
             for line in lines:
-                if line.startswith("_chemical_absolute_configuration") or line.startswith("_chemical.absolute_configuration"):
+                if line.startswith(abs_config_field):
                     parts = line.split()
                     if len(parts) > 1:
                         chemical_absolute_config_value = parts[1].strip("'\"")
                         break
             
             if chemical_absolute_config_value == 'dyn':
-                # Check if _refine_ls.abs_structure_z-score exists
+                # Check if z-score field exists
                 found_z_score = False
                 for line in lines:
-                    if line.startswith("_refine_ls.abs_structure_z-score"):
+                    if line.startswith(z_score_field):
                         found_z_score = True
                         break
                 
                 if found_z_score:
                     result = self.check_line_with_config(
-                        "_refine_ls.abs_structure_z-score", 
+                        z_score_field, 
                         default_value='', 
                         multiline=False, 
                         description="Z-score for absolute structure determination from dynamical refinement.", 
@@ -1101,7 +1137,7 @@ class CIFEditor(QMainWindow):
                         return True
                 else:
                     result = self.add_missing_line_with_config(
-                        "_refine_ls.abs_structure_z-score", 
+                        z_score_field, 
                         lines, 
                         default_value='', 
                         multiline=False, 
@@ -1599,6 +1635,68 @@ class CIFEditor(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Deprecated Field Check Error", 
                                f"Failed to check for deprecated fields:\n{str(e)}")
+
+    def add_legacy_compatibility_fields(self):
+        """Add deprecated fields alongside modern equivalents for validation tool compatibility."""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            # Parse the current CIF content
+            self.cif_parser.parse_file(content)
+            
+            # Show explanation dialog
+            reply = QMessageBox.question(
+                self, 
+                "Add Legacy Compatibility Fields",
+                "This feature adds deprecated fields alongside their modern equivalents "
+                "to ensure compatibility with validation tools (like checkCIF/PLAT) that "
+                "haven't been updated to recognize modern field names.\n\n"
+                "Example: If you have '_diffrn.ambient_temperature', this will also add "
+                "'_cell_measurement_temperature' with the same value.\n\n"
+                "This is safe and won't affect the scientific meaning of your CIF file.\n\n"
+                "Proceed with adding compatibility fields?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            
+            # Add compatibility fields
+            report = self.cif_parser.add_legacy_compatibility_fields(self.dict_manager)
+            
+            # Generate the updated CIF content
+            updated_content = self.cif_parser.generate_cif_content()
+            
+            # Update the editor
+            self.text_editor.setText(updated_content)
+            self.modified = True
+            
+            # Show results
+            if "Added" in report:
+                QMessageBox.information(
+                    self, 
+                    "Compatibility Fields Added", 
+                    report + "\n\nYour CIF file is now more compatible with legacy validation tools."
+                )
+            else:
+                QMessageBox.information(
+                    self, 
+                    "No Changes Needed", 
+                    report
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Compatibility Fields Error", 
+                f"Failed to add compatibility fields:\n{str(e)}\n\n"
+                "This might happen if the CIF file has parsing issues or if the dictionary "
+                "manager is not properly initialized."
+            )
 
     def load_custom_dictionary(self):
         """Load a custom CIF dictionary file."""

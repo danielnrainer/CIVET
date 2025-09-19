@@ -59,6 +59,112 @@ class CIFParser:
         self.content_blocks: List[Dict] = []  # Ordered list of fields, loops, and header lines
         self.header_lines: List[str] = []  # Store important header lines like data_
         
+    def add_legacy_compatibility_fields(self, dict_manager) -> str:
+        """
+        Add deprecated fields alongside their modern equivalents for validation tool compatibility.
+        
+        This addresses the issue where modern CIF dictionaries have deprecated certain fields
+        but validation tools (like checkCIF/PLAT) haven't been updated to recognize the modern
+        equivalents. By including both versions with the same value, we ensure compatibility
+        with both old and new validation systems.
+        
+        Args:
+            dict_manager: CIFDictionaryManager instance for field conversion
+            
+        Returns:
+            Report string describing what compatibility fields were added
+        """
+        if not dict_manager:
+            return "No dictionary manager provided"
+            
+        added_fields = []
+        
+        # Define critical deprecated fields that validation tools often still require
+        critical_deprecated_fields = [
+            '_cell_measurement_temperature',
+            '_cell_measurement_reflns_used',
+            '_cell_measurement_pressure',
+            '_cell_measurement_radiation',
+            '_cell_measurement_wavelength',
+            '_diffrn_source',
+            '_diffrn_radiation_type',
+            '_diffrn_radiation_wavelength'
+        ]
+        
+        # Check each critical field
+        for deprecated_field in critical_deprecated_fields:
+            # Get the modern equivalent
+            modern_field_cif2 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="CIF2")
+            modern_field_cif1 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="CIF1")
+            
+            # Choose the modern field (prefer the one that exists in our CIF)
+            modern_field = None
+            if modern_field_cif2 and modern_field_cif2 in self.fields:
+                modern_field = modern_field_cif2
+            elif modern_field_cif1 and modern_field_cif1 in self.fields:
+                modern_field = modern_field_cif1
+            elif modern_field_cif2:  # Default to CIF2 if neither exists
+                modern_field = modern_field_cif2
+            elif modern_field_cif1:  # Fallback to CIF1
+                modern_field = modern_field_cif1
+            
+            # If we have a modern field with a value and the deprecated field doesn't exist
+            if (modern_field and 
+                modern_field in self.fields and 
+                self.fields[modern_field].value and 
+                self.fields[modern_field].value != "(in loop)" and
+                deprecated_field not in self.fields):
+                
+                # Create the deprecated field with the same value
+                modern_field_obj = self.fields[modern_field]
+                deprecated_field_obj = CIFField(
+                    name=deprecated_field,
+                    value=modern_field_obj.value,
+                    is_multiline=modern_field_obj.is_multiline,
+                    line_number=None,  # Will be placed appropriately when generating content
+                    raw_lines=[]
+                )
+                
+                self.fields[deprecated_field] = deprecated_field_obj
+                
+                # Add to content blocks right after the modern field
+                self._insert_compatibility_field_in_blocks(deprecated_field_obj, modern_field)
+                
+                added_fields.append(f"{deprecated_field} = {modern_field_obj.value} (from {modern_field})")
+        
+        # Generate report
+        if added_fields:
+            report = f"Added {len(added_fields)} compatibility field(s) for legacy validation tools:\n"
+            for field_info in added_fields:
+                report += f"  • {field_info}\n"
+            report += "\nThese deprecated fields have the same values as their modern equivalents."
+        else:
+            report = "No compatibility fields needed - either modern equivalents not found or deprecated fields already exist."
+            
+        return report
+    
+    def _insert_compatibility_field_in_blocks(self, deprecated_field_obj: CIFField, modern_field_name: str):
+        """Insert a compatibility field in the content blocks right after its modern equivalent."""
+        # Find the modern field in content blocks
+        for i, block in enumerate(self.content_blocks):
+            if (block.get('type') == 'field' and 
+                block.get('content') and 
+                hasattr(block['content'], 'name') and
+                block['content'].name == modern_field_name):
+                
+                # Insert the deprecated field right after the modern one
+                self.content_blocks.insert(i + 1, {
+                    'type': 'field',
+                    'content': deprecated_field_obj
+                })
+                break
+        else:
+            # If modern field not found in blocks, append at the end
+            self.content_blocks.append({
+                'type': 'field', 
+                'content': deprecated_field_obj
+            })
+        
     def parse_file(self, content: str) -> Dict[str, CIFField]:
         """Parse CIF content and return a dictionary of fields."""
         self.fields = {}
@@ -376,11 +482,19 @@ class CIFParser:
             self.fields[field_name].value = value
             self.fields[field_name].is_multiline = self._is_multiline_value(value)
         else:
-            self.fields[field_name] = CIFField(
+            # Create new field
+            new_field = CIFField(
                 name=field_name,
                 value=value,
                 is_multiline=self._is_multiline_value(value)
             )
+            self.fields[field_name] = new_field
+            
+            # Add to content_blocks so it appears in generated content
+            self.content_blocks.append({
+                'type': 'field',
+                'content': new_field
+            })
     
     def generate_cif_content(self) -> str:
         """Generate CIF content from the current fields and loops, preserving order."""
@@ -445,8 +559,11 @@ class CIFParser:
             # Format each value in the row
             formatted_values = []
             for value in row:
+                # Handle empty string values - replace with ? (unknown value indicator)
+                if value == '':
+                    formatted_values.append('?')
                 # Quote values that need quoting
-                if self._needs_quotes(value):
+                elif self._needs_quotes(value):
                     formatted_values.append(f"'{value}'")
                 else:
                     formatted_values.append(value)
@@ -460,12 +577,14 @@ class CIFParser:
         """Add a data row to lines, breaking across multiple lines if needed to respect 80-char limit.
         
         This maintains the CIF format where a logical row can span multiple physical lines.
+        Loop data lines should have leading spaces to distinguish them from field definitions.
         """
         if not values:
             return
         
         current_line_values = []
         current_line_length = 0
+        is_first_line = True
         
         for value in values:
             value_length = len(value)
@@ -474,14 +593,21 @@ class CIFParser:
             # Account for space before value (except for first value on line)
             space_needed = 1 if current_line_values else 0
             
-            if current_line_length + space_needed + value_length <= 80:
+            # For continuation lines, account for leading space indentation
+            line_prefix_length = 0 if is_first_line else 1  # 1 space for continuation lines
+            
+            if current_line_length + space_needed + value_length + line_prefix_length <= 80:
                 # Add to current line
                 current_line_values.append(value)
                 current_line_length += space_needed + value_length
             else:
                 # Current line is full, output it and start a new line
                 if current_line_values:
-                    lines.append(' '.join(current_line_values))
+                    if is_first_line:
+                        lines.append(' '.join(current_line_values))
+                        is_first_line = False
+                    else:
+                        lines.append(' ' + ' '.join(current_line_values))  # Add leading space
                 
                 # Start new line with this value
                 current_line_values = [value]
@@ -489,10 +615,17 @@ class CIFParser:
         
         # Add the final line if it has content
         if current_line_values:
-            lines.append(' '.join(current_line_values))
+            if is_first_line:
+                lines.append(' '.join(current_line_values))
+            else:
+                lines.append(' ' + ' '.join(current_line_values))  # Add leading space
     
     def _format_field(self, field: CIFField) -> List[str]:
-        """Format a CIF field for output with proper 80-character line length handling."""
+        """Format a CIF field for output with proper alignment and 80-character line length handling.
+        
+        Values are aligned to column 36 for improved readability. If the field name is too long
+        (≥35 characters), falls back to 2 spaces between field name and value.
+        """
         if field.value is None or field.value == "(in loop)":
             return [field.name]
         
@@ -519,16 +652,32 @@ class CIFParser:
             # Single line format with proper quoting and length checking
             value = field.value
             
-            # Determine if we need quotes
-            needs_quotes = self._needs_quotes(value)
-            formatted_value = f"'{value}'" if needs_quotes else value
+            # Handle empty string values - replace with ? (unknown value indicator)
+            if value == '':
+                formatted_value = '?'
+            else:
+                # Determine if we need quotes
+                needs_quotes = self._needs_quotes(value)
+                formatted_value = f"'{value}'" if needs_quotes else value
             
-            # Check total line length (field name + 4 spaces + value)
-            total_length = len(field.name) + 4 + len(formatted_value)
+            # Calculate spacing to align values to column 36 (0-indexed = 35)
+            field_name_length = len(field.name)
+            target_column = 35  # 0-indexed, so this is column 36 in 1-indexed terms
+            
+            if field_name_length < target_column - 1:  # -1 to leave at least 1 space
+                # Can align to target column
+                spaces_needed = target_column - field_name_length
+                spacing = ' ' * spaces_needed
+            else:
+                # Field name too long, use minimum 2 spaces
+                spacing = '  '
+            
+            # Check total line length
+            total_length = field_name_length + len(spacing) + len(formatted_value)
             
             if total_length <= 80:
                 # Fits on one line
-                return [f"{field.name}    {formatted_value}"]
+                return [f"{field.name}{spacing}{formatted_value}"]
             else:
                 # Too long for single line, use multiline format
                 return [field.name, ';', value, ';']
