@@ -273,9 +273,12 @@ class CIFParser:
             if line.startswith('_') or line.lower().startswith('loop_'):
                 break
             
-            # Parse data values from this line
-            values = self._parse_data_line(line)
+            # Check for multiline values (semicolon blocks) in the data
+            values, multiline_consumed = self._parse_loop_data_line(lines, i)
             current_row.extend(values)
+            
+            # Advance by the number of lines consumed (including multiline blocks)
+            i += multiline_consumed
             
             # Check if we have a complete row
             if len(current_row) >= len(field_names):
@@ -283,8 +286,6 @@ class CIFParser:
                 row = current_row[:len(field_names)]
                 data_rows.append(row)
                 current_row = current_row[len(field_names):]
-            
-            i += 1
         
         # Handle any remaining partial row
         if current_row:
@@ -335,6 +336,49 @@ class CIFParser:
                     values.append(value)
         
         return values
+
+    def _parse_loop_data_line(self, lines: List[str], start_index: int) -> Tuple[List[str], int]:
+        """Parse a line of loop data values, handling multiline semicolon blocks.
+        
+        Returns:
+            Tuple of (values, lines_consumed)
+        """
+        line = lines[start_index].strip()
+        
+        # Special case: check if this line is just a semicolon (multiline block start)
+        if line == ';':
+            multiline_value, consumed = self._parse_multiline_in_loop(lines, start_index + 1, 0)
+            return [multiline_value], consumed + 1  # +1 for the semicolon line itself
+        
+        # Otherwise, parse values from this line normally
+        values = self._parse_data_line(line)
+        return values, 1
+
+    def _parse_multiline_in_loop(self, lines: List[str], start_index: int, char_index: int) -> Tuple[str, int]:
+        """Parse a multiline value within loop data starting from after a semicolon.
+        
+        Returns:
+            Tuple of (multiline_value, total_lines_consumed_after_semicolon)
+        """
+        value_lines = []
+        i = start_index
+        
+        # Parse lines until closing semicolon
+        while i < len(lines):
+            line = lines[i]
+            
+            # Check for closing semicolon
+            if line.strip() == ';':
+                i += 1
+                break
+            
+            # Add line to multiline value (preserve original formatting)
+            value_lines.append(line.rstrip())
+            i += 1
+        
+        multiline_value = '\n'.join(value_lines)
+        lines_consumed = i - start_index
+        return multiline_value, lines_consumed
     
     def _parse_field(self, lines: List[str], start_index: int) -> Tuple[str, str, int]:
         """Parse a single field starting at the given line index.
@@ -514,11 +558,8 @@ class CIFParser:
                 formatted_lines = self._format_loop(loop)
                 lines.extend(formatted_lines)
                 
-                # Add empty line after loop if next block is a field (not another loop or header)
-                if i + 1 < len(self.content_blocks):
-                    next_block = self.content_blocks[i + 1]
-                    if next_block['type'] == 'field':
-                        lines.append('')  # Add empty line after loop before next field
+                # Always add empty line after loop, regardless of what follows
+                lines.append('')
         
         # If no content_blocks (backward compatibility), fall back to headers + fields
         if not self.content_blocks:
@@ -556,20 +597,26 @@ class CIFParser:
         
         # Add data rows with proper line length handling
         for row in loop.data_rows:
-            # Format each value in the row
+            # Format each value in the row, handling multiline values specially
             formatted_values = []
             for value in row:
                 # Handle empty string values - replace with ? (unknown value indicator)
                 if value == '':
                     formatted_values.append('?')
-                # Quote values that need quoting
+                # Check if this is a multiline value (contains newlines)
+                elif '\n' in value:
+                    # Use semicolon block format for multiline values
+                    formatted_values.append(';')  # Opening semicolon
+                    formatted_values.extend(value.split('\n'))  # Each line as separate element
+                    formatted_values.append(';')  # Closing semicolon
+                # Quote values that need quoting (single-line values only)
                 elif self._needs_quotes(value):
                     formatted_values.append(f"'{value}'")
                 else:
                     formatted_values.append(value)
             
-            # Now output the values, breaking lines as needed to stay under 80 chars
-            self._add_data_row_with_line_breaks(lines, formatted_values)
+            # Now output the values with special handling for multiline blocks
+            self._add_data_row_with_multiline_handling(lines, formatted_values)
         
         return lines
     
@@ -619,6 +666,46 @@ class CIFParser:
                 lines.append(' '.join(current_line_values))
             else:
                 lines.append(' ' + ' '.join(current_line_values))  # Add leading space
+
+    def _add_data_row_with_multiline_handling(self, lines: List[str], values: List[str]):
+        """Add a data row to lines, with special handling for multiline semicolon blocks."""
+        if not values:
+            return
+        
+        i = 0
+        current_line_values = []
+        
+        while i < len(values):
+            value = values[i]
+            
+            # Check if this is a multiline block (starts with semicolon)
+            if value == ';':
+                # Output any accumulated single-line values first
+                if current_line_values:
+                    lines.append(' '.join(current_line_values))
+                    current_line_values = []
+                
+                # Output opening semicolon on its own line
+                lines.append(';')
+                i += 1
+                
+                # Output multiline content
+                while i < len(values) and values[i] != ';':
+                    lines.append(values[i])
+                    i += 1
+                
+                # Output closing semicolon
+                if i < len(values) and values[i] == ';':
+                    lines.append(';')
+                    i += 1
+            else:
+                # Regular value - add to current line
+                current_line_values.append(value)
+                i += 1
+        
+        # Output any remaining single-line values
+        if current_line_values:
+            lines.append(' '.join(current_line_values))
     
     def _format_field(self, field: CIFField) -> List[str]:
         """Format a CIF field for output with proper alignment and 80-character line length handling.
