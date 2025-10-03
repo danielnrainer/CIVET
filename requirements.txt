@@ -1,4 +1,4 @@
-# CIF Checker Application Requirements
+# CIVET (CIF Validation and Editing Tool) Application Requirements
 # For development and building standalone executable
 
 # GUI Framework - Core requirement for the application
@@ -7,13 +7,9 @@ PyQt6>=6.4.0
 # HTTP library for downloading CIF dictionaries from URLs
 requests>=2.28.0
 
-# Build tools for creating standalone executable
+# Build tools for creating standalone executable (development only)
 pyinstaller>=5.13.0
 
-# Additional libraries that may be useful for future development
-# typing-extensions>=4.0.0  # Usually included with Python 3.8+
-
-# Note: Standard library modules are automatically included:
+# Note: All other dependencies are part of Python standard library:
 # - os, sys, re, json, tempfile, urllib.parse
-# - typing, dataclasses, enum, datetime
-# - pathlib (Python 3.4+)
+# - typing, dataclasses, enum, datetime, pathlib

@@ -32,7 +32,7 @@ def load_cif_field_rules(filepath):
         descriptions = {}
         
         # First pass: collect descriptions from comments
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 # Description on its own line
@@ -49,7 +49,7 @@ def load_cif_field_rules(filepath):
                         descriptions[field_name] = comment_part.strip()
         
         # Second pass: collect field definitions
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 # Skip empty lines and comments

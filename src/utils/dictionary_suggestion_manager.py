@@ -1,5 +1,5 @@
 """
-Dictionary Suggestion Manager for CIF Checker
+Dictionary Suggestion Manager for CIVET
 
 This module analyzes CIF content and suggests relevant COMCIFS dictionaries
 based on field patterns that indicate specialized structure types.

@@ -1,72 +1,71 @@
-# CIF Checker
+# CIVET
 
-A CIF (Crystallographic Information File) editor and validator with format conversion and intelligent field validation.
-
-## Overview
-
-CIF Checker is designed for crystallographic workflows, particularly 3D electron diffraction (3DED) and high-pressure crystallography. It provides CIF1/CIF2 format conversion, field validation, and multi-dictionary support.
+**CIF Validation and Editing Tool** - A modern CIF (Crystallographic Information File) editor and validator with intelligent field checking, format conversion, and UTF-8 support.
 
 ## Key Features
 
-- **CIF1 ↔ CIF2 Format Conversion**: Bidirectional format conversion with intelligent field mapping
-- **Field Validation**: Validate against predefined field sets (3DED, HP, or custom .cif_rules files)  
-- **Selective Conversion**: Choose specific types of field conversions (Official/CIF2-Extensions/All)
-- **Dictionary Management**: Multi-dictionary support with automatic suggestions based on content
-- **Smart Editing**: Syntax highlighting, line length management, and real-time validation
+- **Smart Field Validation**: Visual indicators for adding (🆕), editing (✏️), and correcting (⚠️) fields
+- **CIF1 ↔ CIF2 Format Conversion**: Bidirectional conversion with intelligent field mapping
+- **Multiline Field Support**: Proper handling of semicolon-delimited multiline values
+- **UTF-8 Support**: Full Unicode support for international characters (Å, °, ±, ₁, ₂, etc.)
+- **Dictionary Management**: Multi-dictionary support with automatic content-based suggestions
+- **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, HP, or custom)
+- **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
 
 ## Quick Start
 
 ### Standalone Executable (Recommended)
-1. Download `CIF_checker.exe` from releases
+1. Download `CIVET.exe` from releases
 2. Run directly - no Python installation required
 
 ### From Source
 ```bash
-git clone https://github.com/danielnrainer/CIF_checker.git
-cd CIF_checker
+git clone https://github.com/danielnrainer/CIVET.git
+cd CIVET
 pip install -r requirements.txt
 python src/main.py
 ```
 
+## Recent Enhancements (v2.1.0)
+
+### Enhanced User Experience
+- **Color-coded dialogs**: Green (add), blue (edit), orange (differs from default)
+- **Multiline editing**: Proper display and editing of complex field values
+- **Confirmation dialogs**: Prevents accidental formatting changes
+- **Current file display**: Shows filename in window title
+
+### Technical Improvements
+- **Complete UTF-8 support**: All text operations now handle Unicode properly
+- **Improved field parsing**: Better handling of multi-line and next-line field values
+- **Enhanced dialog system**: Context information preserved in all dialogs
+
 ## Building Executable
 ```bash
 pip install pyinstaller
-pyinstaller CIF_checker.spec
+pyinstaller CIVET.spec
 ```
 
-## Field Rules
-Create custom validation rules using `.cif_rules` files:
+## Custom Field Rules
+Create validation rules using `.cif_rules` files:
 ```
 # Example custom field rules
 _chemical_formula_sum ? # Chemical formula
 _space_group_name_H-M_alt 'P 1' # Space group
-_diffrn_ambient_temperature 293 # Temperature
+_diffrn_ambient_temperature 293 # Temperature in K
 ```
 
 Built-in sets: **3DED** (electron diffraction), **HP** (high-pressure)
 
-## Recent Enhancements
-
-### Enhanced Field Validation
-- **Selective Conversions**: Convert only official mappings, CIF2-extensions, or all auto-fixable fields
-- **Real-time Feedback**: Dynamic button counts and format-aware validation
-- **CIF2-Only Extensions**: Access to 30+ specialized field mappings beyond core CIF specification
-
-### Smart Dictionary Suggestions
-- **Automatic Detection**: Analyzes CIF content to suggest relevant dictionaries (twinning, powder, modulated structures, etc.)
-- **One-Click Integration**: Download and integrate COMCIFS dictionaries directly
-
 ## System Requirements
-- Python 3.8+ (source) or Windows (executable)
-- PyQt6, requests
-- Optional: Internet for dictionary downloads
+- **Executable**: Windows 10/11 (64-bit)
+- **Source**: Python 3.8+, PyQt6, requests
 
 ## License
-MIT License - see [LICENSE](LICENSE) file
+BSD Clause License - see [LICENSE](LICENSE)
 
 ## Citation
 ```
-CIF Checker - Crystallographic Information File Editor and Validator  
-GitHub: https://github.com/danielnrainer/CIF_checker
+CIVET - CIF Validation and Editing Tool
+GitHub: https://github.com/danielnrainer/CIVET
 ```
 

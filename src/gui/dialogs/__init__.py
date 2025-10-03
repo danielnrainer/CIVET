@@ -1,4 +1,4 @@
-"""Dialog classes for the CIF Checker application."""
+"""Dialog classes for the CIVET application."""
 
 from .input_dialog import CIFInputDialog
 from .multiline_dialog import MultilineInputDialog

@@ -89,7 +89,7 @@ class CIFTextEditor(QWidget):
         settings_path = os.path.join(os.path.dirname(__file__), '..', 'editor_settings.json')
         try:
             if os.path.exists(settings_path):
-                with open(settings_path, 'r') as f:
+                with open(settings_path, 'r', encoding='utf-8') as f:
                     saved_settings = json.load(f)
                     self.settings.update(saved_settings)
         except Exception as e:
@@ -99,7 +99,7 @@ class CIFTextEditor(QWidget):
         """Save editor settings to JSON file."""
         settings_path = os.path.join(os.path.dirname(__file__), '..', 'editor_settings.json')
         try:
-            with open(settings_path, 'w') as f:
+            with open(settings_path, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=4)
         except Exception as e:
             print(f"Error saving settings: {e}")

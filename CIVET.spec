@@ -10,11 +10,11 @@ a = Analysis(
         # GUI configuration files
         ('src/gui/editor_settings.json', 'gui'),              # Include editor settings file
 
-        # Definition files for checks
-        ('field_rules/3ded.cif_rules', 'field_rules'), # Include 3D ED field rules
-        ('field_rules/3ded_cif1.cif_rules', 'field_rules'), # Include 3D ED field rules in CIF1 format
-        ('field_rules/hp.cif_rules', 'field_rules'), # Include HP field rules
-        ('field_rules/cleanups.cif_rules', 'field_rules'), # Include cleanup operations
+        # Field definition files for validation
+        ('field_rules/3ded.cif_rules', 'field_rules'),        # 3D ED field rules
+        ('field_rules/3ded_cif1.cif_rules', 'field_rules'),   # 3D ED field rules in CIF1 format
+        ('field_rules/hp.cif_rules', 'field_rules'),          # High-pressure field rules
+        ('field_rules/cleanups.cif_rules', 'field_rules'),    # Cleanup operations
         
         # CIF Dictionary files - Essential for field validation and conversion
         ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
@@ -111,7 +111,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='CIF_checker',
+    name='CIVET',
     debug=False,                          # Set to True for debugging builds
     bootloader_ignore_signals=False,
     strip=False,                          # Don't strip symbols for better error messages
@@ -124,5 +124,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='icon.ico'  # Uncomment and add icon file path if available
+    # icon='civet.ico'  # Uncomment and add icon file path if available
 )

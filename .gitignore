@@ -28,3 +28,6 @@ dist/
 deprecated_fields_analysis_sifted.txt
 .gitignore
 deprecated_fields_analysis.txt
+
+# until done properly
+civet.ico

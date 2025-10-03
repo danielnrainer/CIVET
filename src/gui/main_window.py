@@ -93,7 +93,7 @@ class CIFEditor(QMainWindow):
         self.save_settings()
 
     def init_ui(self):
-        self.setWindowTitle("EDCIF-check")
+        self.setWindowTitle("CIVET")
         self.setGeometry(100, 100, 900, 700)
 
         # Create central widget and main layout
@@ -322,6 +322,161 @@ class CIFEditor(QMainWindow):
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
 
+    def update_window_title(self, filepath=None):
+        """Update window title with current filename."""
+        if filepath:
+            import os
+            filename = os.path.basename(filepath)
+            self.setWindowTitle(f"CIVET - {filename}")
+        else:
+            self.setWindowTitle("CIVET")
+
+    def extract_field_value(self, lines, field_index, field_name):
+        """Extract the value for a CIF field, handling cases where value might be on next line or in semicolon blocks."""
+        current_line = lines[field_index]
+        
+        # First, try to get value from the same line
+        line_parts = current_line.split()
+        if len(line_parts) > 1:
+            # Value is on the same line as field name
+            current_value = " ".join(line_parts[1:])
+            return current_value.strip()
+        
+        # If no value on same line, check the next line
+        if field_index + 1 < len(lines):
+            next_line = lines[field_index + 1].strip()
+            
+            # Check if it's a semicolon-delimited multiline value
+            if next_line == ';':
+                # Extract content between semicolons
+                multiline_content = []
+                for i in range(field_index + 2, len(lines)):
+                    line = lines[i]
+                    if line.strip() == ';':
+                        # Found closing semicolon
+                        break
+                    multiline_content.append(line)
+                
+                # Join the multiline content
+                if multiline_content:
+                    # Remove leading whitespace consistently
+                    cleaned_lines = []
+                    for line in multiline_content:
+                        # Keep the line as-is but strip trailing whitespace
+                        cleaned_lines.append(line.rstrip())
+                    return '\n'.join(cleaned_lines)
+                else:
+                    return ""
+            
+            # Check if next line looks like a regular value (not another field name or empty)
+            elif next_line and not next_line.startswith('_') and not next_line.startswith('#'):
+                return next_line.strip()
+        
+        # No value found
+        return ""
+
+    def update_field_value(self, lines, field_index, field_name, new_value):
+        """Update the value for a CIF field, handling cases where value might be on next line or in semicolon blocks."""
+        removable_chars = "'"
+        current_line = lines[field_index]
+        
+        # Check if current line has a value
+        line_parts = current_line.split()
+        if len(line_parts) > 1:
+            # Value is on the same line as field name
+            stripped_value = new_value.strip(removable_chars)
+            if ' ' in stripped_value or ',' in stripped_value or '\n' in stripped_value:
+                # If value contains spaces, commas, or newlines, use quotes or semicolons
+                if '\n' in stripped_value:
+                    # Multiline value - use semicolon format
+                    lines[field_index] = field_name
+                    # Insert semicolon block after current line
+                    semicolon_lines = [';'] + stripped_value.split('\n') + [';']
+                    for i, semicolon_line in enumerate(semicolon_lines):
+                        lines.insert(field_index + 1 + i, semicolon_line)
+                else:
+                    # Single line with spaces/commas - use quotes
+                    formatted_value = f"'{stripped_value}'"
+                    lines[field_index] = f"{field_name} {formatted_value}"
+            else:
+                # Simple value without spaces
+                lines[field_index] = f"{field_name} {stripped_value}"
+        else:
+            # No value on same line, check if next line has value
+            if field_index + 1 < len(lines):
+                next_line = lines[field_index + 1].strip()
+                
+                if next_line == ';':
+                    # It's a semicolon-delimited multiline value - replace the entire block
+                    # Find the end of the semicolon block
+                    end_index = field_index + 1
+                    for i in range(field_index + 2, len(lines)):
+                        if lines[i].strip() == ';':
+                            end_index = i
+                            break
+                    
+                    # Remove the old semicolon block
+                    del lines[field_index + 1:end_index + 1]
+                    
+                    # Insert new semicolon block
+                    stripped_value = new_value.strip(removable_chars)
+                    if '\n' in stripped_value:
+                        # Multiline value
+                        semicolon_lines = [';'] + stripped_value.split('\n') + [';']
+                    else:
+                        # Single line value
+                        semicolon_lines = [';', stripped_value, ';']
+                    
+                    for i, semicolon_line in enumerate(semicolon_lines):
+                        lines.insert(field_index + 1 + i, semicolon_line)
+                
+                elif next_line and not next_line.startswith('_') and not next_line.startswith('#'):
+                    # Next line has a regular value, replace it
+                    stripped_value = new_value.strip(removable_chars)
+                    if '\n' in stripped_value:
+                        # Convert to semicolon format
+                        lines[field_index + 1] = ';'
+                        semicolon_lines = stripped_value.split('\n') + [';']
+                        for i, semicolon_line in enumerate(semicolon_lines):
+                            lines.insert(field_index + 2 + i, semicolon_line)
+                    else:
+                        # Simple replacement
+                        if ' ' in stripped_value or ',' in stripped_value:
+                            formatted_value = f"'{stripped_value}'"
+                        else:
+                            formatted_value = stripped_value
+                        lines[field_index + 1] = f" {formatted_value}"
+                else:
+                    # Next line doesn't have value, add value to current line
+                    stripped_value = new_value.strip(removable_chars)
+                    if '\n' in stripped_value:
+                        # Multiline value - use semicolon format
+                        semicolon_lines = [';'] + stripped_value.split('\n') + [';']
+                        for i, semicolon_line in enumerate(semicolon_lines):
+                            lines.insert(field_index + 1 + i, semicolon_line)
+                    else:
+                        # Single line value
+                        if ' ' in stripped_value or ',' in stripped_value:
+                            formatted_value = f"'{stripped_value}'"
+                        else:
+                            formatted_value = stripped_value
+                        lines[field_index] = f"{field_name} {formatted_value}"
+            else:
+                # No next line, add value to current line
+                stripped_value = new_value.strip(removable_chars)
+                if '\n' in stripped_value:
+                    # Multiline value - use semicolon format
+                    semicolon_lines = [';'] + stripped_value.split('\n') + [';']
+                    for i, semicolon_line in enumerate(semicolon_lines):
+                        lines.insert(field_index + 1 + i, semicolon_line)
+                else:
+                    # Single line value
+                    if ' ' in stripped_value or ',' in stripped_value:
+                        formatted_value = f"'{stripped_value}'"
+                    else:
+                        formatted_value = stripped_value
+                    lines[field_index] = f"{field_name} {formatted_value}"
+
     def select_initial_file(self):
         file_filter = "CIF Files (*.cif);;All Files (*.*)"
         self.current_file, _ = QFileDialog.getOpenFileName(
@@ -367,7 +522,7 @@ class CIFEditor(QMainWindow):
             filepath = self.current_file
 
         try:
-            with open(filepath, "r") as file:
+            with open(filepath, "r", encoding="utf-8") as file:
                 content = file.read()
             self.text_editor.setText(content)
             self.current_file = filepath
@@ -378,7 +533,7 @@ class CIFEditor(QMainWindow):
             
             self.update_status_bar()
             self.add_to_recent_files(filepath)
-            self.setWindowTitle(f"EDCIF-check - {filepath}")
+            self.update_window_title(filepath)
             
             # Prompt for dictionary suggestions after opening CIF file
             self.prompt_for_dictionary_suggestions(content)
@@ -444,7 +599,7 @@ class CIFEditor(QMainWindow):
 
     def save_to_file(self, filepath):
         try:
-            with open(filepath, "w") as file:
+            with open(filepath, "w", encoding="utf-8") as file:
                 content = self.text_editor.toPlainText().strip()
                 file.write(content)
             self.current_file = filepath
@@ -452,7 +607,7 @@ class CIFEditor(QMainWindow):
             self.update_status_bar()
             QMessageBox.information(self, "Success", 
                                   f"File saved successfully:\n{filepath}")
-            self.setWindowTitle(f"EDCIF-check - {filepath}")
+            self.update_window_title(filepath)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
 
@@ -463,22 +618,27 @@ class CIFEditor(QMainWindow):
         
         for i, line in enumerate(lines):
             if line.startswith(prefix):
-                current_value = " ".join(line.split()[1:])
+                current_value = self.extract_field_value(lines, i, prefix)
+                
+                # Determine operation type based on whether value differs from default
+                operation_type = "edit"
+                if default_value:
+                    # Clean both values for comparison
+                    clean_current = current_value.strip().strip("'\"")
+                    clean_default = str(default_value).strip().strip("'\"")
+                    if clean_current and clean_current != clean_default:
+                        operation_type = "different"
+                
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value)
+                    current_value, default_value, operation_type=operation_type)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
-                    # Preserve original quoting style - only quote if value has spaces or special chars
-                    stripped_value = value.strip(removable_chars)
-                    if ' ' in stripped_value or ',' in stripped_value:
-                        formatted_value = f"'{stripped_value}'"
-                    else:
-                        formatted_value = stripped_value
-                    lines[i] = f"{prefix} {formatted_value}"
+                    # Update the field value properly
+                    self.update_field_value(lines, i, prefix, value)
                     self.text_editor.setText("\n".join(lines))
                 return result
 
@@ -491,7 +651,7 @@ class CIFEditor(QMainWindow):
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
             f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
-            default_value if default_value else "", default_value)
+            default_value if default_value else "", default_value, operation_type="add")
         
         if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
             return result
@@ -571,7 +731,7 @@ class CIFEditor(QMainWindow):
         for i, line in enumerate(lines):
             if line.startswith(prefix):
                 field_found = True
-                current_value = " ".join(line.split()[1:]).strip(removable_chars)
+                current_value = self.extract_field_value(lines, i, prefix).strip(removable_chars)
                 
                 # If skip_matching_defaults is enabled and current value matches default
                 if config.get('skip_matching_defaults', False) and default_value:
@@ -582,21 +742,25 @@ class CIFEditor(QMainWindow):
                         return QDialog.DialogCode.Accepted  # Skip this field
                 
                 # Show normal edit dialog
+                # Determine operation type based on whether value differs from default
+                operation_type = "edit"
+                if default_value:
+                    # Clean both values for comparison
+                    clean_current = current_value.strip().strip("'\"")
+                    clean_default = str(default_value).strip().strip("'\"")
+                    if clean_current and clean_current != clean_default:
+                        operation_type = "different"
+                
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value)
+                    current_value, default_value, operation_type=operation_type)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
-                    # Preserve original quoting style - only quote if value has spaces or special chars
-                    stripped_value = value.strip(removable_chars)
-                    if ' ' in stripped_value or ',' in stripped_value:
-                        formatted_value = f"'{stripped_value}'"
-                    else:
-                        formatted_value = stripped_value
-                    lines[i] = f"{prefix} {formatted_value}"
+                    # Update the field value properly
+                    self.update_field_value(lines, i, prefix, value)
                     self.text_editor.setText("\n".join(lines))
                 return result
         
@@ -916,7 +1080,7 @@ class CIFEditor(QMainWindow):
         if config.get('reformat_after_checks', False):
             self.reformat_file()
         
-        self.setWindowTitle("EDCIF-check")
+        self.setWindowTitle("CIVET")
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
 
     def _process_single_field_set(self, config, initial_state):
@@ -965,7 +1129,7 @@ class CIFEditor(QMainWindow):
                 'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
             }
             
-            self.setWindowTitle(f"EDCIF-check - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
+            self.setWindowTitle(f"CIVET - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
             
             # Parse the current CIF content
             content = self.text_editor.toPlainText()
@@ -1014,7 +1178,7 @@ class CIFEditor(QMainWindow):
                 
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
+                    self.setWindowTitle("CIVET")
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1028,7 +1192,7 @@ class CIFEditor(QMainWindow):
             
         except Exception as e:
             self.text_editor.setText(initial_state)
-            self.setWindowTitle("EDCIF-check")
+            self.setWindowTitle("CIVET")
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
             return False
     
@@ -1080,7 +1244,7 @@ class CIFEditor(QMainWindow):
                 )
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
+                    self.setWindowTitle("CIVET")
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1096,7 +1260,7 @@ class CIFEditor(QMainWindow):
                 )
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("EDCIF-check")
+                    self.setWindowTitle("CIVET")
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1130,7 +1294,7 @@ class CIFEditor(QMainWindow):
                     )
                     if result == RESULT_ABORT:
                         self.text_editor.setText(initial_state)
-                        self.setWindowTitle("EDCIF-check")
+                        self.setWindowTitle("CIVET")
                         QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                         return False
                     elif result == RESULT_STOP_SAVE:
@@ -1146,7 +1310,7 @@ class CIFEditor(QMainWindow):
                     )
                     if result == RESULT_ABORT:
                         self.text_editor.setText(initial_state)
-                        self.setWindowTitle("EDCIF-check")
+                        self.setWindowTitle("CIVET")
                         QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                         return False
                     elif result == RESULT_STOP_SAVE:
@@ -1156,6 +1320,17 @@ class CIFEditor(QMainWindow):
 
     def reformat_file(self):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
+        # Ask for user confirmation before reformatting
+        reply = QMessageBox.question(self, "Confirm Reformatting",
+                                   "This will reformat the entire CIF file to handle long lines and proper formatting.\n\n"
+                                   "This may change existing formatting that you have intentionally applied.\n\n"
+                                   "Do you want to proceed with reformatting?",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                   QMessageBox.StandardButton.No)
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
         try:
             # Use the CIF parser's reformatting functionality
             current_content = self.text_editor.toPlainText()
