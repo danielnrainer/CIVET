@@ -124,5 +124,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='civet.ico'  # Uncomment and add icon file path if available
+    icon='civet.ico'  # CIVET application icon
 )

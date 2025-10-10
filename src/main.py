@@ -1,6 +1,7 @@
 import sys
 import os
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QIcon
 from gui.main_window import CIFEditor
 
 def main():
@@ -25,6 +26,11 @@ def main():
         pass
     
     app = QApplication(sys.argv)
+    
+    # Set application icon (for taskbar)
+    icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "civet.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     # Set application-wide encoding attributes
     app.setProperty("encoding", "utf-8")

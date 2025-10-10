@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QButtonGroup)
 from PyQt6.QtCore import Qt, QRegularExpression, QTimer
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
-                        QFontMetrics, QTextCursor, QTextDocument)
+                        QFontMetrics, QTextCursor, QTextDocument, QIcon)
 import os
 import json
 import sys
@@ -95,6 +95,11 @@ class CIFEditor(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("CIVET")
         self.setGeometry(100, 100, 900, 700)
+        
+        # Set window icon
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "civet.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Create central widget and main layout
         central_widget = QWidget()
