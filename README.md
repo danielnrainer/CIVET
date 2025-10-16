@@ -44,6 +44,12 @@ If the error message `From 6.5.0, xcb-cursor0 or libxcb-cursor0 is needed to loa
 when you run `python src/main.py`, 
 you need to install packages `libxcb-cursor0` and `libxcb-util1` or equivalent package names for your distribution.
 
+To execute after the initial installation:
+```bash
+source CIVET/civet_virtual/bin/activate
+python CIVET/src/main.py
+```
+
 ## Recent Enhancements (v2.1.0)
 
 ### Enhanced User Experience
