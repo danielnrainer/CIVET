@@ -18,12 +18,36 @@
 1. Download `CIVET.exe` from releases
 2. Run directly - no Python installation required
 
-### From Source
+### From Source (Windows)
 ```bash
 git clone https://github.com/danielnrainer/CIVET.git
 cd CIVET
 pip install -r requirements.txt
 python src/main.py
+```
+
+### From source (Linux)
+
+Linux distributions do not like use of `pip` outside a virtual environment:
+
+```bash
+git clone https://github.com/danielnrainer/CIVET.git
+cd CIVET
+mkdir civet_virtual
+python -m venv ./civet_virtual
+source ./civet_virtual/bin/activate
+pip install -r requirements.txt
+python src/main.py
+```
+
+If the error message `From 6.5.0, xcb-cursor0 or libxcb-cursor0 is needed to load the Qt xcb platform plugin` appears
+when you run `python src/main.py`, 
+you need to install packages `libxcb-cursor0` and `libxcb-util1` or equivalent package names for your distribution.
+
+To execute after the initial installation:
+```bash
+source CIVET/civet_virtual/bin/activate
+python CIVET/src/main.py
 ```
 
 ## Recent Enhancements (v2.1.0)
