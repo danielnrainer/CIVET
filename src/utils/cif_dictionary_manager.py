@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
-from .cif_core_parser import CIFCoreParser
+from .cif_dictionary_parser import CIFDictionaryParser
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
 from .cif2_only_extensions import CIF2_ONLY_FIELD_MAPPINGS
 
@@ -185,13 +185,13 @@ class CIFDictionaryManager:
             # Use resource path function to find bundled dictionary
             cif_core_path = get_resource_path('dictionaries/cif_core.dic')
             
-        self.parser = CIFCoreParser(cif_core_path)
+        self.parser = CIFDictionaryParser(cif_core_path)
         self._loaded = False
         self._cif1_to_cif2: Optional[Dict[str, str]] = None
         self._cif2_to_cif1: Optional[Dict[str, List[str]]] = None
         
         # Multi-dictionary support with enhanced tracking
-        self._additional_parsers: List[CIFCoreParser] = []
+        self._additional_parsers: List[CIFDictionaryParser] = []
         self._dictionary_infos: List[DictionaryInfo] = []
         
         # Dictionary suggestion system
@@ -470,7 +470,10 @@ class CIFDictionaryManager:
                 return True
                 
             # Also check for save frames with the field name
-            pattern = rf"save_{re.escape(field_name.replace('.', r'\.')).replace('_', r'[_\.]')}"
+            # Build pattern outside f-string to avoid backslash issues
+            escaped_field = re.escape(field_name.replace('.', r'\.'))
+            pattern_str = escaped_field.replace('_', r'[_\.]')
+            pattern = rf"save_{pattern_str}"
             if re.search(pattern, content, re.IGNORECASE):
                 return True
                 
@@ -862,7 +865,7 @@ class CIFDictionaryManager:
                 raise FileNotFoundError(f"Dictionary file not found: {dictionary_path}")
             
             # Create parser for the additional dictionary
-            additional_parser = CIFCoreParser(dictionary_path)
+            additional_parser = CIFDictionaryParser(dictionary_path)
             
             # Test that it can be parsed and contains valid mappings
             cif1_to_cif2, cif2_to_cif1 = additional_parser.parse_dictionary()
@@ -922,7 +925,7 @@ class CIFDictionaryManager:
             
             try:
                 # Create parser for the downloaded dictionary
-                additional_parser = CIFCoreParser(temp_path)
+                additional_parser = CIFDictionaryParser(temp_path)
                 
                 # Test that it can be parsed and contains valid mappings
                 cif1_to_cif2, cif2_to_cif1 = additional_parser.parse_dictionary()

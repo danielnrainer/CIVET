@@ -1,4 +1,4 @@
-# CIF Field Constants for CIVET, CIF2 notation
+# CIF Field Constants for CIVET, modern notation
 # Fields and their standard values for electron diffraction CIF files
 # References: https://github.com/COMCIFS/cif_ed and personal preferences/opinions by DNR (based on Synergy-ED Southampton)
 

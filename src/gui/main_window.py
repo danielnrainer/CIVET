@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
-from utils.CIF_parser import CIFParser
+from utils.CIF_parser import CIFParser, CIFField
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif2_only_extensions import ExtendedCIFDictionaryManager
 from utils.cif_format_converter import CIFFormatConverter
@@ -696,37 +696,18 @@ class CIFEditor(QMainWindow):
         if self.dict_manager.is_field_deprecated(prefix):
             modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="CIF1")
             if modern_equivalent:
-                # Show deprecated field warning with suggestion
-                reply = QMessageBox.question(
-                    self, 
-                    "Deprecated Field Warning",
-                    f"The field '{prefix}' is deprecated.\n\n"
-                    f"Modern equivalent: '{modern_equivalent}'\n\n"
-                    f"Would you like to replace it with the modern equivalent?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Yes
-                )
-                
-                if reply == QMessageBox.StandardButton.Yes:
-                    # Replace deprecated field with modern equivalent
-                    return self._replace_deprecated_field(prefix, modern_equivalent)
-                elif reply == QMessageBox.StandardButton.Cancel:
-                    return QDialog.DialogCode.Rejected
-                # If No, continue with the deprecated field
+                # Automatically replace deprecated field with modern equivalent and create deprecated section
+                # No user confirmation needed as requested
+                return self._replace_deprecated_field(prefix, modern_equivalent)
             else:
-                # No modern equivalent available
-                reply = QMessageBox.question(
+                # No modern equivalent available - show warning but continue
+                QMessageBox.information(
                     self,
-                    "Deprecated Field Warning", 
+                    "Deprecated Field Notice", 
                     f"The field '{prefix}' is deprecated and has no modern equivalent.\n\n"
-                    f"It's recommended to remove this field.\n\n"
-                    f"Continue with deprecated field?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    f"It will be processed as-is, but consider reviewing this field.",
+                    QMessageBox.StandardButton.Ok
                 )
-                
-                if reply == QMessageBox.StandardButton.No:
-                    return QDialog.DialogCode.Rejected
         
         removable_chars = "'"
         lines = self.text_editor.toPlainText().splitlines()
@@ -807,36 +788,67 @@ class CIFEditor(QMainWindow):
         return self.add_missing_line(prefix, lines, default_value, multiline, description)
     
     def _replace_deprecated_field(self, deprecated_field, modern_field):
-        """Replace a deprecated field with its modern equivalent in the CIF content"""
+        """Replace a deprecated field with its modern equivalent in the CIF content and create deprecated section"""
         content = self.text_editor.toPlainText()
-        lines = content.splitlines()
         
-        field_replaced = False
-        for i, line in enumerate(lines):
-            if line.startswith(deprecated_field):
-                # Extract the value from the deprecated field
-                parts = line.split(maxsplit=1)
-                if len(parts) > 1:
-                    value = parts[1]
-                    lines[i] = f"{modern_field} {value}"
-                    field_replaced = True
-                    break
+        # Parse the CIF content using the CIF parser
+        self.cif_parser.parse_file(content)
         
-        if field_replaced:
-            self.text_editor.setText("\n".join(lines))
-            QMessageBox.information(
-                self, 
-                "Field Updated", 
-                f"Successfully replaced deprecated field '{deprecated_field}' with '{modern_field}'"
-            )
-            return QDialog.DialogCode.Accepted
-        else:
+        # Check if the deprecated field exists
+        if deprecated_field not in self.cif_parser.fields:
             QMessageBox.warning(
                 self, 
                 "Field Not Found", 
                 f"Could not find deprecated field '{deprecated_field}' to replace"
             )
             return QDialog.DialogCode.Rejected
+        
+        # Get the current value of the deprecated field
+        deprecated_field_obj = self.cif_parser.fields[deprecated_field]
+        field_value = deprecated_field_obj.value
+        
+        # Remove the deprecated field from the main content
+        del self.cif_parser.fields[deprecated_field]
+        
+        # Add the modern field with the same value
+        modern_field_obj = CIFField(
+            name=modern_field,
+            value=field_value,
+            is_multiline=deprecated_field_obj.is_multiline,
+            line_number=deprecated_field_obj.line_number,
+            raw_lines=deprecated_field_obj.raw_lines
+        )
+        self.cif_parser.fields[modern_field] = modern_field_obj
+        
+        # Create a deprecated field object for the deprecated section
+        deprecated_for_section = CIFField(
+            name=deprecated_field,
+            value=field_value,
+            is_multiline=deprecated_field_obj.is_multiline,
+            line_number=None,  # Will be placed in deprecated section
+            raw_lines=[]
+        )
+        
+        # Add deprecated section with the field by default
+        self.cif_parser._add_deprecated_section_to_blocks([deprecated_for_section], self.dict_manager)
+        
+        # Update the content blocks to replace the deprecated field with modern field in the main content
+        for block in self.cif_parser.content_blocks:
+            if block['type'] == 'field' and hasattr(block['content'], 'name') and block['content'].name == deprecated_field:
+                block['content'] = modern_field_obj
+                break
+        
+        # Generate updated CIF content and update the text editor
+        updated_content = self.cif_parser.generate_cif_content()
+        self.text_editor.setText(updated_content)
+        
+        QMessageBox.information(
+            self, 
+            "Field Updated", 
+            f"Successfully replaced deprecated field '{deprecated_field}' with '{modern_field}'\n\n"
+            f"The deprecated field has been moved to a deprecated section at the end of the file for legacy compatibility."
+        )
+        return QDialog.DialogCode.Accepted
     
     def check_refine_special_details(self):
         """Check and edit _refine_special_details field, creating it if needed."""
@@ -1081,6 +1093,12 @@ class CIFEditor(QMainWindow):
         if not success:
             return
         
+        # Check for duplicates and aliases LAST (if enabled)
+        if config.get('check_duplicates_aliases', True):
+            duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
+            if not duplicate_check_success:
+                return  # User aborted or there was an error
+        
         # If we get here, checks completed successfully
         if config.get('reformat_after_checks', False):
             self.reformat_file()
@@ -1157,7 +1175,7 @@ class CIFEditor(QMainWindow):
                             lines = current_content.splitlines()
                             lines, edited = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
                             if edited:
-                                operations_applied.append(f"EDITED: {field_def.name} -> {field_def.default_value}")
+                                operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
                                 current_content = '\n'.join(lines)
                 
                 # Update content after DELETE/EDIT operations
@@ -1721,6 +1739,371 @@ class CIFEditor(QMainWindow):
             resolutions[canonical_field] = (chosen_field, chosen_value)
         
         return resolutions
+    
+    def _check_duplicates_and_aliases(self, initial_state: str) -> bool:
+        """
+        Check for duplicate field names, alias conflicts, and deprecated fields.
+        This should be called at the END of the checking procedure.
+        
+        Args:
+            initial_state: Initial CIF content for potential restore
+            
+        Returns:
+            True if check passed or conflicts were resolved, False if user aborted
+        """
+        try:
+            content = self.text_editor.toPlainText()
+            
+            # Check for duplicates and aliases first
+            conflicts = self.dict_manager.detect_field_aliases_in_cif(content)
+            
+            # Check for deprecated fields
+            lines = content.splitlines()
+            deprecated_fields = []
+            
+            for line_num, line in enumerate(lines, 1):
+                line_stripped = line.strip()
+                if line_stripped.startswith('_') and ' ' in line_stripped:
+                    field_name = line_stripped.split()[0]
+                    if self.dict_manager.is_field_deprecated(field_name):
+                        # Skip if this field is already in a deprecated section
+                        # (we don't want to flag fields we already moved to deprecated sections)
+                        if not self._is_in_deprecated_section(content, line_num):
+                            modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="CIF1")
+                            deprecated_fields.append({
+                                'field': field_name,
+                                'line_num': line_num,
+                                'line': line_stripped,
+                                'modern': modern_equiv
+                            })
+            
+            # Filter conflicts to exclude those between main section and deprecated section
+            filtered_conflicts = {}
+            for canonical, alias_list in conflicts.items():
+                # Check if this conflict involves fields that are in both main and deprecated sections
+                main_section_fields = []
+                deprecated_section_fields = []
+                
+                for alias in alias_list:
+                    # Find this field in the content
+                    field_in_deprecated = False
+                    for line_num, line in enumerate(lines, 1):
+                        line_stripped = line.strip()
+                        if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
+                            if self._is_in_deprecated_section(content, line_num):
+                                deprecated_section_fields.append(alias)
+                                field_in_deprecated = True
+                                break
+                    
+                    if not field_in_deprecated:
+                        # Check if field exists in main section
+                        for line_num, line in enumerate(lines, 1):
+                            line_stripped = line.strip()
+                            if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
+                                if not self._is_in_deprecated_section(content, line_num):
+                                    main_section_fields.append(alias)
+                                    break
+                
+                # Only report as conflict if:
+                # 1. Multiple fields in main section, OR
+                # 2. Multiple fields in deprecated section, OR  
+                # 3. Fields only in one section but duplicated
+                if (len(main_section_fields) > 1 or len(deprecated_section_fields) > 1 or
+                    (len(main_section_fields) == 0 and len(deprecated_section_fields) > 0) or
+                    (len(main_section_fields) > 0 and len(deprecated_section_fields) == 0)):
+                    filtered_conflicts[canonical] = alias_list
+                # If we have one field in main and one in deprecated, this is by design, not a conflict
+            
+            conflicts = filtered_conflicts
+            
+            # If no conflicts and no deprecated fields found - all good!
+            if not conflicts and not deprecated_fields:
+                return True
+            
+            # Build detailed report
+            report_summary = ""
+            has_critical_issues = False
+            
+            if conflicts:
+                has_critical_issues = True
+                report_summary += "⚠️ DUPLICATE/ALIAS FIELD CONFLICTS DETECTED ⚠️\n\n"
+                report_summary += "CIF databases will reject files with duplicate field names or conflicting aliases.\n\n"
+                report_summary += f"Found {len(conflicts)} conflict(s):\n\n"
+                
+                for canonical, alias_list in conflicts.items():
+                    # Check if this is a direct duplicate (same field multiple times)
+                    unique_aliases = set(alias_list)
+                    if len(unique_aliases) == 1:
+                        duplicate_field = list(unique_aliases)[0]
+                        duplicate_count = len(alias_list)
+                        report_summary += f"• '{duplicate_field}' appears {duplicate_count} times (DUPLICATE)\n"
+                    else:
+                        # Multiple different aliases present
+                        report_summary += f"• Canonical field '{canonical}' has multiple forms:\n"
+                        for alias in alias_list:
+                            report_summary += f"    - {alias}\n"
+                    report_summary += "\n"
+                
+                report_summary += "These conflicts MUST be resolved before database submission.\n\n"
+            
+            if deprecated_fields:
+                if report_summary:
+                    report_summary += "---\n\n"
+                
+                report_summary += "📅 DEPRECATED FIELDS DETECTED\n\n"
+                report_summary += f"Found {len(deprecated_fields)} deprecated field(s) that can be modernized:\n\n"
+                
+                for dep_field in deprecated_fields:
+                    report_summary += f"• Line {dep_field['line_num']}: {dep_field['field']}\n"
+                    if dep_field['modern']:
+                        report_summary += f"  → Modern equivalent: {dep_field['modern']}\n"
+                    else:
+                        report_summary += f"  → No modern equivalent (consider removal)\n"
+                    report_summary += "\n"
+                
+                report_summary += "Modernizing these fields improves CIF compatibility and reduces validation warnings.\n\n"
+            
+            # Determine action buttons based on what issues we found
+            if has_critical_issues and deprecated_fields:
+                action_text = ("How would you like to proceed?\n\n" +
+                             "• Yes: Resolve conflicts AND modernize deprecated fields (RECOMMENDED)\n" +
+                             "• No: Continue with all issues (NOT RECOMMENDED)\n" +
+                             "• Cancel: Abort checks and revert all changes")
+                title = "Critical Issues and Deprecated Fields Found"
+                default_button = QMessageBox.StandardButton.Yes
+            elif has_critical_issues:
+                action_text = ("How would you like to resolve these conflicts?\n\n" +
+                             "• Yes: Resolve conflicts now (RECOMMENDED)\n" +
+                             "• No: Continue with conflicts (NOT RECOMMENDED - file may be rejected)\n" +
+                             "• Cancel: Abort checks and revert all changes")
+                title = "Critical: Duplicate/Alias Conflicts"
+                default_button = QMessageBox.StandardButton.Yes
+            else:  # Only deprecated fields
+                action_text = ("How would you like to proceed?\n\n" +
+                             "• Yes: Modernize deprecated fields (RECOMMENDED)\n" +
+                             "• No: Continue with deprecated fields (compatibility warnings may occur)\n" +
+                             "• Cancel: Abort checks and revert all changes")
+                title = "Deprecated Fields Found"
+                default_button = QMessageBox.StandardButton.Yes
+            
+            # Ask user how to proceed
+            reply = QMessageBox.question(
+                self, 
+                title,
+                report_summary + action_text,
+                QMessageBox.StandardButton.Yes |
+                QMessageBox.StandardButton.No |
+                QMessageBox.StandardButton.Cancel,
+                default_button
+            )
+            
+            if reply == QMessageBox.StandardButton.Cancel:
+                # User wants to abort - restore initial state
+                self.text_editor.setText(initial_state)
+                self.setWindowTitle("CIVET")
+                QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                return False
+                
+            elif reply == QMessageBox.StandardButton.No:
+                # User wants to continue with all issues
+                if has_critical_issues:
+                    # Warn them about critical issues
+                    final_warning = QMessageBox.warning(
+                        self,
+                        "Warning: Unresolved Issues",
+                        "⚠️ WARNING ⚠️\n\n"
+                        "Proceeding with unresolved issues.\n\n" +
+                        ("Your CIF file may be REJECTED by databases due to duplicate/alias conflicts.\n\n" if conflicts else "") +
+                        ("Deprecated fields may cause validation warnings.\n\n" if deprecated_fields else "") +
+                        "Are you absolutely sure you want to continue?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    if final_warning == QMessageBox.StandardButton.No:
+                        # Give them another chance to resolve
+                        return self._check_duplicates_and_aliases(initial_state)
+                
+                # They insist on keeping issues
+                return True
+                    
+            else:  # Yes - resolve issues
+                success = True
+                
+                # Handle duplicate/alias conflicts first
+                if conflicts:
+                    success = self._resolve_duplicate_conflicts(conflicts, content, initial_state)
+                    if not success:
+                        return False
+                    # Update content after conflict resolution
+                    content = self.text_editor.toPlainText()
+                
+                # Handle deprecated fields
+                if deprecated_fields and success:
+                    success = self._resolve_deprecated_fields(deprecated_fields, initial_state)
+                
+                return success
+                    
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Field Check Error",
+                f"An error occurred while checking fields:\n{str(e)}\n\n"
+                "Please check the file manually for duplicate field names and deprecated fields."
+            )
+            return True  # Continue despite error
+    
+    def _is_in_deprecated_section(self, content: str, line_num: int) -> bool:
+        """Check if a line is within a deprecated section of the CIF file."""
+        lines = content.splitlines()
+        
+        # Find the deprecated section boundaries
+        deprecated_section_start = None
+        deprecated_section_end = None
+        
+        for i in range(len(lines)):
+            line = lines[i].strip()
+            if "# DEPRECATED FIELDS" in line:
+                deprecated_section_start = i
+                # Look for the end of this section (closing ###... line)
+                for j in range(i + 1, len(lines)):
+                    end_line = lines[j].strip()
+                    if end_line.startswith('#') and len(end_line) > 70 and all(c == '#' for c in end_line):
+                        # Check if this is actually a closing border
+                        if j + 1 < len(lines):
+                            next_line = lines[j + 1].strip()
+                            if not next_line or next_line.startswith('data_'):
+                                deprecated_section_end = j
+                                break
+                        else:
+                            # End of file
+                            deprecated_section_end = j
+                            break
+                break
+        
+        # Check if our target line is within the deprecated section
+        if deprecated_section_start is not None:
+            end_line = deprecated_section_end if deprecated_section_end is not None else len(lines) - 1
+            target_line_index = line_num - 1  # Convert to 0-based indexing
+            return deprecated_section_start <= target_line_index <= end_line
+        
+        return False
+    
+    def _resolve_duplicate_conflicts(self, conflicts: Dict, content: str, initial_state: str) -> bool:
+        """Resolve duplicate/alias conflicts using existing infrastructure."""
+        try:
+            # Ask user how they want to resolve
+            resolve_reply = QMessageBox.question(
+                self, 
+                "Conflict Resolution Method",
+                "Choose conflict resolution method:\n\n" +
+                "• Yes: Let me choose for each conflict individually\n" +
+                "• No: Auto-resolve using CIF2 format + first available values",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No  # Default to auto-resolve
+            )
+            
+            if resolve_reply == QMessageBox.StandardButton.Yes:
+                # Manual resolution using existing dialog
+                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    resolutions = dialog.get_resolutions()
+                else:
+                    # User cancelled the dialog - ask if they want to abort or auto-resolve
+                    fallback = QMessageBox.question(
+                        self,
+                        "Resolution Cancelled",
+                        "Manual resolution cancelled.\n\n"
+                        "Would you like to auto-resolve instead?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if fallback == QMessageBox.StandardButton.Yes:
+                        resolutions = self._auto_resolve_conflicts(conflicts, content)
+                    else:
+                        # They don't want to resolve at all
+                        return False
+            else:
+                # Auto-resolve
+                resolutions = self._auto_resolve_conflicts(conflicts, content)
+            
+            # Apply the resolutions
+            if resolutions:
+                resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
+                
+                if changes:
+                    self.text_editor.setText(resolved_content)
+                    self.modified = True
+                    
+                    change_summary = f"✅ Successfully resolved {len(conflicts)} conflict(s):\n\n"
+                    for change in changes:
+                        change_summary += f"• {change}\n"
+                    
+                    QMessageBox.information(self, "Conflicts Resolved", change_summary)
+                    
+                    # Verify conflicts are actually resolved
+                    verify_conflicts = self.dict_manager.detect_field_aliases_in_cif(
+                        self.text_editor.toPlainText()
+                    )
+                    if verify_conflicts:
+                        # Still have conflicts - this shouldn't happen, but handle it
+                        QMessageBox.warning(
+                            self,
+                            "Warning: Conflicts Remain",
+                            f"Some conflicts could not be fully resolved.\n\n"
+                            f"{len(verify_conflicts)} conflict(s) still present.\n\n"
+                            "Manual review may be required."
+                        )
+                    return True
+                else:
+                    QMessageBox.information(self, "No Changes Made", 
+                                          "No changes were needed to resolve the conflicts.")
+                    return True
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Conflict Resolution Error",
+                f"An error occurred while resolving conflicts:\n{str(e)}"
+            )
+            return False
+    
+    def _resolve_deprecated_fields(self, deprecated_fields: List[Dict], initial_state: str) -> bool:
+        """Resolve deprecated fields by replacing them with modern equivalents."""
+        try:
+            resolved_count = 0
+            changes_made = []
+            
+            for dep_field in deprecated_fields:
+                field_name = dep_field['field']
+                modern_equiv = dep_field['modern']
+                
+                if modern_equiv:
+                    # Automatically replace the deprecated field
+                    result = self._replace_deprecated_field(field_name, modern_equiv)
+                    if result == QDialog.DialogCode.Accepted:
+                        resolved_count += 1
+                        changes_made.append(f"Replaced {field_name} → {modern_equiv}")
+            
+            if resolved_count > 0:
+                change_summary = f"✅ Successfully modernized {resolved_count} deprecated field(s):\n\n"
+                for change in changes_made:
+                    change_summary += f"• {change}\n"
+                
+                QMessageBox.information(self, "Deprecated Fields Modernized", change_summary)
+            else:
+                QMessageBox.information(self, "No Changes Made", 
+                                      "No deprecated fields could be automatically modernized.")
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Deprecated Field Resolution Error",
+                f"An error occurred while modernizing deprecated fields:\n{str(e)}"
+            )
+            return False
 
     def check_deprecated_fields(self):
         """Check for deprecated fields in the current CIF file and offer to replace them"""

@@ -17,6 +17,7 @@ class CheckConfigDialog(QDialog):
         self.auto_fill_missing = False
         self.skip_matching_defaults = False
         self.reformat_after_checks = False
+        self.check_duplicates_aliases = True  # Enabled by default
         
         self.init_ui()
     
@@ -63,6 +64,15 @@ class CheckConfigDialog(QDialog):
         self.reformat_checkbox.setChecked(self.reformat_after_checks)
         config_layout.addWidget(self.reformat_checkbox)
         
+        # Option 4: Check for duplicates and aliases (ENABLED BY DEFAULT)
+        self.check_duplicates_checkbox = QCheckBox(
+            "Check for duplicate and alias fields (RECOMMENDED)\n"
+            "(Verify no duplicate field names or conflicting aliases - required for database submission)"
+        )
+        self.check_duplicates_checkbox.setChecked(self.check_duplicates_aliases)
+        self.check_duplicates_checkbox.setStyleSheet("font-weight: bold;")  # Emphasize importance
+        config_layout.addWidget(self.check_duplicates_checkbox)
+        
         layout.addWidget(config_group)
         
         # Add buttons
@@ -85,5 +95,6 @@ class CheckConfigDialog(QDialog):
         return {
             'auto_fill_missing': self.auto_fill_checkbox.isChecked(),
             'skip_matching_defaults': self.skip_defaults_checkbox.isChecked(),
-            'reformat_after_checks': self.reformat_checkbox.isChecked()
+            'reformat_after_checks': self.reformat_checkbox.isChecked(),
+            'check_duplicates_aliases': self.check_duplicates_checkbox.isChecked()
         }

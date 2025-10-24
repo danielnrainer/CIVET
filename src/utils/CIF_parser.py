@@ -68,6 +68,8 @@ class CIFParser:
         equivalents. By including both versions with the same value, we ensure compatibility
         with both old and new validation systems.
         
+        The deprecated fields are placed in a clearly marked section at the end of the CIF file.
+        
         Args:
             dict_manager: CIFDictionaryManager instance for field conversion
             
@@ -78,6 +80,7 @@ class CIFParser:
             return "No dictionary manager provided"
             
         added_fields = []
+        deprecated_field_objs = []
         
         # Define critical deprecated fields that validation tools often still require
         critical_deprecated_fields = [
@@ -121,48 +124,183 @@ class CIFParser:
                     name=deprecated_field,
                     value=modern_field_obj.value,
                     is_multiline=modern_field_obj.is_multiline,
-                    line_number=None,  # Will be placed appropriately when generating content
+                    line_number=None,  # Will be placed in deprecated section
                     raw_lines=[]
                 )
                 
                 self.fields[deprecated_field] = deprecated_field_obj
-                
-                # Add to content blocks right after the modern field
-                self._insert_compatibility_field_in_blocks(deprecated_field_obj, modern_field)
+                deprecated_field_objs.append(deprecated_field_obj)
                 
                 added_fields.append(f"{deprecated_field} = {modern_field_obj.value} (from {modern_field})")
+        
+        # If we added any deprecated fields, create a deprecated section at the end
+        if deprecated_field_objs:
+            self._add_deprecated_section_to_blocks(deprecated_field_objs, dict_manager)
         
         # Generate report
         if added_fields:
             report = f"Added {len(added_fields)} compatibility field(s) for legacy validation tools:\n"
             for field_info in added_fields:
                 report += f"  • {field_info}\n"
-            report += "\nThese deprecated fields have the same values as their modern equivalents."
+            report += "\nThese deprecated fields are placed in a marked section at the end of the file."
         else:
             report = "No compatibility fields needed - either modern equivalents not found or deprecated fields already exist."
             
         return report
     
-    def _insert_compatibility_field_in_blocks(self, deprecated_field_obj: CIFField, modern_field_name: str):
-        """Insert a compatibility field in the content blocks right after its modern equivalent."""
-        # Find the modern field in content blocks
+    def _add_deprecated_section_to_blocks(self, deprecated_field_objs: List[CIFField], dict_manager):
+        """
+        Add a formatted deprecated section at the end of the content blocks.
+        
+        If a deprecated section already exists, append the new fields to it.
+        If no deprecated section exists, create a new one.
+        
+        The section is added as a special block that won't be reparsed during reformatting.
+        This ensures inline comments remain on the same line as field values.
+        
+        Args:
+            deprecated_field_objs: List of CIFField objects for deprecated fields
+            dict_manager: Dictionary manager to get replacement field info
+        """
+        # Check if a deprecated section already exists
+        deprecated_section_start = None
+        deprecated_section_end = None
+        
         for i, block in enumerate(self.content_blocks):
-            if (block.get('type') == 'field' and 
-                block.get('content') and 
-                hasattr(block['content'], 'name') and
-                block['content'].name == modern_field_name):
-                
-                # Insert the deprecated field right after the modern one
-                self.content_blocks.insert(i + 1, {
-                    'type': 'field',
-                    'content': deprecated_field_obj
-                })
+            if (block.get('type') == 'comment' and 
+                block.get('content') == '# DEPRECATED FIELDS - Retained for legacy software compatibility'):
+                deprecated_section_start = i
+                # Find the closing border
+                for j in range(i + 1, len(self.content_blocks)):
+                    if (self.content_blocks[j].get('type') == 'comment' and
+                        self.content_blocks[j].get('content') == '#' * 79):
+                        deprecated_section_end = j
+                        break
                 break
+        
+        if deprecated_section_start is not None and deprecated_section_end is not None:
+            # Deprecated section exists - insert new fields before the closing border
+            insert_position = deprecated_section_end
+            
+            # Add each deprecated field before the closing border
+            for field_obj in deprecated_field_objs:
+                # Get replacement field info and add as a comment BEFORE the field
+                try:
+                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF2")
+                    if not replacement:
+                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF1")
+                    
+                    if replacement:
+                        comment_text = f"# -> Use {replacement} instead"
+                    else:
+                        comment_text = "# -> Deprecated (no direct replacement)"
+                except:
+                    comment_text = "# -> Deprecated"
+                
+                # Insert the replacement info as a separate comment line
+                self.content_blocks.insert(insert_position, {
+                    'type': 'comment',
+                    'content': comment_text
+                })
+                insert_position += 1
+                
+                # Format the field line with proper alignment (no inline comment)
+                # Calculate spacing for alignment
+                field_name_length = len(field_obj.name)
+                value_str = str(field_obj.value)
+                target_column = 35
+                
+                if field_name_length < target_column - 1:
+                    spacing = ' ' * (target_column - field_name_length)
+                else:
+                    spacing = '  '
+                
+                # Create formatted line (without inline comment for better readability)
+                formatted_line = f"{field_obj.name}{spacing}{value_str}"
+                
+                # Insert as a special deprecated field block that won't be reformatted
+                self.content_blocks.insert(insert_position, {
+                    'type': 'deprecated_field',
+                    'content': formatted_line
+                })
+                insert_position += 1
         else:
-            # If modern field not found in blocks, append at the end
+            # No deprecated section exists - create a new one
+            # Add a blank line before the section
             self.content_blocks.append({
-                'type': 'field', 
-                'content': deprecated_field_obj
+                'type': 'empty',
+                'content': ''
+            })
+            
+            # Add the header border
+            self.content_blocks.append({
+                'type': 'comment',
+                'content': '#' * 79
+            })
+            
+            # Add section title
+            self.content_blocks.append({
+                'type': 'comment',
+                'content': '# DEPRECATED FIELDS - Retained for legacy software compatibility'
+            })
+            
+            self.content_blocks.append({
+                'type': 'comment',
+                'content': '# These fields have modern replacements and should not be used in new files'
+            })
+            
+            self.content_blocks.append({
+                'type': 'comment',
+                'content': '#' * 79
+            })
+            
+            # Add each deprecated field as a special formatted block
+            # This prevents them from being reparsed and reformatted
+            for field_obj in deprecated_field_objs:
+                # Get replacement field info and add as a comment BEFORE the field
+                # This ensures the field line stays within 80 characters
+                try:
+                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF2")
+                    if not replacement:
+                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF1")
+                    
+                    if replacement:
+                        comment_text = f"# -> Use {replacement} instead"
+                    else:
+                        comment_text = "# -> Deprecated (no direct replacement)"
+                except:
+                    comment_text = "# -> Deprecated"
+                
+                # Add the replacement info as a separate comment line
+                self.content_blocks.append({
+                    'type': 'comment',
+                    'content': comment_text
+                })
+                
+                # Format the field line with proper alignment (no inline comment)
+                # Calculate spacing for alignment
+                field_name_length = len(field_obj.name)
+                value_str = str(field_obj.value)
+                target_column = 35
+                
+                if field_name_length < target_column - 1:
+                    spacing = ' ' * (target_column - field_name_length)
+                else:
+                    spacing = '  '
+                
+                # Create formatted line (without inline comment for better readability)
+                formatted_line = f"{field_obj.name}{spacing}{value_str}"
+                
+                # Add as a special deprecated field block that won't be reformatted
+                self.content_blocks.append({
+                    'type': 'deprecated_field',
+                    'content': formatted_line
+                })
+            
+            # Add closing border
+            self.content_blocks.append({
+                'type': 'comment',
+                'content': '#' * 79
             })
         
     def parse_file(self, content: str) -> Dict[str, CIFField]:
@@ -174,11 +312,32 @@ class CIFParser:
         lines = content.splitlines()
         i = 0
         
+        # Track if we're in a deprecated section
+        in_deprecated_section = False
+        
         while i < len(lines):
             line = lines[i].strip()
             
-            # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            # Preserve empty lines
+            if not line:
+                self.content_blocks.append({'type': 'empty', 'content': ''})
+                i += 1
+                continue
+            
+            # Preserve comment lines
+            if line.startswith('#'):
+                self.content_blocks.append({'type': 'comment', 'content': line})
+                
+                # Check if this is the start or end of a deprecated section
+                if '# DEPRECATED FIELDS' in line:
+                    in_deprecated_section = True
+                elif line == '#' * 79 and in_deprecated_section:
+                    # Check if this is the closing border (next line should not be deprecated field)
+                    if i + 1 < len(lines):
+                        next_line = lines[i + 1].strip()
+                        if not next_line.startswith('_'):
+                            in_deprecated_section = False
+                
                 i += 1
                 continue
             
@@ -207,6 +366,15 @@ class CIFParser:
             
             # Check if this line starts a field definition
             if line.startswith('_'):
+                # Check if we're in a deprecated section - if so, preserve the entire line
+                if in_deprecated_section:
+                    # This is a deprecated field line with inline comment
+                    # Preserve it as-is without parsing
+                    self.content_blocks.append({'type': 'deprecated_field', 'content': line})
+                    i += 1
+                    continue
+                
+                # Normal field parsing
                 field_name, value, lines_consumed = self._parse_field(lines, i)
                 if field_name:
                     field = CIFField(
@@ -544,22 +712,56 @@ class CIFParser:
         """Generate CIF content from the current fields and loops, preserving order."""
         lines = []
         
-        # Use content_blocks to preserve the original order of fields, loops, and headers
+        # Use content_blocks to preserve the original order of fields, loops, headers, and comments
         for i, block in enumerate(self.content_blocks):
             if block['type'] == 'header':
                 # Add header lines (like data_xxxx)
                 lines.append(block['content'])
+            elif block['type'] == 'empty':
+                # Add empty line
+                lines.append('')
+            elif block['type'] == 'comment':
+                # Add comment line (including special headers and borders)
+                lines.append(block['content'])
+            elif block['type'] == 'deprecated_field':
+                # Add pre-formatted deprecated field line (won't be reformatted)
+                lines.append(block['content'])
+            elif block['type'] == 'inline_comment':
+                # This was already handled as part of the previous field
+                # (or will be - skip it here)
+                continue
             elif block['type'] == 'field':
                 field = block['content']
-                formatted_lines = self._format_field(field)
-                lines.extend(formatted_lines)
+                
+                # Check if this is a deprecated field with an inline comment following
+                if block.get('is_deprecated') and i + 1 < len(self.content_blocks):
+                    next_block = self.content_blocks[i + 1]
+                    if (next_block.get('type') == 'inline_comment' and 
+                        next_block.get('for_field') == field.name):
+                        # Format field with inline comment
+                        formatted_lines = self._format_field_with_comment(field, next_block['content'])
+                        lines.extend(formatted_lines)
+                    else:
+                        # Regular field formatting
+                        formatted_lines = self._format_field(field)
+                        lines.extend(formatted_lines)
+                else:
+                    # Regular field formatting
+                    formatted_lines = self._format_field(field)
+                    lines.extend(formatted_lines)
             elif block['type'] == 'loop':
                 loop = block['content']
                 formatted_lines = self._format_loop(loop)
                 lines.extend(formatted_lines)
                 
-                # Always add empty line after loop, regardless of what follows
-                lines.append('')
+                # Add empty line after loop if next block is not already an empty line
+                if i + 1 < len(self.content_blocks):
+                    next_block = self.content_blocks[i + 1]
+                    if next_block['type'] != 'empty':
+                        lines.append('')
+                else:
+                    # This is the last block, add empty line
+                    lines.append('')
         
         # If no content_blocks (backward compatibility), fall back to headers + fields
         if not self.content_blocks:
@@ -707,6 +909,30 @@ class CIFParser:
         if current_line_values:
             lines.append(' '.join(current_line_values))
     
+    def _format_field_with_comment(self, field: CIFField, comment: str) -> List[str]:
+        """
+        Format a field with an inline comment (for deprecated fields).
+        
+        Example output:
+        _cell_measurement_pressure       100.0    # → Use _diffrn.ambient_pressure instead
+        """
+        if field.value is None or field.value == "(in loop)":
+            return [f"{field.name}    {comment}"]
+        
+        # For deprecated fields, format with alignment and inline comment
+        field_name_length = len(field.name)
+        value_str = str(field.value)
+        
+        # Calculate spacing for value alignment
+        target_column = 35
+        if field_name_length < target_column - 1:
+            spacing = ' ' * (target_column - field_name_length)
+        else:
+            spacing = '  '
+        
+        # Format: field_name    value    comment
+        return [f"{field.name}{spacing}{value_str}    {comment}"]
+    
     def _format_field(self, field: CIFField) -> List[str]:
         """Format a CIF field for output with proper alignment and 80-character line length handling.
         
@@ -822,16 +1048,26 @@ class CIFParser:
     def reformat_for_line_length(self, content: str) -> str:
         """Reformat CIF content to ensure no line exceeds 80 characters.
         
+        This function intelligently reformats only CIF field values that need it,
+        while preserving:
+        - Comment lines (starting with #)
+        - Loop structures (reformatted internally but structure preserved)
+        - Header lines (data_, save_, global_, stop_)
+        - Empty lines
+        - Special sections (like deprecated fields sections)
+        
         Args:
             content: The CIF content to reformat
             
         Returns:
-            Reformatted CIF content with proper line length handling and preserved loop structures
+            Reformatted CIF content with proper line length handling
         """
         # Parse the content first
         self.parse_file(content)
         
-        # Reformat individual fields based on 80-character rule (loops are preserved as-is)
+        # Reformat individual fields based on 80-character rule
+        # Only single-line and multiline fields are reformatted
+        # Loops are preserved as-is during parsing and regeneration
         for field_name, field in self.fields.items():
             if field.value is not None and field.value != "(in loop)":
                 # Recalculate multiline status based on 80-character rule
@@ -839,7 +1075,66 @@ class CIFParser:
                 field.is_multiline = should_be_multiline
         
         # Generate and return the reformatted content
+        # The generate_cif_content() method preserves all comment lines,
+        # headers, and loops exactly as parsed
         return self.generate_cif_content()
+    
+    def _has_deprecated_section(self, content: str) -> bool:
+        """Check if content has a deprecated fields section."""
+        deprecated_marker = "# DEPRECATED FIELDS - Retained for legacy software compatibility"
+        return deprecated_marker in content
+    
+    def _reformat_preserving_sections(self, content: str) -> str:
+        """
+        Reformat CIF content while preserving special sections like deprecated fields.
+        
+        This splits the content at the deprecated section boundary, reformats the
+        active part, and preserves the deprecated section as-is.
+        """
+        lines = content.split('\n')
+        
+        # Find the start of the deprecated section
+        deprecated_start_idx = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#' * 10):  # Look for hashmark border
+                # Check if next few lines contain the deprecated marker
+                if i + 1 < len(lines) and "DEPRECATED FIELDS" in lines[i + 1]:
+                    deprecated_start_idx = i
+                    break
+        
+        if deprecated_start_idx is None:
+            # No deprecated section found despite marker, do normal reformat
+            return self.reformat_for_line_length(content)
+        
+        # Split content into active and deprecated sections
+        active_lines = lines[:deprecated_start_idx]
+        deprecated_lines = lines[deprecated_start_idx:]
+        
+        # Remove trailing empty lines from active section
+        while active_lines and active_lines[-1].strip() == '':
+            active_lines.pop()
+        
+        # Reformat only the active section
+        active_content = '\n'.join(active_lines)
+        self.parse_file(active_content)
+        
+        # Reformat individual fields based on 80-character rule
+        for field_name, field in self.fields.items():
+            if field.value is not None and field.value != "(in loop)":
+                should_be_multiline = self._should_use_multiline_format(field.name, field.value)
+                field.is_multiline = should_be_multiline
+        
+        # Generate reformatted active content
+        reformatted_active = self.generate_cif_content()
+        
+        # Combine reformatted active section with preserved deprecated section
+        deprecated_content = '\n'.join(deprecated_lines)
+        
+        # Ensure there's a blank line before the deprecated section
+        if not reformatted_active.endswith('\n\n'):
+            reformatted_active += '\n'
+        
+        return reformatted_active + '\n' + deprecated_content
     
     def _should_use_multiline_format(self, field_name: str, value: str) -> bool:
         """Determine if a field should use multiline format based on length and content."""

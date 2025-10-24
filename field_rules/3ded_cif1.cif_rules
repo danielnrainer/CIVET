@@ -1,4 +1,4 @@
-# CIF Field Constants for CIVET, CIF1 notation
+# CIF Field Constants for CIVET, legacy notation (where applicable)
 # Fields and their standard values for electron diffraction CIF files
 # References: https://github.com/COMCIFS/cif_ed and personal preferences/opinions by DNR (based on Synergy-ED Southampton)
 
@@ -62,75 +62,75 @@ _exptl_crystal_preparation  'suspension in ethanol, dropcast on grid, evaporatio
 # _exptl_crystals_number: Number of crystals used
 _exptl_crystals_number  1
 
-# _diffrn_source_ed_diffracting_area_selection: Area selection method
-_diffrn_source_ed_diffracting_area_selection  SAED  # options: SAED, probe
+# _diffrn_source.ed_diffracting_area_selection: Area selection method
+_diffrn_source.ed_diffracting_area_selection  SAED  # options: SAED, probe
 
-# _diffrn_measurement_rotation_mode: Data collection rotation mode
-_diffrn_measurement_rotation_mode  rotation  # options: rotation, stepwise
+# _diffrn_measurement.rotation_mode: Data collection rotation mode
+_diffrn_measurement.rotation_mode  rotation  # options: rotation, stepwise
 
-# _refine_diffraction_theory: Theory used for structure refinement
-_refine_diffraction_theory  kinematical  # options: kinematical, dynamical
+# _refine.diffraction_theory: Theory used for structure refinement
+_refine.diffraction_theory  kinematical  # options: kinematical, dynamical
 
-# _refine_diffraction_theory_details: free text to f.ex. state refined parameters during dynamical refinement 
-_refine_diffraction_theory_details  ?
+# _refine.diffraction_theory_details: free text to f.ex. state refined parameters during dynamical refinement 
+_refine.diffraction_theory_details  ?
 
-# _diffrn_measurement_sample_tracking: yes/no crystal tracking used during data collection?
-_diffrn_measurement_sample_tracking  no
+# _diffrn_measurement.sample_tracking: yes/no crystal tracking used during data collection?
+_diffrn_measurement.sample_tracking  no
 
-# _diffrn_measurement_sample_tracking_method: description of the method used for crystal tracking if applicable
-_diffrn_measurement_sample_tracking_method  .
+# _diffrn_measurement.sample_tracking_method: description of the method used for crystal tracking if applicable
+_diffrn_measurement.sample_tracking_method  .
 
-# _computing_sample_tracking: Reference for sample tracking during collection if applicable
-_computing_sample_tracking  .
+# _computing.sample_tracking: Reference for sample tracking during collection if applicable
+_computing.sample_tracking  .
 
-# _diffrn_radiation_illumination_mode: optical configuration of incident beam at the sample, i.e. distinction between TEM and STEM
-_diffrn_radiation_illumination_mode  parallel  # options: parallel, convergent
+# _diffrn_radiation.illumination_mode: optical configuration of incident beam at the sample, i.e. distinction between TEM and STEM
+_diffrn_radiation.illumination_mode  parallel  # options: parallel, convergent
 
 # _diffrn_source_size: Measure of the beam size at the sample. For SAED, this should be the beam width corresponding to the aperture size (at the sample), and not the total beam width.
 _diffrn_source_size  'SAED nominal aperture diameter 100 um, corresponding to a diameter of about 2 um at the image plane.'
 
 #_diffrn_measurement.method_precession: yes/no if the measurement was performed by precessing the beam.
-_diffrn_measurement_method_precession  no
+_diffrn_measurement.method_precession  no
 
-# _diffrn_precession_semi_angle: Angle (in degrees) at the sample of the tilt from the normal direction of a radiation beam moved in a precessional scan.
-_diffrn_precession_semi_angle  .
+# _diffrn.precession_semi_angle: Angle (in degrees) at the sample of the tilt from the normal direction of a radiation beam moved in a precessional scan.
+_diffrn.precession_semi_angle  .
 
-# _refine_diff_potential_max: Maximum electrostatic potential value in a difference Fourier map.
-_refine_diff_potential_max  ?
+# _refine_diff.potential_max: Maximum electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_max  ?
 
-# _refine_diff_potential_min: Minimum electrostatic potential value in a difference Fourier map.
-_refine_diff_potential_min  ?
+# _refine_diff.potential_min: Minimum electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_min  ?
 
-# _refine_diff_potential_RMS: Root mean square electrostatic potential value in a difference Fourier map.
-_refine_diff_potential_RMS  ?
+# _refine_diff.potential_RMS: Root mean square electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_RMS  ?
 
-# _exptl_crystal_mosaicity: Mosaicity in degrees
-_exptl_crystal_mosaicity  ?
+# _exptl_crystal.mosaicity: Mosaicity in degrees
+_exptl_crystal.mosaicity  ?
 
-# _exptl_crystal_mosaic_method: Method used to determine mosaicity
-_exptl_crystal_mosaic_method  ?
+# _exptl_crystal.mosaic_method: Method used to determine mosaicity
+_exptl_crystal.mosaic_method  ?
 
-# _exptl_crystal_mosaic_block_size: Average mosaic block size in Å
-_exptl_crystal_mosaic_block_size  ?
+# _exptl_crystal.mosaic_block_size: Average mosaic block size in Å
+_exptl_crystal.mosaic_block_size  ?
 
-# _diffrn_source_convergence_angle: Angle of convergence in degrees, generally only necessary for convergent beams
-_diffrn_source_convergence_angle  ?
+# _diffrn_source.convergence_angle: Angle of convergence in degrees, generally only necessary for convergent beams
+_diffrn_source.convergence_angle  ?
 
-# _refine_ls_sample_thickness: Refined sample thickness as determined by dynamical refinement
-_refine_ls_sample_thickness  .
+# _refine_ls.sample_thickness: Refined sample thickness as determined by dynamical refinement
+_refine_ls.sample_thickness  .
 
-# _refine_ls_sample_shape_expression: Expression used to determine sample thickness during dynamical refinement
-_refine_ls_sample_shape_expression  .
+# _refine_ls.sample_shape_expression: Expression used to determine sample thickness during dynamical refinement
+_refine_ls.sample_shape_expression  .
 
-# _refine_ls_sample_shape_details: Further details on how the sample shape/thickness are approximated
-_refine_ls_sample_shape_details  .
+# _refine_ls.sample_shape_details: Further details on how the sample shape/thickness are approximated
+_refine_ls.sample_shape_details    .
 
-# _diffrn_flux_density: Beam flux density, for electrons in e-/Å^2
-_diffrn_flux_density  ?
+# _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2
+_diffrn.flux_density  ?
 
-# _diffrn_total_dose: Total electron dose in MGy, probably not sensible unless crystal volume known
-_diffrn_total_dose  ?
+# _diffrn.total_dose: Total electron dose in MGy, probably not sensible unless crystal volume known
+_diffrn.total_dose  ?
 
-# _diffrn_total_exposure_time: Total exposure time in minutes 
-_diffrn_total_exposure_time  ?
+# _diffrn.total_exposure_time: Total exposure time in minutes 
+_diffrn.total_exposure_time  ?
 

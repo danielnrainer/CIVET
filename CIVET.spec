@@ -54,7 +54,7 @@ a = Analysis(
         'utils.CIF_parser',
         'utils.cif_dictionary_manager',
         'utils.cif_format_converter',
-        'utils.cif_core_parser',
+        'utils.cif_dictionary_parser',
         'utils.cif_deprecation_manager',
         'utils.cif2_only_extensions',
         'utils.dictionary_suggestion_manager',  # New dictionary suggestion system
