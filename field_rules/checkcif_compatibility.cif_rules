@@ -1,0 +1,29 @@
+# checkCIF Compatibility Configuration
+# =====================================
+# 
+# This file lists CIF field names that checkCIF validation does not recognize in modern format.
+# For these fields, we retain BOTH the modern format AND the legacy format to ensure compatibility.
+#
+# Format: One field name per line (legacy underscore notation)
+# Lines starting with # are comments and will be ignored
+# Empty lines are ignored
+#
+# Last updated: 2025-10-24
+# 
+# NOTE: This is a temporary workaround until checkCIF is updated to recognize modern field names.
+# Periodically review this list and remove fields once checkCIF supports them.
+
+# Diffraction measurement device
+_diffrn_measurement_device_type
+
+# Atomic site anisotropic displacement parameters
+_atom_site_aniso_label
+
+# Geometry angle measurements
+_geom_angle
+
+# Cell measurement temperature (deprecated but retained for checkCIF)
+# Note: This field is deprecated and replaced by _diffrn.ambient_temperature
+# However, checkCIF doesn't recognize the modern replacement, so we keep it
+# The converter intelligently handles this to prevent duplicates
+_cell_measurement_temperature

@@ -92,8 +92,6 @@ class IssueTreeWidget(QTreeWidget):
                 # Color code auto-fix type in third column
                 if issue.auto_fix_type == AutoFixType.YES:
                     issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Dark))
-                elif issue.auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
-                    issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Link))
                 else:
                     issue_item.setForeground(2, self.palette().color(self.palette().ColorRole.Mid))
                 
@@ -125,8 +123,6 @@ class IssueTreeWidget(QTreeWidget):
         """Format auto-fix type for display"""
         if auto_fix_type == AutoFixType.YES:
             return "yes"
-        elif auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
-            return "CIF2 manual mapping"
         else:
             return "no"
     
@@ -161,7 +157,7 @@ class IssueTreeWidget(QTreeWidget):
         return selected
     
     def select_all_auto_fixable(self):
-        """Select all auto-fixable issues (both official and CIF2 manual mappings)"""
+        """Select all auto-fixable issues (both official and modern manual mappings)"""
         iterator = QTreeWidgetItemIterator(self)
         while iterator.value():
             item = iterator.value()
@@ -276,13 +272,13 @@ class FieldRulesValidationDialog(QDialog):
         
         self.format_button_group = QButtonGroup()
         
-        self.cif1_radio = QRadioButton("CIF1 format (e.g., _cell_length_a)")
-        self.cif1_radio.setToolTip("Convert mixed formats to CIF1 style with underscores")
+        self.cif1_radio = QRadioButton("Legacy format (e.g., _cell_length_a)")
+        self.cif1_radio.setToolTip("Convert mixed formats to legacy style with underscores")
         self.format_button_group.addButton(self.cif1_radio, 1)
         format_layout.addWidget(self.cif1_radio)
         
-        self.cif2_radio = QRadioButton("CIF2 format (e.g., _cell.length_a)")
-        self.cif2_radio.setToolTip("Convert mixed formats to CIF2 style with dots")
+        self.cif2_radio = QRadioButton("Modern format (e.g., _cell.length_a)")
+        self.cif2_radio.setToolTip("Convert mixed formats to modern style with dots")
         self.format_button_group.addButton(self.cif2_radio, 2)
         format_layout.addWidget(self.cif2_radio)
         
@@ -410,14 +406,9 @@ class FieldRulesValidationDialog(QDialog):
         self.convert_official_btn.setToolTip("Select and convert all fields with official dictionary mappings (\"yes\" items)")
         self.convert_official_btn.clicked.connect(self.convert_official_mappings)
         conversion_layout.addWidget(self.convert_official_btn)
-        
-        self.convert_cif2_only_btn = QPushButton("🔶 Convert CIF2-Only Mappings")
-        self.convert_cif2_only_btn.setToolTip("Select and convert all fields with CIF2-only extension mappings (\"CIF2 manual mapping\" items)")
-        self.convert_cif2_only_btn.clicked.connect(self.convert_cif2_only_mappings)
-        conversion_layout.addWidget(self.convert_cif2_only_btn)
-        
-        self.convert_all_fixable_btn = QPushButton("⚡ Convert All Auto-Fixable")
-        self.convert_all_fixable_btn.setToolTip("Select and convert all auto-fixable fields (both \"yes\" and \"CIF2 manual mapping\" items)")
+
+        self.convert_all_fixable_btn = QPushButton("⚡ Convert All Fixable")
+        self.convert_all_fixable_btn.setToolTip("Select and convert all fixable fields")
         self.convert_all_fixable_btn.clicked.connect(self.convert_all_fixable)
         conversion_layout.addWidget(self.convert_all_fixable_btn)
         
@@ -600,8 +591,6 @@ class FieldRulesValidationDialog(QDialog):
         """Format auto-fix type for display"""
         if auto_fix_type == AutoFixType.YES:
             return "yes"
-        elif auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING:
-            return "CIF2 manual mapping"
         else:
             return "no"
     
@@ -636,7 +625,7 @@ class FieldRulesValidationDialog(QDialog):
         if (hasattr(self, 'validation_result') and hasattr(self, 'field_rules_content') and 
             hasattr(self, 'validator') and hasattr(self, 'issues_tree')):
             # Re-run validation with the new target format
-            target_format = "CIF2" if self.cif2_radio.isChecked() else "CIF1"
+            target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
             
             # Create a new validation result with the new target format
             new_validation_result = self.validator.validate_field_rules(
@@ -652,14 +641,9 @@ class FieldRulesValidationDialog(QDialog):
         self._select_by_auto_fix_type([AutoFixType.YES])
         self.apply_selected_fixes()
     
-    def convert_cif2_only_mappings(self):
-        """Select and convert all fields with CIF2-only extension mappings"""
-        self._select_by_auto_fix_type([AutoFixType.CIF2_MANUAL_MAPPING])
-        self.apply_selected_fixes()
-    
     def convert_all_fixable(self):
-        """Select and convert all auto-fixable fields (both official and CIF2-only)"""
-        self._select_by_auto_fix_type([AutoFixType.YES, AutoFixType.CIF2_MANUAL_MAPPING])
+        """Select and convert all auto-fixable fields"""
+        self._select_by_auto_fix_type([AutoFixType.YES])
         self.apply_selected_fixes()
     
     def _select_by_auto_fix_type(self, auto_fix_types):
@@ -700,19 +684,15 @@ class FieldRulesValidationDialog(QDialog):
     def update_conversion_button_counts(self):
         """Update the conversion button texts with current counts"""
         # Count issues by auto-fix type
-        official_count = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type == AutoFixType.YES)
-        cif2_only_count = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type == AutoFixType.CIF2_MANUAL_MAPPING)
-        total_fixable = official_count + cif2_only_count
+        fixable_count = sum(1 for issue in self.validation_result.issues if issue.auto_fix_type == AutoFixType.YES)
         
         # Update button texts with counts
-        self.convert_official_btn.setText(f"🔄 Convert Official Mappings ({official_count})")
-        self.convert_cif2_only_btn.setText(f"🔶 Convert CIF2-Only Mappings ({cif2_only_count})")
-        self.convert_all_fixable_btn.setText(f"⚡ Convert All Auto-Fixable ({total_fixable})")
+        self.convert_official_btn.setText(f"🔄 Convert Official Mappings ({fixable_count})")
+        self.convert_all_fixable_btn.setText(f"⚡ Convert All Auto-Fixable ({fixable_count})")
         
         # Enable/disable buttons based on counts
-        self.convert_official_btn.setEnabled(official_count > 0)
-        self.convert_cif2_only_btn.setEnabled(cif2_only_count > 0)
-        self.convert_all_fixable_btn.setEnabled(total_fixable > 0)
+        self.convert_official_btn.setEnabled(fixable_count > 0)
+        self.convert_all_fixable_btn.setEnabled(fixable_count > 0)
     
     def apply_selected_fixes(self):
         """Apply fixes for all selected issues"""
@@ -747,7 +727,7 @@ class FieldRulesValidationDialog(QDialog):
             
             if fixable_issues:
                 # Determine target format from radio buttons
-                target_format = "CIF2" if self.cif2_radio.isChecked() else "CIF1"
+                target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
                 
                 self.fixed_content, self.changes_made = self.validator.apply_automatic_fixes(
                     self.field_rules_content, fixable_issues, target_format=target_format
@@ -792,7 +772,7 @@ class FieldRulesValidationDialog(QDialog):
             current_content = self.manual_editor.toPlainText()
             
             # Determine target format from radio buttons
-            target_format = "CIF2" if self.cif2_radio.isChecked() else "CIF1"
+            target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
             
             # Apply fixes with selected format
             fixed_content, changes_made = self.validator.apply_automatic_fixes(

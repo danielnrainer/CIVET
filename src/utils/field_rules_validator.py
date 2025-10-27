@@ -3,7 +3,7 @@ Field Rules Validator
 ====================
 
 Validates and analyzes field rules files for common issues:
-- Mixed CIF1/CIF2 formats
+- Mixed legacy/modern formats
 - Duplicate/alias fields
 - Unknown fields not in dictionaries
 - Format inconsistencies
@@ -38,7 +38,6 @@ class IssueCategory(Enum):
 class AutoFixType(Enum):
     """Types of automatic fixes available"""
     YES = "yes"                         # Direct dictionary mapping available
-    CIF2_MANUAL_MAPPING = "CIF2 manual mapping"  # CIF2-only extension mapping
     NO = "no"                          # No automatic fix available
 
 
@@ -55,7 +54,7 @@ class ValidationIssue:
     @property
     def auto_fixable(self) -> bool:
         """Check if issue can be automatically fixed"""
-        return self.auto_fix_type in [AutoFixType.YES, AutoFixType.CIF2_MANUAL_MAPPING]
+        return self.auto_fix_type == AutoFixType.YES
 
 
 @dataclass
@@ -64,7 +63,7 @@ class ValidationResult:
     issues: List[ValidationIssue]
     total_fields: int
     unique_fields: int
-    cif_format_detected: str  # "CIF1", "CIF2", "Mixed"
+    cif_format_detected: str  # "legacy", "modern", "Mixed"
     
     @property
     def has_issues(self) -> bool:
@@ -87,10 +86,10 @@ class CIFFormatAnalyzer:
     def analyze_cif_format(cif_content: str) -> str:
         """
         Analyze CIF content to determine format.
-        Returns: "CIF1", "CIF2", or "Mixed"
+        Returns: "legacy", "modern", or "Mixed"
         """
         if not cif_content.strip():
-            return "CIF1"  # Default to CIF1 for empty content
+            return "legacy"  # Default to CIF1 for empty content
             
         # Extract all field names from valid positions in the CIF content
         # Process line by line to avoid matching fields in comments
@@ -107,7 +106,7 @@ class CIFFormatAnalyzer:
                 matches.append(match.group(1))
         
         if not matches:
-            return "CIF1"  # Default if no fields found
+            return "legacy"  # Default if no fields found
         
         cif1_count = 0
         cif2_count = 0
@@ -120,15 +119,15 @@ class CIFFormatAnalyzer:
         
         total = cif1_count + cif2_count
         if total == 0:
-            return "CIF1"
+            return "legacy"
         
         cif2_ratio = cif2_count / total
         
         # Determine format based on ratio
         if cif2_ratio >= 0.7:
-            return "CIF2"
+            return "modern"
         elif cif2_ratio <= 0.3:
-            return "CIF1"
+            return "legacy"
         else:
             return "Mixed"
 
@@ -149,24 +148,19 @@ class FieldRulesValidator:
         self.dict_manager = dict_manager
         self.format_converter = format_converter
     
-    def _determine_auto_fix_type(self, field_name: str, preferred_format: str = "CIF1") -> AutoFixType:
+    def _determine_auto_fix_type(self, field_name: str, preferred_format: str = "legacy") -> AutoFixType:
         """
         Determine what type of automatic fix is available for a field.
         
         Args:
             field_name: The field name to check
-            preferred_format: Target format ("CIF1" or "CIF2")
+            preferred_format: Target format ("legacy" or "modern")
         
         Returns:
             AutoFixType indicating the fix availability
         """
-        # Check if there's a CIF2-only mapping first (for proper categorization)
-        if hasattr(self.dict_manager, 'is_cif2_only_extension'):
-            if self.dict_manager.is_cif2_only_extension(field_name):
-                return AutoFixType.CIF2_MANUAL_MAPPING
-        
         # Check if there's an official dictionary mapping
-        if preferred_format == "CIF1":
+        if preferred_format == "legacy":
             official_equiv = self.dict_manager.get_cif1_equivalent(field_name)
         else:
             official_equiv = self.dict_manager.get_cif2_equivalent(field_name)
@@ -180,14 +174,14 @@ class FieldRulesValidator:
     def validate_field_rules(self, 
                            field_rules_content: str, 
                            cif_content: Optional[str] = None,
-                           target_format: str = "CIF2") -> ValidationResult:
+                           target_format: str = "modern") -> ValidationResult:
         """
         Validate field rules and return detailed results
         
         Args:
             field_rules_content: Content of field rules file
             cif_content: Content of CIF file to analyze format (optional)
-            target_format: Target format for validation ("CIF1" or "CIF2")
+            target_format: Target format for validation ("legacy" or "modern")
             
         Returns:
             ValidationResult with all issues found
@@ -199,7 +193,7 @@ class FieldRulesValidator:
         if cif_content:
             cif_format = CIFFormatAnalyzer.analyze_cif_format(cif_content)
         else:
-            cif_format = "CIF1"  # Default if no CIF provided
+            cif_format = "legacy"  # Default if no CIF provided
         
         # Find all issues
         issues = []
@@ -261,14 +255,14 @@ class FieldRulesValidator:
         
         for field in fields:
             is_cif2 = '.' in field
-            field_format = "CIF2" if is_cif2 else "CIF1"
+            field_format = "modern" if is_cif2 else "legacy"
             
             # For mixed CIF files, prefer CIF2
-            preferred_format = "CIF2" if target_format == "Mixed" else target_format
+            preferred_format = "modern" if target_format == "Mixed" else target_format
             
             if field_format != preferred_format:
                 # Try to find the equivalent in the preferred format
-                if preferred_format == "CIF2":
+                if preferred_format == "modern":
                     equivalent = self.dict_manager.get_cif2_equivalent(field)
                 else:
                     equivalent = self.dict_manager.get_cif1_equivalent(field)
@@ -372,7 +366,7 @@ class FieldRulesValidator:
         for field in fields:
             if self.dict_manager.is_field_deprecated(field):
                 # Get the non-deprecated replacement (prefer CIF2 for field rules)
-                modern_replacement = self.dict_manager.get_modern_equivalent(field, prefer_format="CIF2")
+                modern_replacement = self.dict_manager.get_modern_equivalent(field, prefer_format="modern")
                 
                 if modern_replacement:
                     issues.append(ValidationIssue(
@@ -446,7 +440,7 @@ class FieldRulesValidator:
                             field_def_content: str, 
                             issues: List[ValidationIssue],
                             fix_obvious_only: bool = False,
-                            target_format: str = "CIF2") -> Tuple[str, List[str]]:
+                            target_format: str = "modern") -> Tuple[str, List[str]]:
         """
         Apply automatic fixes to field definition content
         
@@ -454,7 +448,7 @@ class FieldRulesValidator:
             field_def_content: Original field definition content
             issues: List of issues to fix
             fix_obvious_only: Only fix obviously safe issues
-            target_format: Target format for fixes ("CIF1" or "CIF2")
+            target_format: Target format for fixes ("legacy" or "modern")
             
         Returns:
             Tuple of (fixed_content, list_of_changes_made)
@@ -492,12 +486,12 @@ class FieldRulesValidator:
         
         return fixed_content, changes_made
     
-    def _fix_mixed_format(self, content: str, issue: ValidationIssue, target_format: str = "CIF2") -> Tuple[str, Optional[str]]:
+    def _fix_mixed_format(self, content: str, issue: ValidationIssue, target_format: str = "modern") -> Tuple[str, Optional[str]]:
         """Fix mixed format issue using the specified target format"""
         field = issue.field_names[0]
         
         # Determine the replacement based on target format
-        if target_format == "CIF1":
+        if target_format == "legacy":
             # Convert to CIF1 format
             replacement = self.dict_manager.get_cif1_equivalent(field)
             if not replacement:
@@ -518,16 +512,16 @@ class FieldRulesValidator:
         
         return content, None
     
-    def _fix_duplicate_alias(self, content: str, issue: ValidationIssue, target_format: str = "CIF2") -> Tuple[str, Optional[str]]:
+    def _fix_duplicate_alias(self, content: str, issue: ValidationIssue, target_format: str = "modern") -> Tuple[str, Optional[str]]:
         """Fix duplicate alias issue, preferring the target format"""
         preferred = None
         
         # Choose the preferred field based on target format
         for field in issue.field_names:
-            if target_format == "CIF1" and '.' not in field:
+            if target_format == "legacy" and '.' not in field:
                 preferred = field
                 break
-            elif target_format == "CIF2" and '.' in field:
+            elif target_format == "modern" and '.' in field:
                 preferred = field
                 break
         

@@ -12,9 +12,10 @@ a = Analysis(
 
         # Field definition files for validation
         ('field_rules/3ded.cif_rules', 'field_rules'),        # 3D ED field rules
-        ('field_rules/3ded_cif1.cif_rules', 'field_rules'),   # 3D ED field rules in CIF1 format
+        ('field_rules/3ded_legacy.cif_rules', 'field_rules'), # 3D ED field rules in legacy format
         ('field_rules/hp.cif_rules', 'field_rules'),          # High-pressure field rules
         ('field_rules/cleanups.cif_rules', 'field_rules'),    # Cleanup operations
+        ('field_rules/checkcif_compatibility.cif_rules', 'field_rules'),  # checkCIF compatibility fields
         
         # CIF Dictionary files - Essential for field validation and conversion
         ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
@@ -47,6 +48,7 @@ a = Analysis(
         'gui.dialogs.dictionary_info_dialog',
         'gui.dialogs.dictionary_suggestion_dialog',  # New dictionary suggestion dialog
         'gui.dialogs.field_rules_validation_dialog', # New field validation dialog
+        'gui.dialogs.format_conversion_dialog',      # New format conversion dialog
         
         # Utility modules - Core functionality
         'utils',
@@ -56,7 +58,6 @@ a = Analysis(
         'utils.cif_format_converter',
         'utils.cif_dictionary_parser',
         'utils.cif_deprecation_manager',
-        'utils.cif2_only_extensions',
         'utils.dictionary_suggestion_manager',  # New dictionary suggestion system
         'utils.field_rules_validator',  # New field rules validation system
         

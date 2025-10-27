@@ -56,8 +56,8 @@ class ConflictResolutionWidget(QWidget):
                 self.field_combo.addItem(alias)
                 
         # Add the canonical field as the preferred option
-        self.field_combo.addItem(f"{self.canonical_field} (CIF2 format)")
-        self.field_combo.setCurrentText(f"{self.canonical_field} (CIF2 format)")
+        self.field_combo.addItem(f"{self.canonical_field} (modern format)")
+        self.field_combo.setCurrentText(f"{self.canonical_field} (modern format)")
         
         form_layout.addRow("Field name to use:", self.field_combo)
         
@@ -67,7 +67,7 @@ class ConflictResolutionWidget(QWidget):
                                 if self.dict_manager.is_field_deprecated(alias)]
             if deprecated_aliases:
                 warning_text = f"⚠️ Warning: {', '.join(deprecated_aliases)} {'is' if len(deprecated_aliases) == 1 else 'are'} deprecated field{'s' if len(deprecated_aliases) > 1 else ''}. " \
-                              f"Consider using the CIF2 format ({self.canonical_field}) instead."
+                              f"Consider using the modern format ({self.canonical_field}) instead."
                 warning_label = QLabel(warning_text)
                 warning_label.setWordWrap(True)
                 warning_label.setStyleSheet("color: #ff6b35; background-color: #fff3cd; padding: 8px; border: 1px solid #ffeaa7; border-radius: 4px;")
@@ -91,9 +91,9 @@ class ConflictResolutionWidget(QWidget):
     def get_resolution(self) -> Tuple[str, str]:
         """Get the user's resolution for this conflict"""
         field_text = self.field_combo.currentText()
-        
-        # Handle the CIF2 format option
-        if "(CIF2 format)" in field_text:
+
+        # Handle the modern format option
+        if "(modern format)" in field_text:
             field_name = self.canonical_field
         elif "(DEPRECATED - not recommended)" in field_text:
             # Extract the field name from deprecated marker
@@ -139,7 +139,7 @@ class FieldConflictDialog(QDialog):
         if len(self.conflicts) > 10:
             info_text = f"Found {len(self.conflicts)} field conflicts that need to be resolved. " + \
                        "Due to the large number of conflicts, consider using the 'Auto-Resolve' button " + \
-                       "to quickly set all conflicts to use CIF2 format with the first available values."
+                       "to quickly set all conflicts to use modern format with the first available values."
         else:
             info_text = f"Found {len(self.conflicts)} field conflicts that need to be resolved. " + \
                        "Each conflict occurs when the same field appears in multiple forms in your CIF file."
@@ -183,7 +183,7 @@ class FieldConflictDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         
-        auto_resolve_btn = QPushButton("Auto-Resolve (Use CIF2 + First Value)")
+        auto_resolve_btn = QPushButton("Auto-Resolve (Use Modern format + First Value)")
         auto_resolve_btn.clicked.connect(self.auto_resolve)
         if len(self.conflicts) > 5:
             auto_resolve_btn.setStyleSheet("background-color: #28a745; color: white; font-weight: bold;")
@@ -256,16 +256,16 @@ class FieldConflictDialog(QDialog):
         return aliases_and_values
     
     def auto_resolve(self):
-        """Auto-resolve all conflicts using CIF2 format and first available values"""
+        """Auto-resolve all conflicts using modern format and first available values"""
         for widget in self.resolution_widgets:
-            # Set to CIF2 format
-            cif2_option = f"{widget.canonical_field} (CIF2 format)"
+            # Set to modern format
+            cif2_option = f"{widget.canonical_field} (modern format)"
             widget.field_combo.setCurrentText(cif2_option)
             
             # Keep current value (should already be set to first non-empty value)
         
         QMessageBox.information(self, "Auto-Resolved", 
-                              "All conflicts have been auto-resolved using CIF2 format and the first available values. " +
+                              "All conflicts have been auto-resolved using modern format and the first available values. " +
                               "You can still modify the selections before applying.")
     
     def get_resolutions(self) -> Dict[str, Tuple[str, str]]:

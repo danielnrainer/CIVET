@@ -13,7 +13,6 @@ from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
 from utils.CIF_parser import CIFParser, CIFField
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
-from utils.cif2_only_extensions import ExtendedCIFDictionaryManager
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
@@ -22,6 +21,7 @@ from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
 from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
 from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
+from .dialogs.format_conversion_dialog import suggest_format_conversion
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -39,8 +39,7 @@ class CIFEditor(QMainWindow):
         config_path = os.path.dirname(__file__)
         
         # Initialize CIF dictionary manager and format converter
-        base_dict_manager = CIFDictionaryManager()
-        self.dict_manager = ExtendedCIFDictionaryManager(base_dict_manager)
+        self.dict_manager = CIFDictionaryManager()
         self.format_converter = CIFFormatConverter(self.dict_manager)
         self.current_cif_version = CIFVersion.UNKNOWN
         
@@ -203,6 +202,8 @@ class CIFEditor(QMainWindow):
         file_menu.addMenu(self.recent_menu)
         
         save_as_action = file_menu.addAction("Save As")
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.setShortcut("Ctrl+S")
         save_as_action.triggered.connect(self.save_file_as)
         
         file_menu.addSeparator()
@@ -230,10 +231,10 @@ class CIFEditor(QMainWindow):
         
         format_menu.addSeparator()
         
-        convert_to_cif1_action = format_menu.addAction("Convert to CIF1")
+        convert_to_cif1_action = format_menu.addAction("Convert to Legacy Format")
         convert_to_cif1_action.triggered.connect(self.convert_to_cif1)
         
-        convert_to_cif2_action = format_menu.addAction("Convert to CIF2")
+        convert_to_cif2_action = format_menu.addAction("Convert to Modern Format")
         convert_to_cif2_action.triggered.connect(self.convert_to_cif2)
         
         format_menu.addSeparator()
@@ -529,11 +530,38 @@ class CIFEditor(QMainWindow):
         try:
             with open(filepath, "r", encoding="utf-8") as file:
                 content = file.read()
+            
+            # Detect CIF version first
+            detected_version = self.dict_manager.detect_cif_version(content)
+            
+            # Suggest conversion to modern format if not already modern
+            if detected_version in [CIFVersion.CIF1, CIFVersion.MIXED]:
+                final_content, user_choice, changes = suggest_format_conversion(
+                    content, detected_version, self.format_converter, self
+                )
+                
+                if user_choice == 'cancel':
+                    # User cancelled, don't load the file
+                    return
+                elif user_choice == 'convert':
+                    # User accepted conversion
+                    content = final_content
+                    self.modified = True  # Mark as modified since content changed
+                    QMessageBox.information(
+                        self, 
+                        "Conversion Complete",
+                        f"File converted to modern CIF format.\n"
+                        f"{len(changes)} field names updated.\n\n"
+                        f"Remember to save the file to preserve changes."
+                    )
+                # else: user_choice == 'keep_original', use original content
+            
             self.text_editor.setText(content)
             self.current_file = filepath
-            self.modified = False
+            if not self.modified:  # Only set to False if we didn't convert
+                self.modified = False
             
-            # Detect CIF version
+            # Update CIF version display with the content we're actually showing
             self.detect_and_update_cif_version(content)
             
             self.update_status_bar()
@@ -871,18 +899,18 @@ class CIFEditor(QMainWindow):
                 field_name = '_refine_special_details'
             else:
                 # Neither exists, so decide based on the predominant format
-                # Check if this looks more like CIF2 by counting modern vs legacy fields
+                # Check if this looks more like modern format by counting modern vs legacy fields
                 all_fields = list(self.cif_parser.fields.keys())
-                cif2_fields = [f for f in all_fields if '.' in f]
-                cif1_fields = [f for f in all_fields if '.' not in f]
+                modern_fields = [f for f in all_fields if '.' in f]
+                legacy_fields = [f for f in all_fields if '.' not in f]
                 
-                # If more CIF2 fields, use CIF2 naming
-                if len(cif2_fields) >= len(cif1_fields):
+                # If more modern fields, use modern naming
+                if len(modern_fields) >= len(legacy_fields):
                     field_name = '_refine.special_details'
                 else:
                     field_name = '_refine_special_details'
         else:
-            # Default to CIF1 format (covers CIF1, UNKNOWN)
+            # Default to legacy format (covers legacy, UNKNOWN)
             field_name = '_refine_special_details'
         
         template = (
@@ -960,7 +988,7 @@ class CIFEditor(QMainWindow):
                     self, "Validate Field Definitions",
                     "Would you like to validate this field definition file for common issues?\n\n"
                     "This can help identify and fix:\n"
-                    "• Mixed CIF1/CIF2 formats\n"
+                    "• Mixed legacy/modern formats\n"
                     "• Duplicate/alias fields\n"
                     "• Unknown fields\n\n"
                     "Recommended for better compatibility.",
@@ -1117,25 +1145,25 @@ class CIFEditor(QMainWindow):
                 
                 # Load appropriate 3DED rules based on CIF format
                 field_rules_dir = get_resource_path('field_rules')
-                if cif_format.upper() == 'CIF1':
-                    # Load CIF1 version of 3DED rules
-                    cif1_rules_path = os.path.join(field_rules_dir, '3ded_cif1.cif_rules')
-                    if os.path.exists(cif1_rules_path):
-                        self.field_checker.load_field_set('3DED', cif1_rules_path)
+                if cif_format.upper() == 'LEGACY':
+                    # Load legacy version of 3DED rules
+                    legacy_rules_path = os.path.join(field_rules_dir, '3ded_legacy.cif_rules')
+                    if os.path.exists(legacy_rules_path):
+                        self.field_checker.load_field_set('3DED', legacy_rules_path)
                         QMessageBox.information(
                             self, 
                             "CIF Format Compatibility", 
-                            f"Detected CIF1 format. Automatically switched to CIF1-compatible 3D ED field rules."
+                            f"Detected legacy format. Automatically switched to legacy-compatible 3D ED field rules."
                         )
                     else:
                         QMessageBox.warning(
                             self, 
                             "Compatibility Issue", 
-                            f"CIF1 format detected, but CIF1-compatible 3D ED rules not found.\n"
-                            f"Using default CIF2 rules which may cause validation issues."
+                            f"Legacy format detected, but legacy-compatible 3D ED rules not found.\n"
+                            f"Using default modern rules which may cause validation issues."
                         )
                 else:
-                    # Load default CIF2 version of 3DED rules
+                    # Load default modern version of 3DED rules
                     default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
                     if os.path.exists(default_rules_path):
                         self.field_checker.load_field_set('3DED', default_rules_path)
@@ -1247,7 +1275,7 @@ class CIFEditor(QMainWindow):
                 abs_config_field = "_chemical.absolute_configuration"
                 z_score_field = "_refine_ls.abs_structure_z-score"
             else:
-                # Use CIF1 format for CIF1, MIXED, and UNKNOWN
+                # Use legacy format for legacy, MIXED, and UNKNOWN
                 abs_config_field = "_chemical_absolute_configuration"
                 z_score_field = "_refine_ls_abs_structure_z-score"
             
@@ -1489,9 +1517,9 @@ class CIFEditor(QMainWindow):
     def update_cif_version_display(self):
         """Update the CIF version display in the status bar"""
         version_text = {
-            CIFVersion.CIF1: "CIF Version: 1.x",
-            CIFVersion.CIF2: "CIF Version: 2.0",
-            CIFVersion.MIXED: "CIF Version: Mixed (1.x/2.0)",
+            CIFVersion.CIF1: "CIF Version: Legacy (1.x)",
+            CIFVersion.CIF2: "CIF Version: Modern (2.0)",
+            CIFVersion.MIXED: "CIF Version: Mixed (legacy/modern)",
             CIFVersion.UNKNOWN: "CIF Version: Unknown"
         }
         
@@ -1519,9 +1547,9 @@ class CIFEditor(QMainWindow):
         
         # Show detailed information
         version_info = {
-            CIFVersion.CIF1: "CIF version 1.x detected\nThis file uses traditional CIF1 format.",
-            CIFVersion.CIF2: "CIF version 2.0 detected\nThis file uses modern CIF2 format with UTF-8 encoding.",
-            CIFVersion.MIXED: "Mixed CIF format detected\nThis file contains both CIF1 and CIF2 elements.\nConsider using 'Fix Mixed Format' to resolve.",
+            CIFVersion.CIF1: "CIF version 1.x detected\nThis file uses traditional legacy format.",
+            CIFVersion.CIF2: "CIF version 2.0 detected\nThis file uses modern format with UTF-8 encoding.",
+            CIFVersion.MIXED: "Mixed CIF format detected\nThis file contains both legacy and modern elements.\nConsider using 'Fix Mixed Format' to resolve.",
             CIFVersion.UNKNOWN: "Unknown CIF format\nCould not determine CIF version from the content."
         }
         
@@ -1529,7 +1557,7 @@ class CIFEditor(QMainWindow):
                               version_info.get(version, "Unknown format detected."))
     
     def convert_to_cif1(self):
-        """Convert current CIF content to CIF1 format"""
+        """Convert current CIF content to legacy format"""
         content = self.text_editor.toPlainText()
         if not content.strip():
             QMessageBox.information(self, "No Content", "Please open a CIF file first.")
@@ -1546,16 +1574,16 @@ class CIFEditor(QMainWindow):
                 if len(changes) > 5:
                     change_summary += f"\n... and {len(changes)-5} more"
                 QMessageBox.information(self, "Conversion Complete", 
-                                      f"File successfully converted to CIF1 format.\n\n{change_summary}")
+                                      f"File successfully converted to legacy format.\n\n{change_summary}")
             else:
                 QMessageBox.information(self, "No Changes", 
-                                      "File is already in CIF1 format or no conversion was needed.")
+                                      "File is already in legacy format or no conversion was needed.")
         except Exception as e:
             QMessageBox.critical(self, "Conversion Error", 
-                               f"Failed to convert to CIF1:\n{str(e)}")
+                               f"Failed to convert to legacy format:\n{str(e)}")
     
     def convert_to_cif2(self):
-        """Convert current CIF content to CIF2 format"""
+        """Convert current CIF content to modern format"""
         content = self.text_editor.toPlainText()
         if not content.strip():
             QMessageBox.information(self, "No Content", "Please open a CIF file first.")
@@ -1572,14 +1600,14 @@ class CIFEditor(QMainWindow):
                 if len(changes) > 5:
                     change_summary += f"\n... and {len(changes)-5} more"
                 QMessageBox.information(self, "Conversion Complete", 
-                                      f"File successfully converted to CIF2 format.\n" +
+                                      f"File successfully converted to modern format.\n" +
                                       f"Note: Save with UTF-8 encoding.\n\n{change_summary}")
             else:
                 QMessageBox.information(self, "No Changes", 
-                                      "File is already in CIF2 format or no conversion was needed.")
+                                      "File is already in modern format or no conversion was needed.")
         except Exception as e:
             QMessageBox.critical(self, "Conversion Error", 
-                               f"Failed to convert to CIF2:\n{str(e)}")
+                               f"Failed to convert to modern format:\n{str(e)}")
     
     def fix_mixed_format(self):
         """Fix mixed CIF format by converting to consistent format"""
@@ -1598,8 +1626,8 @@ class CIFEditor(QMainWindow):
         # Ask user which format to convert to
         reply = QMessageBox.question(self, "Choose Target Format",
                                    "Convert mixed format to:\n\n" +
-                                   "Yes: CIF2 (recommended for new files)\n" +
-                                   "No: CIF1 (for legacy compatibility)\n" +
+                                   "Yes: Modern format (recommended for new files)\n" +
+                                   "No: Legacy format (for compatibility)\n" +
                                    "Cancel: Abort conversion",
                                    QMessageBox.StandardButton.Yes |
                                    QMessageBox.StandardButton.No |
@@ -1610,15 +1638,15 @@ class CIFEditor(QMainWindow):
         
         try:
             if reply == QMessageBox.StandardButton.Yes:
-                # Convert to CIF2
+                # Convert to modern format
                 fixed_content, changes = self.format_converter.fix_mixed_format(content, target_version=CIFVersion.CIF2)
                 target_version = CIFVersion.CIF2
-                format_name = "CIF2"
+                format_name = "modern"
             else:
-                # Convert to CIF1
+                # Convert to legacy format
                 fixed_content, changes = self.format_converter.fix_mixed_format(content, target_version=CIFVersion.CIF1)
                 target_version = CIFVersion.CIF1
-                format_name = "CIF1"
+                format_name = "legacy"
             
             if fixed_content != content:
                 self.text_editor.setText(fixed_content)
@@ -1669,7 +1697,7 @@ class CIFEditor(QMainWindow):
                                        conflict_summary + 
                                        "How would you like to resolve these conflicts?\n\n" +
                                        "• Yes: Let me choose for each conflict individually\n" +
-                                       "• No: Auto-resolve using CIF2 format + first available values\n" +
+                                       "• No: Auto-resolve using modern format + first available values\n" +
                                        "• Cancel: Don't resolve conflicts",
                                        QMessageBox.StandardButton.Yes |
                                        QMessageBox.StandardButton.No |
@@ -1685,7 +1713,7 @@ class CIFEditor(QMainWindow):
                 else:
                     return  # User cancelled
             else:
-                # Auto-resolve using CIF2 format + first available values
+                # Auto-resolve using modern format + first available values
                 resolutions = self._auto_resolve_conflicts(conflicts, content)
             
             # Apply the resolutions
@@ -1710,13 +1738,13 @@ class CIFEditor(QMainWindow):
                                f"Failed to resolve field alias conflicts:\n{str(e)}")
     
     def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str) -> Dict[str, Tuple[str, str]]:
-        """Auto-resolve conflicts using CIF2 format and first available values"""
+        """Auto-resolve conflicts using modern format and first available values"""
         resolutions = {}
         
         lines = cif_content.split('\n')
         
         for canonical_field, alias_list in conflicts.items():
-            # Use CIF2 format (canonical field)
+            # Use modern format (canonical field)
             chosen_field = canonical_field
             
             # Find the first available value
@@ -1997,7 +2025,7 @@ class CIFEditor(QMainWindow):
                 "Conflict Resolution Method",
                 "Choose conflict resolution method:\n\n" +
                 "• Yes: Let me choose for each conflict individually\n" +
-                "• No: Auto-resolve using CIF2 format + first available values",
+                "• No: Auto-resolve using modern format + first available values",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No  # Default to auto-resolve
             )

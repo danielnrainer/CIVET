@@ -25,6 +25,6 @@ Thumbs.db
 *.temp
 build/
 dist/
-deprecated_fields_analysis_sifted.txt
+*.txt
 .gitignore
-deprecated_fields_analysis.txt
+

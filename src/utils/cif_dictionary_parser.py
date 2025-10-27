@@ -231,9 +231,10 @@ class CIFDictionaryParser:
                     if alias_lower not in self._cif2_to_cif1[target_field]:
                         self._cif2_to_cif1[target_field].append(alias_lower)
         else:
-            # Add mappings only for non-deprecated aliases
+            # Add mappings for all aliases (including deprecated ones)
+            # This is necessary for format conversion to work properly
             for alias_info in aliases:
-                if alias_info.name and alias_info.name != cif2_field and not alias_info.is_deprecated:
+                if alias_info.name and alias_info.name != cif2_field:
                     alias_lower = alias_info.name.lower()
                     cif2_lower = cif2_field.lower()
                     self._cif1_to_cif2[alias_lower] = cif2_lower

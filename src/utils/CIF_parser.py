@@ -97,8 +97,8 @@ class CIFParser:
         # Check each critical field
         for deprecated_field in critical_deprecated_fields:
             # Get the modern equivalent
-            modern_field_cif2 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="CIF2")
-            modern_field_cif1 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="CIF1")
+            modern_field_cif2 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="modern")
+            modern_field_cif1 = dict_manager.get_modern_equivalent(deprecated_field, prefer_format="legacy")
             
             # Choose the modern field (prefer the one that exists in our CIF)
             modern_field = None
@@ -186,9 +186,9 @@ class CIFParser:
             for field_obj in deprecated_field_objs:
                 # Get replacement field info and add as a comment BEFORE the field
                 try:
-                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF2")
+                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="modern")
                     if not replacement:
-                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF1")
+                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="legacy")
                     
                     if replacement:
                         comment_text = f"# -> Use {replacement} instead"
@@ -260,9 +260,9 @@ class CIFParser:
                 # Get replacement field info and add as a comment BEFORE the field
                 # This ensures the field line stays within 80 characters
                 try:
-                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF2")
+                    replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="modern")
                     if not replacement:
-                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="CIF1")
+                        replacement = dict_manager.get_modern_equivalent(field_obj.name, prefer_format="legacy")
                     
                     if replacement:
                         comment_text = f"# -> Use {replacement} instead"

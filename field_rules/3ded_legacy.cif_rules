@@ -1,0 +1,136 @@
+# CIF Field Constants for CIVET, legacy notation (where applicable)
+# Fields and their standard values for electron diffraction CIF files
+# References: https://github.com/COMCIFS/cif_ed and personal preferences/opinions by DNR (based on Synergy-ED Southampton)
+
+# _diffrn_ambient_temperature: Sample temperature during data collection (in K)
+_diffrn_ambient_temperature  293(5)
+
+# _cell_measurement_temperature: Sample temperature during data collection (in K)
+_cell_measurement_temperature  293(5)
+
+# _diffrn_ambient_environment: Sample environment during measurement
+_diffrn_ambient_environment  vacuum  # options: vacuum, helium, nitrogen, air
+
+# _exptl_crystal_colour: Visual description of the crystal color
+_exptl_crystal_colour  'white (bulk)'
+
+# _exptl_crystal_description: Visual description of the crystal habit
+_exptl_crystal_description  'irregular'  # suggestions: 'plate', 'needle', 'block', 'prism', ...
+
+# _diffrn_radiation_wavelength: Electron wavelength in Å
+_diffrn_radiation_wavelength  0.0251
+
+# _diffrn_source: Primary description of the electron source
+_diffrn_source  'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
+
+# _diffrn_source_make: Details of electron source type
+_diffrn_source_make  'JEOL JSM-2300ED, LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'
+
+# _diffrn_source_voltage: Accelerating voltage in kV
+_diffrn_source_voltage  200
+
+# _diffrn_radiation_probe: Type of radiation probe
+_diffrn_radiation_probe  electron
+
+# _diffrn_radiation_monochromator: Monochromator type if present
+_diffrn_radiation_monochromator  none
+
+# _diffrn_detector: General detector category
+_diffrn_detector  'hybrid pixel array detector'  # suggestions: 'CCD', 'CMOS', 'hybrid pixel', 'direct detection camera'
+
+# _diffrn_detector_type: Specific detector model
+_diffrn_detector_type  'Rigaku HyPix-ED'  # suggestions: 'Rigaku HyPix-ED', 'Rigaku HyPix-Arc', 'ASI Timpix', 'TVIPS XF-416', 'Gatan K2', 'Gatan K3'
+
+# _diffrn_measurement_device: Primary instrument used
+_diffrn_measurement_device  'electron diffractometer'  # suggestions: 'electron diffractometer', 'transmission electron microscope'
+
+# _diffrn_measurement_device_type: The make, model or name of the goniometer device used. This is a bit odd for TEM based instruments, but maybe instrument name is good enough
+_diffrn_measurement_device_type  'Rigaku XtaLAB Synergy-ED' 
+
+# _diffrn_measurement_method: Data collection method
+_diffrn_measurement_method  'continuous rotation electron diffraction'  # options: 'continuous rotation electron diffraction', 'serial electron diffraction'
+
+# _diffrn_measurement_specimen_support: Grid details (or equivalent)
+_diffrn_measurement_specimen_support  'lacey carbon copper grid, 200 mesh'
+
+# _exptl_special_details: holder make and T-control if applicable (lack of different CIF field)
+_exptl_special_details  'Gatan Elsa cryo-transfer holder model 698. Temperature controller model 1905'
+
+# _exptl_crystal_preparation: Sample preparation method
+_exptl_crystal_preparation  'suspension in ethanol, dropcast on grid, evaporation in air'
+
+# _exptl_crystals_number: Number of crystals used
+_exptl_crystals_number  1
+
+# _diffrn_source.ed_diffracting_area_selection: Area selection method
+_diffrn_source.ed_diffracting_area_selection  SAED  # options: SAED, probe
+
+# _diffrn_measurement.rotation_mode: Data collection rotation mode
+_diffrn_measurement.rotation_mode  rotation  # options: rotation, stepwise
+
+# _refine.diffraction_theory: Theory used for structure refinement
+_refine.diffraction_theory  kinematical  # options: kinematical, dynamical
+
+# _refine.diffraction_theory_details: free text to f.ex. state refined parameters during dynamical refinement 
+_refine.diffraction_theory_details  ?
+
+# _diffrn_measurement.sample_tracking: yes/no crystal tracking used during data collection?
+_diffrn_measurement.sample_tracking  no
+
+# _diffrn_measurement.sample_tracking_method: description of the method used for crystal tracking if applicable
+_diffrn_measurement.sample_tracking_method  .
+
+# _computing.sample_tracking: Reference for sample tracking during collection if applicable
+_computing.sample_tracking  .
+
+# _diffrn_radiation.illumination_mode: optical configuration of incident beam at the sample, i.e. distinction between TEM and STEM
+_diffrn_radiation.illumination_mode  parallel  # options: parallel, convergent
+
+# _diffrn_source_size: Measure of the beam size at the sample. For SAED, this should be the beam width corresponding to the aperture size (at the sample), and not the total beam width.
+_diffrn_source_size  'SAED nominal aperture diameter 100 um, corresponding to a diameter of about 2 um at the image plane.'
+
+#_diffrn_measurement.method_precession: yes/no if the measurement was performed by precessing the beam.
+_diffrn_measurement.method_precession  no
+
+# _diffrn.precession_semi_angle: Angle (in degrees) at the sample of the tilt from the normal direction of a radiation beam moved in a precessional scan.
+_diffrn.precession_semi_angle  .
+
+# _refine_diff.potential_max: Maximum electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_max  ?
+
+# _refine_diff.potential_min: Minimum electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_min  ?
+
+# _refine_diff.potential_RMS: Root mean square electrostatic potential value in a difference Fourier map.
+_refine_diff.potential_RMS  ?
+
+# _exptl_crystal.mosaicity: Mosaicity in degrees
+_exptl_crystal.mosaicity  ?
+
+# _exptl_crystal.mosaic_method: Method used to determine mosaicity
+_exptl_crystal.mosaic_method  ?
+
+# _exptl_crystal.mosaic_block_size: Average mosaic block size in Å
+_exptl_crystal.mosaic_block_size  ?
+
+# _diffrn_source.convergence_angle: Angle of convergence in degrees, generally only necessary for convergent beams
+_diffrn_source.convergence_angle  ?
+
+# _refine_ls.sample_thickness: Refined sample thickness as determined by dynamical refinement
+_refine_ls.sample_thickness  .
+
+# _refine_ls.sample_shape_expression: Expression used to determine sample thickness during dynamical refinement
+_refine_ls.sample_shape_expression  .
+
+# _refine_ls.sample_shape_details: Further details on how the sample shape/thickness are approximated
+_refine_ls.sample_shape_details    .
+
+# _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2
+_diffrn.flux_density  ?
+
+# _diffrn.total_dose: Total electron dose in MGy, probably not sensible unless crystal volume known
+_diffrn.total_dose  ?
+
+# _diffrn.total_exposure_time: Total exposure time in minutes 
+_diffrn.total_exposure_time  ?
+

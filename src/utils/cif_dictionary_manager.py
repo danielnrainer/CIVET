@@ -24,7 +24,6 @@ from datetime import datetime
 from urllib.parse import urlparse
 from .cif_dictionary_parser import CIFDictionaryParser
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
-from .cif2_only_extensions import CIF2_ONLY_FIELD_MAPPINGS
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -371,6 +370,14 @@ class CIFDictionaryManager:
             CIF2 field name or None if not found
         """
         self._ensure_loaded()
+        
+        # First try to get the correctly-cased definition_id from the parser
+        # This preserves proper case like "IT_number" instead of "it_number"
+        definition_id = self.parser._alias_to_definition.get(field_name.lower())
+        if definition_id:
+            return definition_id
+        
+        # Fall back to the legacy mapping (may have incorrect case)
         return self._cif1_to_cif2.get(field_name.lower())
     
     def get_cif1_equivalent(self, field_name: str) -> Optional[str]:
@@ -554,6 +561,38 @@ class CIFDictionaryManager:
         
         return self.parser.is_field_deprecated(field_name)
     
+    def get_modern_replacement(self, deprecated_field: str) -> Optional[str]:
+        """
+        Get the modern (non-deprecated) replacement for a deprecated field.
+        
+        Args:
+            deprecated_field: Deprecated field name
+            
+        Returns:
+            Modern replacement field name, or None if no replacement exists
+        """
+        self._ensure_loaded()
+        
+        # First, check if this field has a direct replacement_by value
+        # Note: _alias_to_definition uses lowercase keys
+        definition_id = self.parser._alias_to_definition.get(deprecated_field.lower())
+        if definition_id:
+            metadata = self.parser._field_metadata.get(definition_id)
+            if metadata and metadata.replacement_by:
+                return metadata.replacement_by
+            
+            # If no explicit replacement_by, but the field is deprecated,
+            # return the canonical (definition_id) if it's not deprecated
+            if metadata and not self.is_field_deprecated(metadata.definition_id):
+                return metadata.definition_id
+        
+        # Try getting CIF2 equivalent if this is a CIF1 field
+        cif2_equiv = self.get_cif2_equivalent(deprecated_field)
+        if cif2_equiv and not self.is_field_deprecated(cif2_equiv):
+            return cif2_equiv
+        
+        return None
+    
     def get_non_deprecated_aliases(self, cif2_field: str) -> List[str]:
         """Get only non-deprecated aliases for a CIF2 field"""
         self._ensure_loaded()
@@ -659,13 +698,13 @@ class CIFDictionaryManager:
         
         return unique_variations
 
-    def get_modern_equivalent(self, old_field_name: str, prefer_format: str = "CIF1") -> Optional[str]:
+    def get_modern_equivalent(self, old_field_name: str, prefer_format: str = "legacy") -> Optional[str]:
         """
         Get the modern equivalent of a deprecated/replaced field name.
         
         Args:
             old_field_name: Old/deprecated field name
-            prefer_format: Preferred format for the result ("CIF1" or "CIF2")
+            prefer_format: Preferred format for the result ("legacy" or "modern")
             
         Returns:
             Modern field name or None if no equivalent exists
@@ -677,17 +716,11 @@ class CIFDictionaryManager:
         
         # Try each variation to find a working mapping
         for field_variant in field_variations:
-            if prefer_format == "CIF1":
+            if prefer_format == "legacy":
                 # Try to get CIF2 equivalent first, then find its CIF1 alias
                 cif2_equiv = self.get_cif2_equivalent(field_variant)
                 if cif2_equiv:
-                    # Check if it's in our CIF2-only extensions mapping
-                    if cif2_equiv in CIF2_ONLY_FIELD_MAPPINGS:
-                        cif1_extension = CIF2_ONLY_FIELD_MAPPINGS[cif2_equiv]
-                        if not self.is_field_deprecated(cif1_extension):
-                            return cif1_extension
-                    
-                    # Now find the CIF1 alias for this CIF2 field
+                    # Find the CIF1 alias for this CIF2 field
                     cif1_alias = self.get_cif1_equivalent(cif2_equiv)
                     if cif1_alias and cif1_alias != old_field_name:
                         # Make sure the CIF1 alias is not deprecated
@@ -828,7 +861,7 @@ class CIFDictionaryManager:
                 else:
                     cif1_fields.append(field_name)
             
-            issues.append(f"Mixed CIF1/CIF2 format detected")
+            issues.append(f"Mixed legacy/modern format detected")
             issues.append(f"Found {len(cif1_fields)} CIF1-style fields and {len(cif2_fields)} CIF2-style fields")
             
             suggestions.append("Convert to consistent CIF2 format")
