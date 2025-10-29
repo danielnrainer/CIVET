@@ -870,12 +870,14 @@ class CIFParser:
                 lines.append(' ' + ' '.join(current_line_values))  # Add leading space
 
     def _add_data_row_with_multiline_handling(self, lines: List[str], values: List[str]):
-        """Add a data row to lines, with special handling for multiline semicolon blocks."""
+        """Add a data row to lines, with special handling for multiline semicolon blocks and 80-char limit."""
         if not values:
             return
         
         i = 0
         current_line_values = []
+        current_line_length = 0
+        is_first_line = True
         
         while i < len(values):
             value = values[i]
@@ -884,8 +886,13 @@ class CIFParser:
             if value == ';':
                 # Output any accumulated single-line values first
                 if current_line_values:
-                    lines.append(' '.join(current_line_values))
+                    if is_first_line:
+                        lines.append(' '.join(current_line_values))
+                        is_first_line = False
+                    else:
+                        lines.append(' ' + ' '.join(current_line_values))
                     current_line_values = []
+                    current_line_length = 0
                 
                 # Output opening semicolon on its own line
                 lines.append(';')
@@ -901,13 +908,36 @@ class CIFParser:
                     lines.append(';')
                     i += 1
             else:
-                # Regular value - add to current line
-                current_line_values.append(value)
-                i += 1
+                # Regular value - check if it fits on current line
+                value_length = len(value)
+                space_needed = 1 if current_line_values else 0  # Space before value (except first)
+                line_prefix_length = 0 if is_first_line else 1  # Leading space for continuation
+                
+                if current_line_length + space_needed + value_length + line_prefix_length <= 80:
+                    # Add to current line
+                    current_line_values.append(value)
+                    current_line_length += space_needed + value_length
+                    i += 1
+                else:
+                    # Current line is full, output it and start a new line
+                    if current_line_values:
+                        if is_first_line:
+                            lines.append(' '.join(current_line_values))
+                            is_first_line = False
+                        else:
+                            lines.append(' ' + ' '.join(current_line_values))
+                    
+                    # Start new line with this value
+                    current_line_values = [value]
+                    current_line_length = value_length
+                    i += 1
         
         # Output any remaining single-line values
         if current_line_values:
-            lines.append(' '.join(current_line_values))
+            if is_first_line:
+                lines.append(' '.join(current_line_values))
+            else:
+                lines.append(' ' + ' '.join(current_line_values))
     
     def _format_field_with_comment(self, field: CIFField, comment: str) -> List[str]:
         """

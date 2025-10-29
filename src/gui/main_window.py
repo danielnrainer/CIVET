@@ -22,6 +22,7 @@ from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
 from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
 from .dialogs.format_conversion_dialog import suggest_format_conversion
+from .dialogs.critical_issues_dialog import CriticalIssuesDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -92,7 +93,12 @@ class CIFEditor(QMainWindow):
         self.save_settings()
 
     def init_ui(self):
-        self.setWindowTitle("CIVET")
+        # Set initial window title
+        if self.current_file:
+            filename = os.path.basename(self.current_file)
+            self.setWindowTitle(f"CIVET - {filename}")
+        else:
+            self.setWindowTitle("CIVET")
         self.setGeometry(100, 100, 900, 700)
         
         # Set window icon
@@ -331,8 +337,10 @@ class CIFEditor(QMainWindow):
     def update_window_title(self, filepath=None):
         """Update window title with current filename."""
         if filepath:
-            import os
             filename = os.path.basename(filepath)
+            self.setWindowTitle(f"CIVET - {filename}")
+        elif self.current_file:
+            filename = os.path.basename(self.current_file)
             self.setWindowTitle(f"CIVET - {filename}")
         else:
             self.setWindowTitle("CIVET")
@@ -531,30 +539,37 @@ class CIFEditor(QMainWindow):
             with open(filepath, "r", encoding="utf-8") as file:
                 content = file.read()
             
-            # Detect CIF version first
-            detected_version = self.dict_manager.detect_cif_version(content)
+            # ============================================================================
+            # TEMPORARILY DISABLED: Format conversion check
+            # Due to issues with checkCIF not recognizing modern format, we're sticking
+            # with legacy format for now. This check can be easily re-enabled once
+            # checkCIF is updated to support modern CIF field names.
+            # ============================================================================
             
-            # Suggest conversion to modern format if not already modern
-            if detected_version in [CIFVersion.CIF1, CIFVersion.MIXED]:
-                final_content, user_choice, changes = suggest_format_conversion(
-                    content, detected_version, self.format_converter, self
-                )
-                
-                if user_choice == 'cancel':
-                    # User cancelled, don't load the file
-                    return
-                elif user_choice == 'convert':
-                    # User accepted conversion
-                    content = final_content
-                    self.modified = True  # Mark as modified since content changed
-                    QMessageBox.information(
-                        self, 
-                        "Conversion Complete",
-                        f"File converted to modern CIF format.\n"
-                        f"{len(changes)} field names updated.\n\n"
-                        f"Remember to save the file to preserve changes."
-                    )
-                # else: user_choice == 'keep_original', use original content
+            # # Detect CIF version first
+            # detected_version = self.dict_manager.detect_cif_version(content)
+            # 
+            # # Suggest conversion to modern format if not already modern
+            # if detected_version in [CIFVersion.CIF1, CIFVersion.MIXED]:
+            #     final_content, user_choice, changes = suggest_format_conversion(
+            #         content, detected_version, self.format_converter, self
+            #     )
+            #     
+            #     if user_choice == 'cancel':
+            #         # User cancelled, don't load the file
+            #         return
+            #     elif user_choice == 'convert':
+            #         # User accepted conversion
+            #         content = final_content
+            #         self.modified = True  # Mark as modified since content changed
+            #         QMessageBox.information(
+            #             self, 
+            #             "Conversion Complete",
+            #             f"File converted to modern CIF format.\n"
+            #             f"{len(changes)} field names updated.\n\n"
+            #             f"Remember to save the file to preserve changes."
+            #         )
+            #     # else: user_choice == 'keep_original', use original content
             
             self.text_editor.setText(content)
             self.current_file = filepath
@@ -586,6 +601,8 @@ class CIFEditor(QMainWindow):
                 return
             elif reply == QMessageBox.StandardButton.Yes:
                 self.save_to_file(self.current_file)
+                # Update window title after saving
+                self.update_window_title(self.current_file)
             else:
                 self.save_file_as()
         else:
@@ -1146,7 +1163,7 @@ class CIFEditor(QMainWindow):
                 # Load appropriate 3DED rules based on CIF format
                 field_rules_dir = get_resource_path('field_rules')
                 if cif_format.upper() == 'LEGACY':
-                    # Load legacy version of 3DED rules
+                    # Load legacy version of 3DED rules for legacy format
                     legacy_rules_path = os.path.join(field_rules_dir, '3ded_legacy.cif_rules')
                     if os.path.exists(legacy_rules_path):
                         self.field_checker.load_field_set('3DED', legacy_rules_path)
@@ -1163,7 +1180,7 @@ class CIFEditor(QMainWindow):
                             f"Using default modern rules which may cause validation issues."
                         )
                 else:
-                    # Load default modern version of 3DED rules
+                    # Load default modern version of 3DED rules for modern format
                     default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
                     if os.path.exists(default_rules_path):
                         self.field_checker.load_field_set('3DED', default_rules_path)
@@ -1706,15 +1723,21 @@ class CIFEditor(QMainWindow):
             if reply == QMessageBox.StandardButton.Cancel:
                 return
             elif reply == QMessageBox.StandardButton.Yes:
+                # Detect CIF format for appropriate resolution
+                cif_format = self.dict_manager.detect_cif_format(content)
+                
                 # Let user resolve conflicts individually
-                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager)
+                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager, cif_format)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     resolutions = dialog.get_resolutions()
                 else:
                     return  # User cancelled
             else:
-                # Auto-resolve using modern format + first available values
-                resolutions = self._auto_resolve_conflicts(conflicts, content)
+                # Detect CIF format for auto-resolve
+                cif_format = self.dict_manager.detect_cif_format(content)
+                
+                # Auto-resolve using appropriate format + first available values
+                resolutions = self._auto_resolve_conflicts(conflicts, content, cif_format)
             
             # Apply the resolutions
             if resolutions:
@@ -1737,15 +1760,23 @@ class CIFEditor(QMainWindow):
             QMessageBox.critical(self, "Conflict Resolution Error", 
                                f"Failed to resolve field alias conflicts:\n{str(e)}")
     
-    def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str) -> Dict[str, Tuple[str, str]]:
-        """Auto-resolve conflicts using modern format and first available values"""
+    def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str, cif_format: str = 'modern') -> Dict[str, Tuple[str, str]]:
+        """Auto-resolve conflicts using the appropriate format and first available values"""
         resolutions = {}
         
         lines = cif_content.split('\n')
         
         for canonical_field, alias_list in conflicts.items():
-            # Use modern format (canonical field)
-            chosen_field = canonical_field
+            # Choose field format based on CIF format
+            if cif_format.lower() == 'legacy':
+                # For legacy CIFs, prefer the legacy equivalent
+                chosen_field = self.dict_manager.get_modern_equivalent(canonical_field, prefer_format='legacy')
+                if not chosen_field or chosen_field == canonical_field:
+                    # No specific legacy form available, use first alias or canonical
+                    chosen_field = alias_list[0] if alias_list else canonical_field
+            else:
+                # For modern CIFs, use the canonical (modern) field
+                chosen_field = canonical_field
             
             # Find the first available value
             chosen_value = ""
@@ -1782,30 +1813,36 @@ class CIFEditor(QMainWindow):
         try:
             content = self.text_editor.toPlainText()
             
+            # Detect CIF format to determine if we should check for deprecated fields
+            cif_format = self.dict_manager.detect_cif_format(content)
+            is_legacy = cif_format.lower() == 'legacy'
+            
             # Check for duplicates and aliases first
             conflicts = self.dict_manager.detect_field_aliases_in_cif(content)
             
-            # Check for deprecated fields
-            lines = content.splitlines()
+            # Check for deprecated fields (skip for legacy CIFs as they're expected to be outdated)
             deprecated_fields = []
-            
-            for line_num, line in enumerate(lines, 1):
-                line_stripped = line.strip()
-                if line_stripped.startswith('_') and ' ' in line_stripped:
-                    field_name = line_stripped.split()[0]
-                    if self.dict_manager.is_field_deprecated(field_name):
-                        # Skip if this field is already in a deprecated section
-                        # (we don't want to flag fields we already moved to deprecated sections)
-                        if not self._is_in_deprecated_section(content, line_num):
-                            modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="CIF1")
-                            deprecated_fields.append({
-                                'field': field_name,
-                                'line_num': line_num,
-                                'line': line_stripped,
-                                'modern': modern_equiv
-                            })
+            if not is_legacy:
+                lines = content.splitlines()
+                
+                for line_num, line in enumerate(lines, 1):
+                    line_stripped = line.strip()
+                    if line_stripped.startswith('_') and ' ' in line_stripped:
+                        field_name = line_stripped.split()[0]
+                        if self.dict_manager.is_field_deprecated(field_name):
+                            # Skip if this field is already in a deprecated section
+                            # (we don't want to flag fields we already moved to deprecated sections)
+                            if not self._is_in_deprecated_section(content, line_num):
+                                modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="CIF1")
+                                deprecated_fields.append({
+                                    'field': field_name,
+                                    'line_num': line_num,
+                                    'line': line_stripped,
+                                    'modern': modern_equiv
+                                })
             
             # Filter conflicts to exclude those between main section and deprecated section
+            lines = content.splitlines()
             filtered_conflicts = {}
             for canonical, alias_list in conflicts.items():
                 # Check if this conflict involves fields that are in both main and deprecated sections
@@ -1891,48 +1928,38 @@ class CIFEditor(QMainWindow):
                 
                 report_summary += "Modernizing these fields improves CIF compatibility and reduces validation warnings.\n\n"
             
-            # Determine action buttons based on what issues we found
-            if has_critical_issues and deprecated_fields:
-                action_text = ("How would you like to proceed?\n\n" +
-                             "• Yes: Resolve conflicts AND modernize deprecated fields (RECOMMENDED)\n" +
-                             "• No: Continue with all issues (NOT RECOMMENDED)\n" +
-                             "• Cancel: Abort checks and revert all changes")
-                title = "Critical Issues and Deprecated Fields Found"
-                default_button = QMessageBox.StandardButton.Yes
-            elif has_critical_issues:
-                action_text = ("How would you like to resolve these conflicts?\n\n" +
-                             "• Yes: Resolve conflicts now (RECOMMENDED)\n" +
-                             "• No: Continue with conflicts (NOT RECOMMENDED - file may be rejected)\n" +
-                             "• Cancel: Abort checks and revert all changes")
-                title = "Critical: Duplicate/Alias Conflicts"
-                default_button = QMessageBox.StandardButton.Yes
-            else:  # Only deprecated fields
-                action_text = ("How would you like to proceed?\n\n" +
-                             "• Yes: Modernize deprecated fields (RECOMMENDED)\n" +
-                             "• No: Continue with deprecated fields (compatibility warnings may occur)\n" +
-                             "• Cancel: Abort checks and revert all changes")
-                title = "Deprecated Fields Found"
-                default_button = QMessageBox.StandardButton.Yes
+            # Convert conflicts to detailed structure for dialog
+            detailed_conflicts = {}
+            for canonical, alias_list in conflicts.items():
+                detailed_conflicts[canonical] = []
+                for alias in alias_list:
+                    # Find line number and value for this alias
+                    for line_num, line in enumerate(lines, 1):
+                        line_stripped = line.strip()
+                        if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
+                            # Extract value
+                            parts = line_stripped.split(None, 1)
+                            value = parts[1] if len(parts) > 1 else ''
+                            
+                            detailed_conflicts[canonical].append({
+                                'line_num': line_num,
+                                'alias': alias,
+                                'value': value,
+                                'is_deprecated': self.dict_manager.is_field_deprecated(alias)
+                            })
+                            break
             
-            # Ask user how to proceed
-            reply = QMessageBox.question(
-                self, 
-                title,
-                report_summary + action_text,
-                QMessageBox.StandardButton.Yes |
-                QMessageBox.StandardButton.No |
-                QMessageBox.StandardButton.Cancel,
-                default_button
-            )
+            # Show dialog with scrollable content
+            dialog_result = CriticalIssuesDialog.show_dialog(detailed_conflicts, deprecated_fields, self)
             
-            if reply == QMessageBox.StandardButton.Cancel:
+            if dialog_result == 0:  # Cancel
                 # User wants to abort - restore initial state
                 self.text_editor.setText(initial_state)
-                self.setWindowTitle("CIVET")
+                self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
                 
-            elif reply == QMessageBox.StandardButton.No:
+            elif dialog_result == 2:  # No - keep issues
                 # User wants to continue with all issues
                 if has_critical_issues:
                     # Warn them about critical issues
@@ -2019,20 +2046,24 @@ class CIFEditor(QMainWindow):
     def _resolve_duplicate_conflicts(self, conflicts: Dict, content: str, initial_state: str) -> bool:
         """Resolve duplicate/alias conflicts using existing infrastructure."""
         try:
+            # Detect CIF format to use appropriate resolution strategy
+            cif_format = self.dict_manager.detect_cif_format(content)
+            format_name = "legacy" if cif_format.lower() == 'legacy' else "modern"
+            
             # Ask user how they want to resolve
             resolve_reply = QMessageBox.question(
                 self, 
                 "Conflict Resolution Method",
-                "Choose conflict resolution method:\n\n" +
-                "• Yes: Let me choose for each conflict individually\n" +
-                "• No: Auto-resolve using modern format + first available values",
+                f"Choose conflict resolution method:\n\n" +
+                f"• Yes: Let me choose for each conflict individually\n" +
+                f"• No: Auto-resolve using {format_name} format + first available values",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No  # Default to auto-resolve
             )
             
             if resolve_reply == QMessageBox.StandardButton.Yes:
                 # Manual resolution using existing dialog
-                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager)
+                dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager, cif_format)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     resolutions = dialog.get_resolutions()
                 else:
@@ -2045,13 +2076,13 @@ class CIFEditor(QMainWindow):
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
                     if fallback == QMessageBox.StandardButton.Yes:
-                        resolutions = self._auto_resolve_conflicts(conflicts, content)
+                        resolutions = self._auto_resolve_conflicts(conflicts, content, cif_format)
                     else:
                         # They don't want to resolve at all
                         return False
             else:
                 # Auto-resolve
-                resolutions = self._auto_resolve_conflicts(conflicts, content)
+                resolutions = self._auto_resolve_conflicts(conflicts, content, cif_format)
             
             # Apply the resolutions
             if resolutions:

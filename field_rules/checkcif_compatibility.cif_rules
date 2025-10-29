@@ -22,8 +22,8 @@ _atom_site_aniso_label
 # Geometry angle measurements
 _geom_angle
 
-# Cell measurement temperature (deprecated but retained for checkCIF)
-# Note: This field is deprecated and replaced by _diffrn.ambient_temperature
-# However, checkCIF doesn't recognize the modern replacement, so we keep it
-# The converter intelligently handles this to prevent duplicates
+# Cell measurement temperature
 _cell_measurement_temperature
+
+# Recorded [sum |su(netI)| / sum |netI|] for all measured reflections. 
+_diffrn_reflns_av_unetI/netI

@@ -15,11 +15,12 @@ from typing import Dict, List, Tuple, Optional
 class ConflictResolutionWidget(QWidget):
     """Widget for resolving a single field conflict"""
     
-    def __init__(self, canonical_field: str, aliases_and_values: List[Tuple[str, str]], dict_manager=None, parent=None):
+    def __init__(self, canonical_field: str, aliases_and_values: List[Tuple[str, str]], dict_manager=None, cif_format='modern', parent=None):
         super().__init__(parent)
         self.canonical_field = canonical_field
         self.aliases_and_values = aliases_and_values
         self.dict_manager = dict_manager
+        self.cif_format = cif_format  # 'legacy' or 'modern'
         
         self.setup_ui()
         
@@ -54,10 +55,26 @@ class ConflictResolutionWidget(QWidget):
                 self.field_combo.addItem(f"{alias} (DEPRECATED - not recommended)")
             else:
                 self.field_combo.addItem(alias)
-                
-        # Add the canonical field as the preferred option
-        self.field_combo.addItem(f"{self.canonical_field} (modern format)")
-        self.field_combo.setCurrentText(f"{self.canonical_field} (modern format)")
+        
+        # Determine the appropriate format option based on CIF format
+        if self.cif_format.lower() == 'legacy':
+            # For legacy CIFs, prefer the legacy equivalent
+            legacy_equiv = None
+            if self.dict_manager:
+                legacy_equiv = self.dict_manager.get_modern_equivalent(self.canonical_field, prefer_format='legacy')
+            
+            if legacy_equiv and legacy_equiv != self.canonical_field:
+                # Add legacy form as preferred option
+                self.field_combo.addItem(f"{legacy_equiv} (legacy format - recommended)")
+                self.field_combo.setCurrentText(f"{legacy_equiv} (legacy format - recommended)")
+            else:
+                # No specific legacy form, use canonical
+                self.field_combo.addItem(f"{self.canonical_field} (recommended)")
+                self.field_combo.setCurrentText(f"{self.canonical_field} (recommended)")
+        else:
+            # For modern CIFs, use the canonical (modern) field
+            self.field_combo.addItem(f"{self.canonical_field} (modern format - recommended)")
+            self.field_combo.setCurrentText(f"{self.canonical_field} (modern format - recommended)")
         
         form_layout.addRow("Field name to use:", self.field_combo)
         
@@ -92,9 +109,15 @@ class ConflictResolutionWidget(QWidget):
         """Get the user's resolution for this conflict"""
         field_text = self.field_combo.currentText()
 
-        # Handle the modern format option
-        if "(modern format)" in field_text:
+        # Handle the format options
+        if "(modern format - recommended)" in field_text or "(modern format)" in field_text:
             field_name = self.canonical_field
+        elif "(legacy format - recommended)" in field_text:
+            # Extract the field name from legacy marker
+            field_name = field_text.split(" (legacy format - recommended)")[0]
+        elif "(recommended)" in field_text:
+            # Extract the field name from recommended marker
+            field_name = field_text.split(" (recommended)")[0]
         elif "(DEPRECATED - not recommended)" in field_text:
             # Extract the field name from deprecated marker
             field_name = field_text.split(" (DEPRECATED - not recommended)")[0]
@@ -109,11 +132,12 @@ class ConflictResolutionWidget(QWidget):
 class FieldConflictDialog(QDialog):
     """Dialog for resolving field alias conflicts"""
     
-    def __init__(self, conflicts: Dict[str, List[str]], cif_content: str, parent=None, dict_manager=None):
+    def __init__(self, conflicts: Dict[str, List[str]], cif_content: str, parent=None, dict_manager=None, cif_format='modern'):
         super().__init__(parent)
         self.conflicts = conflicts
         self.cif_content = cif_content
         self.dict_manager = dict_manager
+        self.cif_format = cif_format  # 'legacy' or 'modern'
         self.resolution_widgets = []
         
         self.setWindowTitle("Resolve Field Alias Conflicts")
@@ -164,7 +188,7 @@ class FieldConflictDialog(QDialog):
             group_box = QGroupBox()
             group_layout = QVBoxLayout()
             
-            resolution_widget = ConflictResolutionWidget(canonical_field, aliases_and_values, self.dict_manager, self)
+            resolution_widget = ConflictResolutionWidget(canonical_field, aliases_and_values, self.dict_manager, self.cif_format, self)
             self.resolution_widgets.append(resolution_widget)
             
             group_layout.addWidget(resolution_widget)
@@ -183,7 +207,13 @@ class FieldConflictDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         
-        auto_resolve_btn = QPushButton("Auto-Resolve (Use Modern format + First Value)")
+        # Format-aware auto-resolve button text
+        if self.cif_format.lower() == 'legacy':
+            auto_resolve_text = "Auto-Resolve (Use Legacy format + First Value)"
+        else:
+            auto_resolve_text = "Auto-Resolve (Use Modern format + First Value)"
+        
+        auto_resolve_btn = QPushButton(auto_resolve_text)
         auto_resolve_btn.clicked.connect(self.auto_resolve)
         if len(self.conflicts) > 5:
             auto_resolve_btn.setStyleSheet("background-color: #28a745; color: white; font-weight: bold;")
@@ -256,16 +286,29 @@ class FieldConflictDialog(QDialog):
         return aliases_and_values
     
     def auto_resolve(self):
-        """Auto-resolve all conflicts using modern format and first available values"""
+        """Auto-resolve all conflicts using the appropriate format and first available values"""
+        format_label = "modern format - recommended" if self.cif_format.lower() == 'modern' else "legacy format - recommended"
+        
         for widget in self.resolution_widgets:
-            # Set to modern format
-            cif2_option = f"{widget.canonical_field} (modern format)"
-            widget.field_combo.setCurrentText(cif2_option)
+            # Try to find the appropriate format option
+            for i in range(widget.field_combo.count()):
+                item_text = widget.field_combo.itemText(i)
+                if format_label in item_text:
+                    widget.field_combo.setCurrentIndex(i)
+                    break
+            else:
+                # Fallback: try to find any recommended option
+                for i in range(widget.field_combo.count()):
+                    item_text = widget.field_combo.itemText(i)
+                    if "recommended" in item_text:
+                        widget.field_combo.setCurrentIndex(i)
+                        break
             
             # Keep current value (should already be set to first non-empty value)
         
+        format_name = "legacy" if self.cif_format.lower() == 'legacy' else "modern"
         QMessageBox.information(self, "Auto-Resolved", 
-                              "All conflicts have been auto-resolved using modern format and the first available values. " +
+                              f"All conflicts have been auto-resolved using {format_name} format and the first available values. " +
                               "You can still modify the selections before applying.")
     
     def get_resolutions(self) -> Dict[str, Tuple[str, str]]:

@@ -4,7 +4,7 @@ CIF Dictionary Manager with Lazy Loading
 
 Efficient manager for CIF core dictionary that provides:
 - Lazy loading of field definitions from cif_core.dic
-- Field alias resolution (CIF1 <-> CIF2)
+- Field alias resolution (legacy <-> modern)
 - CIF format version detection
 - Field validation and compliance checking
 
@@ -1216,13 +1216,13 @@ class CIFDictionaryManager:
     
     def detect_cif_format(self, cif_content: str) -> str:
         """
-        Detect whether CIF content is in CIF1 or CIF2 format.
+        Detect whether CIF content is in legacy or modern format.
         
         Args:
             cif_content: CIF file content as string
             
         Returns:
-            'CIF1' or 'CIF2' based on field naming patterns
+            'legacy' or 'modern' based on field naming patterns
         """
         return self._suggestion_manager.detect_cif_format(cif_content)
     

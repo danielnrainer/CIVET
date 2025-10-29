@@ -162,43 +162,43 @@ class DictionarySuggestionManager:
     
     def detect_cif_format(self, cif_content: str) -> str:
         """
-        Detect whether CIF content is in CIF1 or CIF2 format.
+        Detect whether CIF content is in legacy or modern format.
         
         Args:
             cif_content: CIF file content as string
             
         Returns:
-            'CIF1' or 'CIF2' based on field naming patterns
+            'legacy' or 'modern' based on field naming patterns
         """
         fields = self._extract_fields_excluding_text_blocks(cif_content)
         
-        # Count CIF2-style fields (with dots) vs CIF1-style fields (underscores only)
-        cif2_fields = sum(1 for field in fields if '.' in field)
-        cif1_fields = len(fields) - cif2_fields
+        # Count modern-style fields (with dots) vs legacy-style fields (underscores only)
+        modern_fields = sum(1 for field in fields if '.' in field)
+        legacy_fields = len(fields) - modern_fields
         
-        # If significant number of dotted fields, assume CIF2
-        if cif2_fields > 0 and cif2_fields >= cif1_fields * 0.3:
-            return 'CIF2'
+        # If significant number of dotted fields, assume modern format
+        if modern_fields > 0 and modern_fields >= legacy_fields * 0.3:
+            return 'modern'
         else:
-            return 'CIF1'
+            return 'legacy'
     
     def get_format_appropriate_triggers(self, cif_format: str) -> Dict[str, List[str]]:
         """
         Get trigger fields appropriate for the detected CIF format.
         
         Args:
-            cif_format: 'CIF1' or 'CIF2'
+            cif_format: 'legacy' or 'modern'
             
         Returns:
             Dictionary mapping suggestion keys to format-appropriate trigger fields
         """
         result = {}
         for key, suggestion in self._suggestions.items():
-            if cif_format == 'CIF1':
-                # Filter for CIF1-style fields (no dots)
+            if cif_format == 'legacy':
+                # Filter for legacy-style fields (no dots)
                 triggers = [f for f in suggestion.trigger_fields if '.' not in f]
             else:
-                # Filter for CIF2-style fields (with dots)
+                # Filter for modern-style fields (with dots)
                 triggers = [f for f in suggestion.trigger_fields if '.' in f]
             
             if triggers:  # Only include if there are appropriate triggers

@@ -171,14 +171,25 @@ class CIFDictionaryParser:
         # Check if this field is replaced/obsolete
         is_replaced = '_definition_replaced.id' in block_content or '_definition_replaced.by' in block_content
         replacement_field = None
-        
+
         if is_replaced:
             self._replaced_fields.add(cif2_field)
+            
+            # Try to extract replacement field - handle both single value and loop formats
+            # Format 1: Single quoted value: _definition_replaced.by 'field_name'
             replacement_match = re.search(r"_definition_replaced\.by\s+'([^']+)'", block_content)
             if replacement_match:
                 replacement_field = replacement_match.group(1)
-        
-        # Extract aliases with deprecation information
+            else:
+                # Format 2: Loop format with multiple replacements
+                # Extract the first replacement from the loop (entry with id 1)
+                loop_match = re.search(
+                    r'loop_\s+_definition_replaced\.id\s+_definition_replaced\.by\s+\d+\s+\'([^\']+)\'',
+                    block_content,
+                    re.DOTALL
+                )
+                if loop_match:
+                    replacement_field = loop_match.group(1)        # Extract aliases with deprecation information
         aliases = self._extract_aliases_with_deprecation(block_content)
         
         # Extract enumeration values if present

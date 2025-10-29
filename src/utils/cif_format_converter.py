@@ -767,6 +767,15 @@ class CIFFormatConverter:
             else:
                 deprecated_section.append("# No modern replacement")
         
+        # Add end marker for deprecated section
+        deprecated_section.extend([
+            '',
+            '# ============================================================================',
+            '# END OF DEPRECATED FIELDS SECTION',
+            '# ============================================================================',
+            ''
+        ])
+        
         # Insert the deprecated section
         lines = lines[:last_content_idx + 1] + deprecated_section + lines[last_content_idx + 1:]
         
