@@ -1026,12 +1026,20 @@ class CIFParser:
                 return [field.name, ';', value, ';']
     
     def _needs_quotes(self, value: str) -> bool:
-        """Determine if a value needs to be quoted."""
+        """Determine if a value needs to be quoted.
+        
+        According to CIF specification, values must be quoted if they contain:
+        - Whitespace (spaces, tabs, newlines)
+        - Reserved characters: [ ] { } (cannot be used in whitespace-delimited values)
+        - Special leading characters: ; # ' "
+        - Commas
+        """
         if not value:
             return False
         
-        # Quote if contains spaces, commas, starts with semicolon or hash
+        # Quote if contains spaces, commas, reserved brackets/braces, or starts with special chars
         return (' ' in value or ',' in value or 
+                '[' in value or ']' in value or '{' in value or '}' in value or
                 value.startswith(';') or value.startswith('#') or
                 value.startswith("'") or value.startswith('"'))
     

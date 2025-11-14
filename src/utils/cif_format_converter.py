@@ -121,9 +121,22 @@ class CIFFormatConverter:
         # Track loop state for proper field conversion within loops
         in_loop = False
         loop_field_count = 0
+        in_text_block = False  # Track text blocks like _iucr_refine_fcf_details
         
         for i, line in enumerate(lines):
             original_line = line
+            
+            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
+            if line.strip() == ';':
+                in_text_block = not in_text_block
+                converted_lines.append(line)  # Keep semicolon as-is
+                continue
+            
+            # Convert field names inside text blocks but don't remove them as duplicates
+            if in_text_block:
+                converted_line = self._convert_field_names_in_text(line)
+                converted_lines.append(converted_line)
+                continue
             
             # Before converting, check if this line contains a deprecated field
             field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s+(.+)$', line)
@@ -361,6 +374,16 @@ class CIFFormatConverter:
         
         return line
     
+    def _convert_field_names_in_text(self, line: str) -> str:
+        """Convert field names within text blocks to CIF2 format."""
+        import re
+        field_pattern = r'(_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*)'
+        def replace_field(match):
+            field_name = match.group(1)
+            converted = self._convert_field_to_cif2(field_name)
+            return converted if converted else field_name
+        return re.sub(field_pattern, replace_field, line)
+
     def _convert_field_to_cif2(self, field_name: str) -> str:
         """
         Convert a CIF1 field name to CIF2 format using the CIF core dictionary.
@@ -572,6 +595,9 @@ class CIFFormatConverter:
         Remove duplicate field definitions that are aliases of each other.
         Keeps the modern (CIF2) version and removes legacy aliases.
         
+        Important: This method respects text blocks (semicolon-delimited) and will NOT
+        remove field-like text within blocks such as _iucr_refine_fcf_details.
+        
         Args:
             cif_content: CIF content with potential duplicates
             
@@ -582,10 +608,21 @@ class CIFFormatConverter:
         seen_fields = {}  # field_canonical -> (line_number, field_name_used)
         lines_to_remove = set()
         changes = []
+        in_text_block = False
         
         # First pass: identify all field definitions and their canonical forms
         for i, line in enumerate(lines):
             stripped = line.strip()
+            
+            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
+            if stripped == ';':
+                in_text_block = not in_text_block
+                continue
+            
+            # Skip field detection inside text blocks
+            if in_text_block:
+                continue
+            
             # Match field definitions (both standalone and in loops)
             field_match = re.match(r'^(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s', line)
             if field_match:
@@ -649,9 +686,22 @@ class CIFFormatConverter:
                 break
         
         # First pass: catalog all existing fields IN THE MAIN SECTION ONLY
+        # Also respect text blocks (don't catalog fields inside them)
         scan_end = deprecated_section_start if deprecated_section_start is not None else len(lines)
+        in_text_block = False
+        
         for i in range(scan_end):
             line = lines[i]
+            
+            # Track text block boundaries
+            if line.strip() == ';':
+                in_text_block = not in_text_block
+                continue
+            
+            # Skip field detection inside text blocks
+            if in_text_block:
+                continue
+            
             field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s+(.+)$', line)
             if field_match:
                 indent, field_name, value = field_match.groups()
@@ -782,4 +832,5 @@ class CIFFormatConverter:
         changes.append(f"Added DEPRECATED section with {len(deprecated_fields_found)} field(s)")
         
         return '\n'.join(lines), changes
+
 

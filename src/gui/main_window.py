@@ -94,11 +94,7 @@ class CIFEditor(QMainWindow):
 
     def init_ui(self):
         # Set initial window title
-        if self.current_file:
-            filename = os.path.basename(self.current_file)
-            self.setWindowTitle(f"CIVET - {filename}")
-        else:
-            self.setWindowTitle("CIVET")
+        self.update_window_title()
         self.setGeometry(100, 100, 900, 700)
         
         # Set window icon
@@ -739,20 +735,27 @@ class CIFEditor(QMainWindow):
         
         # Check if this field is deprecated
         if self.dict_manager.is_field_deprecated(prefix):
-            modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="CIF1")
+            modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="legacy")
             if modern_equivalent:
                 # Automatically replace deprecated field with modern equivalent and create deprecated section
                 # No user confirmation needed as requested
                 return self._replace_deprecated_field(prefix, modern_equivalent)
             else:
-                # No modern equivalent available - show warning but continue
-                QMessageBox.information(
-                    self,
-                    "Deprecated Field Notice", 
-                    f"The field '{prefix}' is deprecated and has no modern equivalent.\n\n"
-                    f"It will be processed as-is, but consider reviewing this field.",
-                    QMessageBox.StandardButton.Ok
-                )
+                # No modern equivalent available
+                # For legacy CIF files, deprecated fields are expected and valid - skip warning
+                # Only warn for modern CIF files where deprecated fields are unexpected
+                content = self.text_editor.toPlainText()
+                cif_format = self.dict_manager.detect_cif_format(content)
+                
+                if cif_format != "legacy":
+                    # Show warning only for modern CIF files
+                    QMessageBox.information(
+                        self,
+                        "Deprecated Field Notice", 
+                        f"The field '{prefix}' is deprecated and has no modern equivalent.\n\n"
+                        f"It will be processed as-is, but consider reviewing this field.",
+                        QMessageBox.StandardButton.Ok
+                    )
         
         removable_chars = "'"
         lines = self.text_editor.toPlainText().splitlines()
@@ -1148,7 +1151,7 @@ class CIFEditor(QMainWindow):
         if config.get('reformat_after_checks', False):
             self.reformat_file()
         
-        self.setWindowTitle("CIVET")
+        self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
 
     def _process_single_field_set(self, config, initial_state):
@@ -1197,7 +1200,9 @@ class CIFEditor(QMainWindow):
                 'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
             }
             
-            self.setWindowTitle(f"CIVET - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
+            # Include filename in title during checking
+            filename_part = f" {os.path.basename(self.current_file)}" if self.current_file else ""
+            self.setWindowTitle(f"CIVET{filename_part} - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
             
             # Parse the current CIF content
             content = self.text_editor.toPlainText()
@@ -1246,7 +1251,7 @@ class CIFEditor(QMainWindow):
                 
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("CIVET")
+                    self.update_window_title()
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1260,7 +1265,7 @@ class CIFEditor(QMainWindow):
             
         except Exception as e:
             self.text_editor.setText(initial_state)
-            self.setWindowTitle("CIVET")
+            self.update_window_title()
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
             return False
     
@@ -1312,7 +1317,7 @@ class CIFEditor(QMainWindow):
                 )
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("CIVET")
+                    self.update_window_title()
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1328,7 +1333,7 @@ class CIFEditor(QMainWindow):
                 )
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
-                    self.setWindowTitle("CIVET")
+                    self.update_window_title()
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
                 elif result == RESULT_STOP_SAVE:
@@ -1362,7 +1367,7 @@ class CIFEditor(QMainWindow):
                     )
                     if result == RESULT_ABORT:
                         self.text_editor.setText(initial_state)
-                        self.setWindowTitle("CIVET")
+                        self.update_window_title()
                         QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                         return False
                     elif result == RESULT_STOP_SAVE:
@@ -1378,7 +1383,7 @@ class CIFEditor(QMainWindow):
                     )
                     if result == RESULT_ABORT:
                         self.text_editor.setText(initial_state)
-                        self.setWindowTitle("CIVET")
+                        self.update_window_title()
                         QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                         return False
                     elif result == RESULT_STOP_SAVE:

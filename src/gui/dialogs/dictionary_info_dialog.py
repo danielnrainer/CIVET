@@ -13,10 +13,11 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QPushButton, QLabel, QMessageBox, QFileDialog, QInputDialog, QProgressBar,
-    QGroupBox, QTextEdit, QSplitter, QHeaderView, QAbstractItemView, QApplication
+    QGroupBox, QTextEdit, QSplitter, QHeaderView, QAbstractItemView, QApplication,
+    QWidget, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QIcon, QColor
 import requests
 
 # Add parent directories to path to import from utils
@@ -82,6 +83,36 @@ class BulkCOMCIFSDownloadWorker(QThread):
             
             # Use the dictionary manager's method to load all COMCIFS dictionaries
             results = self.dict_manager.load_all_comcifs_dictionaries(timeout=30)
+            
+            self.progress.emit(100)
+            self.status_update.emit("Download complete")
+            self.finished.emit(results)
+            
+        except Exception as e:
+            self.status_update.emit(f"Error: {str(e)}")
+            # Return empty results dict to indicate failure
+            self.finished.emit({})
+
+
+class BulkIUCrDownloadWorker(QThread):
+    """Worker thread for downloading all IUCr dictionaries"""
+    
+    finished = pyqtSignal(dict)  # results dictionary
+    progress = pyqtSignal(int)  # progress percentage
+    status_update = pyqtSignal(str)  # current status message
+    
+    def __init__(self, dict_manager: CIFDictionaryManager):
+        super().__init__()
+        self.dict_manager = dict_manager
+    
+    def run(self):
+        """Download all IUCr dictionaries"""
+        try:
+            self.progress.emit(10)
+            self.status_update.emit("Starting IUCr downloads...")
+            
+            # Use the dictionary manager's method to load all IUCr dictionaries
+            results = self.dict_manager.load_all_iucr_dictionaries(timeout=30)
             
             self.progress.emit(100)
             self.status_update.emit("Download complete")
@@ -161,14 +192,15 @@ class DictionaryInfoDialog(QDialog):
         table_layout = QVBoxLayout()
         
         self.dict_table = QTableWidget()
-        self.dict_table.setColumnCount(6)
+        self.dict_table.setColumnCount(10)
         self.dict_table.setHorizontalHeaderLabels([
-            "Name", "Source", "Type", "Fields", "Size", "Loaded"
+            "Active", "Dictionary Title", "Date", "Version", "Source", "Status", "Type", "Fields", "Filename", "Path"
         ])
         
         # Set table properties
         self.dict_table.setAlternatingRowColors(True)
         self.dict_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.dict_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.dict_table.horizontalHeader().setStretchLastSection(True)
         self.dict_table.verticalHeader().setVisible(False)
         
@@ -210,13 +242,20 @@ class DictionaryInfoDialog(QDialog):
         self.load_url_btn.clicked.connect(self.load_dictionary_from_url)
         load_layout.addWidget(self.load_url_btn)
         
-        self.load_comcif_btn = QPushButton("Load COMCIFS Dictionary...")
+        self.load_comcif_btn = QPushButton("Load Dictionary...")
+        self.load_comcif_btn.setToolTip("Load from COMCIF (development) or IUCr (official release)")
         self.load_comcif_btn.clicked.connect(self.load_comcifs_dictionary)
         load_layout.addWidget(self.load_comcif_btn)
         
-        self.load_all_comcif_btn = QPushButton("Load All COMCIFS")
+        self.load_all_comcif_btn = QPushButton("Load all (dev)")
+        self.load_all_comcif_btn.setToolTip("Load all COMCIF development dictionaries")
         self.load_all_comcif_btn.clicked.connect(self.load_all_comcifs_dictionaries)
         load_layout.addWidget(self.load_all_comcif_btn)
+        
+        self.load_all_iucr_btn = QPushButton("Load all (release)")
+        self.load_all_iucr_btn.setToolTip("Load all IUCr official release dictionaries")
+        self.load_all_iucr_btn.clicked.connect(self.load_all_iucr_dictionaries)
+        load_layout.addWidget(self.load_all_iucr_btn)
         
         load_layout.addStretch()
         buttons_layout.addLayout(load_layout)
@@ -258,10 +297,12 @@ class DictionaryInfoDialog(QDialog):
             
             # Update summary
             total_dicts = len(detailed_info)
+            active_dicts = sum(1 for info in detailed_info if info.is_active)
             total_fields = dict_summary.get('total_cif1_mappings', 0)
             
             summary_text = f"""
             <b>Total Dictionaries:</b> {total_dicts}<br>
+            <b>Active Dictionaries:</b> {active_dicts}<br>
             <b>Total Field Mappings:</b> {total_fields} CIF1→CIF2, {dict_summary.get('total_cif2_mappings', 0)} CIF2→CIF1<br>
             <b>Primary Dictionary:</b> {detailed_info[0].name if detailed_info else 'None'}
             """
@@ -270,57 +311,91 @@ class DictionaryInfoDialog(QDialog):
             
             self.summary_label.setText(summary_text)
             
+            # Sort dictionaries by dict_title (alphabetically)
+            sorted_info = sorted(detailed_info, key=lambda x: (x.dict_title or x.name or "").lower())
+            
             # Clear and update table
             self.dict_table.clearContents()
-            self.dict_table.setRowCount(len(detailed_info))
+            self.dict_table.setRowCount(len(sorted_info))
             
-            for row, dict_info in enumerate(detailed_info):
-                # Name
-                self.dict_table.setItem(row, 0, QTableWidgetItem(dict_info.name))
+            for row, dict_info in enumerate(sorted_info):
+                # Active checkbox
+                active_widget = QWidget()
+                active_layout = QHBoxLayout(active_widget)
+                active_checkbox = QCheckBox()
+                active_checkbox.setChecked(dict_info.is_active)
+                active_checkbox.setStyleSheet("margin-left: 10px;")
+                # Store dict name in checkbox for later retrieval
+                active_checkbox.setProperty("dict_name", dict_info.name)
+                active_checkbox.stateChanged.connect(self.on_active_changed)
+                active_layout.addWidget(active_checkbox)
+                active_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                active_layout.setContentsMargins(0, 0, 0, 0)
+                self.dict_table.setCellWidget(row, 0, active_widget)
                 
-                # Source (show just filename for files, full URL for web)
-                if dict_info.source_type == 'url':
-                    source_text = dict_info.path
-                elif dict_info.source_type == 'file':
-                    source_text = os.path.dirname(dict_info.path) or "Current directory"
-                else:
-                    source_text = dict_info.source_type.capitalize()
-                    
-                self.dict_table.setItem(row, 1, QTableWidgetItem(source_text))
+                # Dictionary Title (from _dictionary.title)
+                title_text = dict_info.dict_title if dict_info.dict_title else "Unknown"
+                self.dict_table.setItem(row, 1, QTableWidgetItem(title_text))
+                
+                # Date (from _dictionary.date)
+                date_text = dict_info.dict_date if dict_info.dict_date else "Unknown"
+                self.dict_table.setItem(row, 2, QTableWidgetItem(date_text))
+                
+                # Version
+                version_text = dict_info.version if dict_info.version else "Unknown"
+                self.dict_table.setItem(row, 3, QTableWidgetItem(version_text))
+                
+                # Source (COMCIF, IUCr, Local, Custom)
+                source_text = dict_info.source if dict_info.source else "Unknown"
+                source_item = QTableWidgetItem(source_text)
+                # Color code by source
+                if source_text == 'IUCr':
+                    source_item.setForeground(QColor(0, 100, 0))  # Dark green for official
+                elif source_text == 'COMCIF':
+                    source_item.setForeground(QColor(0, 0, 200))  # Blue for development
+                self.dict_table.setItem(row, 4, source_item)
+                
+                # Status (release, development, unknown)
+                status_text = dict_info.status if dict_info.status else "unknown"
+                status_item = QTableWidgetItem(status_text.capitalize())
+                # Color code by status
+                if status_text == 'release':
+                    status_item.setForeground(QColor(0, 100, 0))  # Green for release
+                elif status_text == 'development':
+                    status_item.setForeground(QColor(200, 100, 0))  # Orange for development
+                self.dict_table.setItem(row, 5, status_item)
                 
                 # Type
                 type_text = dict_info.source_type.upper()
-                if row == 0:
-                    type_text += " (Primary)"
-                self.dict_table.setItem(row, 2, QTableWidgetItem(type_text))
+                self.dict_table.setItem(row, 6, QTableWidgetItem(type_text))
                 
                 # Fields
-                self.dict_table.setItem(row, 3, QTableWidgetItem(str(dict_info.field_count)))
+                self.dict_table.setItem(row, 7, QTableWidgetItem(str(dict_info.field_count)))
                 
-                # Size
-                size_text = self.format_file_size(dict_info.size_bytes)
-                self.dict_table.setItem(row, 4, QTableWidgetItem(size_text))
+                # Filename
+                self.dict_table.setItem(row, 8, QTableWidgetItem(dict_info.name))
                 
-                # Loaded time
-                if dict_info.loaded_time:
-                    from datetime import datetime
-                    try:
-                        dt = datetime.fromisoformat(dict_info.loaded_time)
-                        time_text = dt.strftime("%Y-%m-%d %H:%M")
-                    except:
-                        time_text = dict_info.loaded_time
+                # Path (show shortened path for files, URL for web)
+                if dict_info.source_type == 'url':
+                    path_text = dict_info.path
+                elif dict_info.source_type == 'file':
+                    path_text = os.path.dirname(dict_info.path) or "Current directory"
                 else:
-                    time_text = "Unknown"
-                self.dict_table.setItem(row, 5, QTableWidgetItem(time_text))
+                    path_text = dict_info.source_type.capitalize()
+                self.dict_table.setItem(row, 9, QTableWidgetItem(path_text))
             
             # Resize columns
             header = self.dict_table.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Name
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Source
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Type  
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Fields
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Size
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Loaded
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Active
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Dictionary Title
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Date
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Version
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Source
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Status
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Type
+            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # Fields
+            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)  # Filename
+            header.setSectionResizeMode(9, QHeaderView.ResizeMode.Stretch)           # Path
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load dictionary information: {str(e)}")
@@ -330,22 +405,43 @@ class DictionaryInfoDialog(QDialog):
         current_row = self.dict_table.currentRow()
         if current_row >= 0:
             try:
-                detailed_info = self.dict_manager.get_detailed_dictionary_info()
-                if current_row < len(detailed_info):
-                    dict_info = detailed_info[current_row]
+                # Get the filename from the table (column 8)
+                filename_item = self.dict_table.item(current_row, 8)
+                if filename_item:
+                    filename = filename_item.text()
                     
-                    details_html = f"""
-                    <h3>{dict_info.name}</h3>
-                    <b>Description:</b> {dict_info.description or 'No description available'}<br><br>
-                    <b>Full Path:</b> {dict_info.path}<br>
+                    # Find the dictionary info by filename
+                    detailed_info = self.dict_manager.get_detailed_dictionary_info()
+                    dict_info = None
+                    for info in detailed_info:
+                        if info.name == filename:
+                            dict_info = info
+                            break
+                    
+                    if dict_info:
+                        details_html = f"""
+                        <h3>{dict_info.name}</h3>
+                        <b>Description:</b> {dict_info.description or 'No description available'}<br><br>
+                        <b>Full Path:</b> {dict_info.path}<br>
                     <b>Source Type:</b> {dict_info.source_type.upper()}<br>
+                    """
+                    
+                    if dict_info.version:
+                        details_html += f"<b>Version:</b> {dict_info.version}<br>"
+                    
+                    if dict_info.source:
+                        source_color = "green" if dict_info.source == "IUCr" else "blue" if dict_info.source == "COMCIF" else "black"
+                        details_html += f'<b>Source:</b> <span style="color: {source_color};">{dict_info.source}</span><br>'
+                    
+                    if dict_info.status:
+                        status_color = "green" if dict_info.status == "release" else "orange" if dict_info.status == "development" else "gray"
+                        details_html += f'<b>Status:</b> <span style="color: {status_color};">{dict_info.status.capitalize()}</span><br>'
+                    
+                    details_html += f"""
                     <b>File Size:</b> {self.format_file_size(dict_info.size_bytes)}<br>
                     <b>Field Count:</b> {dict_info.field_count}<br>
                     <b>Loaded:</b> {dict_info.loaded_time or 'Unknown'}
                     """
-                    
-                    if dict_info.version:
-                        details_html += f"<br><b>Version:</b> {dict_info.version}"
                     
                     self.details_text.setHtml(details_html)
                 
@@ -410,29 +506,43 @@ class DictionaryInfoDialog(QDialog):
             self.start_url_download(url)
     
     def load_comcifs_dictionary(self):
-        """Show dialog to load common COMCIFS dictionaries"""
-        # Get available COMCIFS dictionaries from the manager
-        available_dicts = self.dict_manager.get_available_comcifs_dictionaries()
+        """Show dialog to load dictionaries from COMCIF or IUCr"""
+        # Get available dictionaries from both sources
+        all_dicts = self.dict_manager.get_all_available_dictionaries()
         
-        # Create display names with descriptions
+        # Create display options organized by source
         display_options = []
         dict_mapping = {}
         
-        for dict_id, dict_info in available_dicts.items():
-            display_name = f"{dict_info['name']} - {dict_info['description']}"
+        # Add COMCIF dictionaries (development versions)
+        display_options.append("=== COMCIF Development Versions ===")
+        for dict_id, dict_info in all_dicts['comcif'].items():
+            display_name = f"{dict_info['name']}"
+            display_options.append(display_name)
+            dict_mapping[display_name] = dict_info['url']
+        
+        # Add separator
+        display_options.append("")
+        display_options.append("=== IUCr Official Release Versions ===")
+        
+        # Add IUCr dictionaries (official releases)
+        for dict_id, dict_info in all_dicts['iucr'].items():
+            display_name = f"{dict_info['name']}"
             display_options.append(display_name)
             dict_mapping[display_name] = dict_info['url']
         
         dict_name, ok = QInputDialog.getItem(
             self,
-            "Load COMCIFS Dictionary",
-            "Select a dictionary to load:",
+            "Load Dictionary",
+            "Select a dictionary to load:\n\n"
+            "COMCIF = Latest development version from GitHub\n"
+            "IUCr = Official release version from IUCr.org",
             display_options,
             0,
             False
         )
         
-        if ok and dict_name:
+        if ok and dict_name and dict_name in dict_mapping:
             url = dict_mapping[dict_name]
             self.start_url_download(url)
     
@@ -450,7 +560,7 @@ class DictionaryInfoDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Load All COMCIFS Dictionaries",
-            f"This will download and load all {dict_count} available COMCIFS dictionaries:\n\n"
+            f"This will download and load all {dict_count} available COMCIFS development dictionaries:\n\n"
             f"{dict_list}\n"
             "This may take a few moments. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -459,6 +569,30 @@ class DictionaryInfoDialog(QDialog):
         
         if reply == QMessageBox.StandardButton.Yes:
             self.start_bulk_comcifs_download()
+    
+    def load_all_iucr_dictionaries(self):
+        """Load all available IUCr dictionaries"""
+        # Get available dictionaries dynamically
+        available_dicts = self.dict_manager.get_available_iucr_dictionaries()
+        dict_count = len(available_dicts)
+        
+        # Build dictionary list for display
+        dict_list = ""
+        for dict_info in available_dicts.values():
+            dict_list += f"• {dict_info['name']}\n"
+        
+        reply = QMessageBox.question(
+            self,
+            "Load All IUCr Dictionaries",
+            f"This will download and load all {dict_count} available IUCr official release dictionaries:\n\n"
+            f"{dict_list}\n"
+            "This may take a few moments. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.start_bulk_iucr_download()
     
     def start_bulk_comcifs_download(self):
         """Start downloading all COMCIFS dictionaries"""
@@ -471,9 +605,30 @@ class DictionaryInfoDialog(QDialog):
         self.load_url_btn.setEnabled(False) 
         self.load_comcif_btn.setEnabled(False)
         self.load_all_comcif_btn.setEnabled(False)
+        self.load_all_iucr_btn.setEnabled(False)
         
         # Create and start bulk download worker
         self.bulk_download_worker = BulkCOMCIFSDownloadWorker(self.dict_manager)
+        self.bulk_download_worker.progress.connect(self.progress_bar.setValue)
+        self.bulk_download_worker.finished.connect(self.on_bulk_download_finished)
+        self.bulk_download_worker.status_update.connect(self.show_status_message)
+        self.bulk_download_worker.start()
+    
+    def start_bulk_iucr_download(self):
+        """Start downloading all IUCr dictionaries"""
+        # Show progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Disable buttons during download
+        self.load_file_btn.setEnabled(False)
+        self.load_url_btn.setEnabled(False) 
+        self.load_comcif_btn.setEnabled(False)
+        self.load_all_comcif_btn.setEnabled(False)
+        self.load_all_iucr_btn.setEnabled(False)
+        
+        # Create and start bulk download worker
+        self.bulk_download_worker = BulkIUCrDownloadWorker(self.dict_manager)
         self.bulk_download_worker.progress.connect(self.progress_bar.setValue)
         self.bulk_download_worker.finished.connect(self.on_bulk_download_finished)
         self.bulk_download_worker.status_update.connect(self.show_status_message)
@@ -489,6 +644,7 @@ class DictionaryInfoDialog(QDialog):
         self.load_url_btn.setEnabled(True)
         self.load_comcif_btn.setEnabled(True)
         self.load_all_comcif_btn.setEnabled(True)
+        self.load_all_iucr_btn.setEnabled(True)
         
         # Show results
         successful = sum(1 for success in results.values() if success)
@@ -498,7 +654,7 @@ class DictionaryInfoDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Download Complete",
-                f"Successfully loaded all {total} COMCIFS dictionaries!"
+                f"Successfully loaded all {total} dictionaries!"
             )
         elif successful > 0:
             failed_dicts = [name for name, success in results.items() if not success]
@@ -512,7 +668,7 @@ class DictionaryInfoDialog(QDialog):
             QMessageBox.critical(
                 self,
                 "Download Failed",
-                "Failed to load any COMCIFS dictionaries. Please check your internet connection."
+                "Failed to load any dictionaries. Please check your internet connection."
             )
         
         # Refresh the dictionary list
@@ -537,6 +693,7 @@ class DictionaryInfoDialog(QDialog):
         self.load_url_btn.setEnabled(False) 
         self.load_comcif_btn.setEnabled(False)
         self.load_all_comcif_btn.setEnabled(False)
+        self.load_all_iucr_btn.setEnabled(False)
         
         # Start download worker
         self.download_worker = DictionaryDownloadWorker(url, self.dict_manager)
@@ -554,6 +711,7 @@ class DictionaryInfoDialog(QDialog):
         self.load_url_btn.setEnabled(True)
         self.load_comcif_btn.setEnabled(True)
         self.load_all_comcif_btn.setEnabled(True)
+        self.load_all_iucr_btn.setEnabled(True)
         
         # Show result message
         if success:
@@ -566,6 +724,30 @@ class DictionaryInfoDialog(QDialog):
         if self.download_worker:
             self.download_worker.deleteLater()
             self.download_worker = None
+    
+    def on_active_changed(self, state):
+        """Handle changes to the Active checkbox"""
+        # Get the checkbox that triggered this
+        checkbox = self.sender()
+        if not checkbox:
+            return
+        
+        dict_name = checkbox.property("dict_name")
+        is_active = (state == Qt.CheckState.Checked.value)
+        
+        # Update the dictionary manager
+        success = self.dict_manager.set_dictionary_active(dict_name, is_active)
+        
+        if success:
+            # Refresh the table to show updated active states
+            self.refresh_data()
+        else:
+            # Revert the checkbox if the operation failed
+            checkbox.blockSignals(True)
+            checkbox.setChecked(not is_active)
+            checkbox.blockSignals(False)
+            QMessageBox.warning(self, "Error", 
+                              f"Failed to change active state for dictionary: {dict_name}")
     
     def refresh_data(self):
         """Refresh the displayed dictionary information"""
@@ -603,14 +785,14 @@ class DictionaryInfoDialog(QDialog):
             self.details_text.clear()
             return
         
-        # Enable remove button only for non-primary dictionaries (not row 0)
-        selected_row = selected_rows[0].row()
-        is_primary = (selected_row == 0)
-        self.remove_btn.setEnabled(not is_primary)
+        # Enable remove button only if no primary dictionary (row 0) is selected
+        has_primary = any(row.row() == 0 for row in selected_rows)
+        self.remove_btn.setEnabled(not has_primary)
         
-        # Show details for selected dictionary
+        # Show details for the first selected dictionary
         try:
             detailed_info = self.dict_manager.get_detailed_dictionary_info()
+            selected_row = selected_rows[0].row()
             if selected_row < len(detailed_info):
                 dict_info = detailed_info[selected_row]
                 self.show_dictionary_details(dict_info)
@@ -622,6 +804,16 @@ class DictionaryInfoDialog(QDialog):
         details = []
         details.append(f"<b>Dictionary Details</b><br>")
         details.append(f"<b>Name:</b> {dict_info.name}")
+        
+        # Show active status with color
+        active_text = "Yes" if dict_info.is_active else "No"
+        active_color = "green" if dict_info.is_active else "red"
+        details.append(f"<b>Active:</b> <span style='color: {active_color};'>{active_text}</span>")
+        
+        # Show dictionary type
+        if dict_info.dict_type:
+            details.append(f"<b>Dictionary Type:</b> {dict_info.dict_type}")
+        
         details.append(f"<b>Path/URL:</b> {dict_info.path}")
         details.append(f"<b>Source Type:</b> {dict_info.source_type}")
         details.append(f"<b>Field Count:</b> {dict_info.field_count:,}")
@@ -639,49 +831,80 @@ class DictionaryInfoDialog(QDialog):
         self.details_text.setHtml("<br>".join(details))
     
     def remove_selected_dictionary(self):
-        """Remove the selected dictionary"""
+        """Remove the selected dictionaries"""
         selected_rows = self.dict_table.selectionModel().selectedRows()
         
         if not selected_rows:
             return
         
-        selected_row = selected_rows[0].row()
-        
-        # Don't allow removal of primary dictionary (row 0)
-        if selected_row == 0:
+        # Check if primary dictionary (row 0) is selected
+        if any(row.row() == 0 for row in selected_rows):
             QMessageBox.information(self, "Cannot Remove", 
                                   "The primary CIF core dictionary cannot be removed.")
             return
         
         try:
             detailed_info = self.dict_manager.get_detailed_dictionary_info()
-            if selected_row >= len(detailed_info):
+            
+            # Get all selected dictionaries
+            dicts_to_remove = []
+            for row in selected_rows:
+                row_index = row.row()
+                if row_index < len(detailed_info):
+                    dicts_to_remove.append(detailed_info[row_index])
+            
+            if not dicts_to_remove:
                 return
             
-            dict_info = detailed_info[selected_row]
+            # Build confirmation message
+            if len(dicts_to_remove) == 1:
+                dict_info = dicts_to_remove[0]
+                message = (f"Are you sure you want to remove the dictionary:\n\n"
+                          f"{dict_info.name}\n"
+                          f"({dict_info.field_count:,} fields)\n\n"
+                          f"This action cannot be undone.")
+            else:
+                dict_list = "\n".join([f"• {d.name} ({d.field_count:,} fields)" for d in dicts_to_remove])
+                message = (f"Are you sure you want to remove {len(dicts_to_remove)} dictionaries:\n\n"
+                          f"{dict_list}\n\n"
+                          f"This action cannot be undone.")
             
             # Confirm removal
-            reply = QMessageBox.question(self, "Remove Dictionary", 
-                                       f"Are you sure you want to remove the dictionary:\n\n"
-                                       f"{dict_info.name}\n"
-                                       f"({dict_info.field_count:,} fields)\n\n"
-                                       f"This action cannot be undone.",
+            reply = QMessageBox.question(self, "Remove Dictionaries", message,
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                        QMessageBox.StandardButton.No)
             
             if reply == QMessageBox.StandardButton.Yes:
-                # Remove the dictionary
-                success = self.dict_manager.remove_dictionary(dict_info.name)
+                # Remove all selected dictionaries
+                removed_count = 0
+                failed_dicts = []
                 
-                if success:
-                    QMessageBox.information(self, "Dictionary Removed", 
-                                          f"Dictionary '{dict_info.name}' has been removed successfully.")
-                    # Refresh the display
-                    self.refresh_data()
+                for dict_info in dicts_to_remove:
+                    success = self.dict_manager.remove_dictionary(dict_info.name)
+                    if success:
+                        removed_count += 1
+                    else:
+                        failed_dicts.append(dict_info.name)
+                
+                # Show result
+                if removed_count == len(dicts_to_remove):
+                    if removed_count == 1:
+                        QMessageBox.information(self, "Dictionary Removed", 
+                                              f"Dictionary '{dicts_to_remove[0].name}' has been removed successfully.")
+                    else:
+                        QMessageBox.information(self, "Dictionaries Removed", 
+                                              f"Successfully removed {removed_count} dictionaries.")
+                elif removed_count > 0:
+                    QMessageBox.warning(self, "Partial Success", 
+                                      f"Removed {removed_count} of {len(dicts_to_remove)} dictionaries.\n\n"
+                                      f"Failed to remove: {', '.join(failed_dicts)}")
                 else:
                     QMessageBox.warning(self, "Removal Failed", 
-                                      f"Failed to remove dictionary '{dict_info.name}'.")
+                                      "Failed to remove the selected dictionaries.")
+                
+                # Refresh the display
+                self.refresh_data()
                     
         except Exception as e:
             QMessageBox.critical(self, "Error", 
-                               f"An error occurred while removing the dictionary:\n{str(e)}")
+                               f"An error occurred while removing dictionaries:\n{str(e)}")

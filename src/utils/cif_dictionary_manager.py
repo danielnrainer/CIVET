@@ -47,73 +47,179 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
-# COMCIFS Dictionary URLs - Hard-coded stable URLs
+# COMCIFS Dictionary URLs - Development versions from GitHub
 COMCIFS_DICTIONARIES = {
     'cif_core': {
         # 'url': 'https://github.com/COMCIFS/cif_core/blob/master/cif_core.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/cif_core/refs/heads/master/cif_core.dic',
         'name': 'Core Dictionary (cif_core.dic)',
-        'description': 'Standard crystallographic data'
+        'description': 'Standard crystallographic data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_pow': {
         # 'url': 'https://github.com/COMCIFS/Powder_Dictionary/blob/master/cif_pow.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/Powder_Dictionary/refs/heads/master/cif_pow.dic',
         'name': 'Powder Dictionary (cif_pow.dic)', 
-        'description': 'Powder diffraction data'
+        'description': 'Powder diffraction data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_topo': {
         # 'url': 'https://github.com/COMCIFS/TopoCif/blob/main/cif_topo.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/TopoCif/refs/heads/main/cif_topo.dic',
         'name': 'Topology Dictionary (cif_topo.dic)',
-        'description': 'Topology descriptions'
+        'description': 'Topology descriptions',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_mag': {
         # 'url': 'https://github.com/COMCIFS/magnetic_dic/blob/main/cif_mag.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/magnetic_dic/refs/heads/main/cif_mag.dic',
         'name': 'Magnetic Dictionary (cif_mag.dic)',
-        'description': 'Magnetic structure data'
+        'description': 'Magnetic structure data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_img': {
         # 'url': 'https://github.com/COMCIFS/imgCIF/blob/master/cif_img.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/imgCIF/refs/heads/master/cif_img.dic',
         'name': 'Image Dictionary (cif_img.dic)',
-        'description': 'Image and area detector data'
+        'description': 'Image and area detector data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_ed': {
         # 'url': 'https://github.com/COMCIFS/cif_ed/blob/main/cif_ed.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/cif_ed/refs/heads/main/cif_ed.dic',
         'name': 'Electron Diffraction Dictionary (cif_ed.dic)',
-        'description': 'Electron diffraction data'
+        'description': 'Electron diffraction data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_multiblock': {
         # 'url': 'https://github.com/COMCIFS/MultiBlock_Dictionary/blob/main/multi_block_core.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/MultiBlock_Dictionary/refs/heads/main/multi_block_core.dic',
         'name': 'Multi-Block Dictionary (multi_block_core.dic)',
-        'description': 'Multi-container data'
+        'description': 'Multi-container data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_ms': {
         # 'url': 'https://github.com/COMCIFS/Modulated_Structures/blob/main/cif_ms.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/Modulated_Structures/refs/heads/main/cif_ms.dic',
         'name': 'Modulated Structures Dictionary (cif_ms.dic)',
-        'description': 'Modulated structure data'
+        'description': 'Modulated structure data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_rho': {
         # 'url': 'https://github.com/COMCIFS/Electron_Density_Dictionary/blob/main/cif_rho.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/Electron_Density_Dictionary/refs/heads/main/cif_rho.dic',
         'name': 'Electron Density Dictionary (cif_rho.dic)',
-        'description': 'Electron density data'
+        'description': 'Electron density data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_twin': {
         # 'url': 'https://github.com/COMCIFS/Twinning_Dictionary/blob/main/cif_twin.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/Twinning_Dictionary/refs/heads/main/cif_twin.dic',
         'name': 'Twinning Dictionary (cif_twin.dic)',
-        'description': 'Twinning data'
+        'description': 'Twinning data',
+        'source': 'COMCIF',
+        'status': 'development'
     },
     'cif_rstr': {
         # 'url': 'https://github.com/COMCIFS/Restraints_Dictionary/blob/main/cif_rstr.dic',
         'url': 'https://raw.githubusercontent.com/COMCIFS/Restraints_Dictionary/refs/heads/main/cif_rstr.dic',
         'name': 'Restraints Dictionary (cif_rstr.dic)',
-        'description': 'Restraints data'
+        'description': 'Restraints data',
+        'source': 'COMCIF',
+        'status': 'development'
+    }
+}
+
+# IUCr Dictionary URLs - Official release versions
+# Reference: https://www.iucr.org/resources/cif/dictionaries
+IUCR_DICTIONARIES = {
+    'cif_core': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_core_3.2.0.dic',
+        # !!! be mindufl here, this doesn't resolve permanently and links to a specific version!
+        # almost certainly an oversight
+        'name': 'Core Dictionary (cif_core.dic) - IUCr Release',
+        'description': 'Standard crystallographic data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_pow': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_pd.dic',
+        'name': 'Powder Dictionary (cif_pow.dic) - IUCr Release',
+        'description': 'Powder diffraction data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_multiblock': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_core_multiblock_1.0.0.dic',
+        'name': 'Multi-Block Dictionary (multi_block_core.dic) - IUCr Release',
+        'description': 'Multi-container data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_img': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_img.dic',
+        'name': 'Image Dictionary (cif_img.dic) - IUCr Release',
+        'description': 'Image and area detector data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_rstr': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_core_restraints.dic',
+        'name': 'Restraints Dictionary (cif_rstr.dic) - IUCr Release',
+        'description': 'Restraints data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_ms': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_ms.dic',
+        'name': 'Modulated Structures Dictionary (cif_ms.dic) - IUCr Release',
+        'description': 'Modulated structure data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_mag': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_mag.dic',
+        'name': 'Magnetic Structures Dictionary (cif_mag.dic) - IUCr Release',
+        'description': 'Magnetic structure data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_topo': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_topology.dic',
+        'name': 'Topology Dictionary (cif_topology.dic) - IUCr Release',
+        'description': 'Topology data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_rho': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_rho.dic',
+        'name': 'Electron Density Dictionary (cif_rho.dic) - IUCr Release',
+        'description': 'Electron density data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_twin': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_twinning.dic',
+        'name': 'Twinning Dictionary (cif_twin.dic) - IUCr Release',
+        'description': 'Twinning data - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
+    },
+    'cif_sym': {
+        'url': 'https://www.iucr.org/__data/iucr/cif/dictionaries/cif_sym.dic',
+        'name': 'Symmetry Dictionary (cif_sym.dic) - IUCr Release',
+        'description': 'Symmetry extensions - Official IUCr release version',
+        'source': 'IUCr',
+        'status': 'release'
     }
 }
 
@@ -137,10 +243,29 @@ class DictionaryInfo:
     loaded_time: Optional[str] = None  # When loaded (ISO format)
     version: Optional[str] = None      # Dictionary version if available
     description: Optional[str] = None  # Dictionary description
+    source: Optional[str] = None       # Source: 'COMCIF', 'IUCr', 'Local', 'Custom'
+    status: Optional[str] = None       # Status: 'release', 'development', 'unknown'
+    dict_type: Optional[str] = None    # Dictionary type: 'core', 'powder', 'img', etc.
+    is_active: bool = True             # Whether this dictionary is active for its type
+    dict_title: Optional[str] = None   # Official dictionary title from _dictionary.title
+    dict_date: Optional[str] = None    # Dictionary date from _dictionary.date
     
     def __post_init__(self):
         if self.loaded_time is None:
             self.loaded_time = datetime.now().isoformat()
+        if self.dict_type is None:
+            # Try to extract type from name (e.g., "cif_core.dic" -> "core")
+            self.dict_type = self._extract_dict_type()
+    
+    def _extract_dict_type(self) -> str:
+        """Extract dictionary type from filename"""
+        name_lower = self.name.lower()
+        # Match patterns like cif_core, cif_pow, cif_img, etc.
+        match = re.match(r'cif[_-](\w+)\.dic', name_lower)
+        if match:
+            return match.group(1)
+        # Fallback to using the filename without extension
+        return os.path.splitext(self.name)[0].replace('cif_', '').replace('cif-', '')
 
 
 class CIFVersion(Enum):
@@ -192,6 +317,9 @@ class CIFDictionaryManager:
         # Multi-dictionary support with enhanced tracking
         self._additional_parsers: List[CIFDictionaryParser] = []
         self._dictionary_infos: List[DictionaryInfo] = []
+        # Map dictionary info index to parser (0 = primary, 1+ = additional)
+        # This allows us to track inactive dictionaries that don't have parsers loaded
+        self._info_to_parser_map: Dict[int, int] = {0: -1}  # -1 = primary parser
         
         # Dictionary suggestion system
         self._suggestion_manager = DictionarySuggestionManager()
@@ -200,11 +328,37 @@ class CIFDictionaryManager:
         primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core.dic')
         source_type = DictionarySource.BUNDLED if 'dictionaries/cif_core.dic' in str(primary_path) else DictionarySource.FILE
         
+        # Read the primary dictionary file to extract metadata
+        version = None
+        dict_title = None
+        dict_date = None
+        if os.path.exists(primary_path):
+            try:
+                with open(primary_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                version = self._extract_dictionary_version(content)
+                dict_title = self._extract_dictionary_title(content)
+                dict_date = self._extract_dictionary_date(content)
+            except Exception as e:
+                print(f"Warning: Could not read primary dictionary metadata: {e}")
+        
+        # Create a descriptive name for the bundled dictionary
+        base_name = os.path.basename(primary_path)
+        if source_type == DictionarySource.BUNDLED:
+            # Add identifier for bundled version
+            base_without_ext = os.path.splitext(base_name)[0]
+            display_name = f"{base_without_ext} (Built-in).dic"
+        else:
+            display_name = base_name
+        
         primary_info = DictionaryInfo(
-            name=os.path.basename(primary_path),
+            name=display_name,
             path=str(primary_path),
             source_type=source_type,
-            description="CIF Core Dictionary - Primary dictionary for standard crystallographic data"
+            description="CIF Core Dictionary - Primary dictionary for standard crystallographic data",
+            version=version,
+            dict_title=dict_title,
+            dict_date=dict_date
         )
         
         if source_type == DictionarySource.FILE and os.path.exists(primary_path):
@@ -255,44 +409,55 @@ class CIFDictionaryManager:
                 print(f"Warning: Could not load twinning dictionary: {e}")
         
     def _ensure_loaded(self):
-        """Ensure all dictionaries are loaded and merged (lazy loading)"""
+        """Ensure all active dictionaries are loaded and merged (lazy loading)"""
         if not self._loaded:
             # Initialize caches
             self._field_cache = {}
             self._alias_map = {}
             
-            # Start with the primary dictionary
-            self._cif1_to_cif2, self._cif2_to_cif1 = self.parser.parse_dictionary()
-            
-            # Update primary dictionary field count
-            if self._dictionary_infos:
+            # Start with the primary dictionary if it's active
+            if self._dictionary_infos and self._dictionary_infos[0].is_active:
+                self._cif1_to_cif2, self._cif2_to_cif1 = self.parser.parse_dictionary()
+                # Update primary dictionary field count
                 self._dictionary_infos[0].field_count = len(self._cif1_to_cif2)
+            else:
+                # If primary is inactive, start with empty mappings
+                self._cif1_to_cif2 = {}
+                self._cif2_to_cif1 = {}
             
-            # Merge additional dictionaries
+            # Merge active additional dictionaries only
             for i, additional_parser in enumerate(self._additional_parsers):
-                add_cif1_to_cif2, add_cif2_to_cif1 = additional_parser.parse_dictionary()
-                
-                # Update field count for this dictionary
-                if i + 1 < len(self._dictionary_infos):
-                    self._dictionary_infos[i + 1].field_count = len(add_cif1_to_cif2)
-                
-                # Merge CIF1 -> CIF2 mappings
-                for cif1_field, cif2_field in add_cif1_to_cif2.items():
-                    if cif1_field not in self._cif1_to_cif2:
-                        self._cif1_to_cif2[cif1_field] = cif2_field
-                    # Note: In case of conflicts, primary dictionary takes precedence
-                
-                # Merge CIF2 -> CIF1 mappings
-                for cif2_field, cif1_fields in add_cif2_to_cif1.items():
-                    if cif2_field not in self._cif2_to_cif1:
-                        self._cif2_to_cif1[cif2_field] = cif1_fields[:]
-                    else:
-                        # Merge alias lists, avoiding duplicates
-                        existing_aliases = set(self._cif2_to_cif1[cif2_field])
-                        for alias in cif1_fields:
-                            if alias not in existing_aliases:
-                                self._cif2_to_cif1[cif2_field].append(alias)
-                                existing_aliases.add(alias)
+                # Check if this dictionary is active (i+1 because 0 is primary)
+                dict_info_index = i + 1
+                if dict_info_index < len(self._dictionary_infos):
+                    dict_info = self._dictionary_infos[dict_info_index]
+                    
+                    # Skip inactive dictionaries
+                    if not dict_info.is_active:
+                        continue
+                    
+                    add_cif1_to_cif2, add_cif2_to_cif1 = additional_parser.parse_dictionary()
+                    
+                    # Update field count for this dictionary
+                    dict_info.field_count = len(add_cif1_to_cif2)
+                    
+                    # Merge CIF1 -> CIF2 mappings
+                    for cif1_field, cif2_field in add_cif1_to_cif2.items():
+                        if cif1_field not in self._cif1_to_cif2:
+                            self._cif1_to_cif2[cif1_field] = cif2_field
+                        # Note: In case of conflicts, earlier dictionaries take precedence
+                    
+                    # Merge CIF2 -> CIF1 mappings
+                    for cif2_field, cif1_fields in add_cif2_to_cif1.items():
+                        if cif2_field not in self._cif2_to_cif1:
+                            self._cif2_to_cif1[cif2_field] = cif1_fields[:]
+                        else:
+                            # Merge alias lists, avoiding duplicates
+                            existing_aliases = set(self._cif2_to_cif1[cif2_field])
+                            for alias in cif1_fields:
+                                if alias not in existing_aliases:
+                                    self._cif2_to_cif1[cif2_field].append(alias)
+                                    existing_aliases.add(alias)
             
             # Manual fixes for missing mappings
             self._add_missing_field_mappings()
@@ -874,6 +1039,139 @@ class CIFDictionaryManager:
             'is_valid': version in [CIFVersion.CIF1, CIFVersion.CIF2]
         }
     
+    @staticmethod
+    def _extract_dictionary_version(content: str) -> Optional[str]:
+        """
+        Extract version information from dictionary content.
+        Looks for _dictionary.version field.
+        
+        Args:
+            content: Dictionary file content
+            
+        Returns:
+            Version string or None if not found
+        """
+        try:
+            # Look for _dictionary.version in the content
+            version_pattern = r'_dictionary\.version\s+([^\s\n]+)'
+            match = re.search(version_pattern, content)
+            if match:
+                version = match.group(1).strip("'\"")
+                return version
+            
+            # Alternative pattern: look in data_ block
+            data_pattern = r'data_\w+.*?_dictionary\.version\s+([^\s\n]+)'
+            match = re.search(data_pattern, content, re.DOTALL)
+            if match:
+                version = match.group(1).strip("'\"")
+                return version
+                
+        except Exception as e:
+            print(f"Warning: Could not extract dictionary version: {e}")
+        
+        return None
+    
+    @staticmethod
+    def _extract_dictionary_title(content: str) -> Optional[str]:
+        """
+        Extract title information from dictionary content.
+        Looks for _dictionary.title field.
+        
+        Args:
+            content: Dictionary file content
+            
+        Returns:
+            Title string or None if not found
+        """
+        try:
+            # Look for _dictionary.title in the content
+            # Title can be single or multi-line, possibly with quotes or semicolons
+            title_pattern = r'_dictionary\.title\s+[;\n]?\s*([^\n]+(?:\n(?!_)[^\n]+)*)'
+            match = re.search(title_pattern, content)
+            if match:
+                title = match.group(1).strip()
+                # Clean up semicolon delimiters and quotes
+                title = title.strip(';').strip("'\"").strip()
+                # Remove extra whitespace
+                title = ' '.join(title.split())
+                return title
+            
+            # Alternative: look for single-line title
+            simple_pattern = r'_dictionary\.title\s+(.+?)(?=\n_|\n\n|\Z)'
+            match = re.search(simple_pattern, content, re.DOTALL)
+            if match:
+                title = match.group(1).strip().strip(';').strip("'\"").strip()
+                title = ' '.join(title.split())
+                return title
+                
+        except Exception as e:
+            print(f"Warning: Could not extract dictionary title: {e}")
+        
+        return None
+    
+    @staticmethod
+    def _extract_dictionary_date(content: str) -> Optional[str]:
+        """
+        Extract date information from dictionary content.
+        Looks for _dictionary.date field.
+        
+        Args:
+            content: Dictionary file content
+            
+        Returns:
+            Date string or None if not found
+        """
+        try:
+            # Look for _dictionary.date in the content
+            date_pattern = r'_dictionary\.date\s+([^\s\n]+)'
+            match = re.search(date_pattern, content)
+            if match:
+                date = match.group(1).strip("'\"")
+                return date
+            
+            # Alternative pattern: look in data_ block
+            data_pattern = r'data_\w+.*?_dictionary\.date\s+([^\s\n]+)'
+            match = re.search(data_pattern, content, re.DOTALL)
+            if match:
+                date = match.group(1).strip("'\"")
+                return date
+                
+        except Exception as e:
+            print(f"Warning: Could not extract dictionary date: {e}")
+        
+        return None
+    
+    @staticmethod
+    def _determine_dict_source_and_status(url_or_path: str, content: str = None) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Determine the source and status of a dictionary based on URL/path.
+        
+        Args:
+            url_or_path: URL or file path of the dictionary
+            content: Optional dictionary content for version extraction
+            
+        Returns:
+            Tuple of (source, status) where:
+                source: 'COMCIF', 'IUCr', 'Local', or 'Custom'
+                status: 'release', 'development', or 'unknown'
+        """
+        url_lower = url_or_path.lower()
+        
+        # Check for IUCr official source
+        if 'iucr.org' in url_lower:
+            return 'IUCr', 'release'
+        
+        # Check for COMCIF GitHub (development versions)
+        if 'github.com/comcifs' in url_lower or 'raw.githubusercontent.com/comcifs' in url_lower:
+            return 'COMCIF', 'development'
+        
+        # Local file
+        if os.path.isfile(url_or_path):
+            return 'Local', 'unknown'
+        
+        # Custom/unknown source
+        return 'Custom', 'unknown'
+    
     def add_dictionary(self, dictionary_path: str) -> bool:
         """
         Add an additional dictionary to enhance field coverage.
@@ -909,6 +1207,16 @@ class CIFDictionaryManager:
             # Add parser to list
             self._additional_parsers.append(additional_parser)
             
+            # Read content for version extraction
+            with open(dictionary_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract metadata from dictionary
+            version = self._extract_dictionary_version(content)
+            dict_title = self._extract_dictionary_title(content)
+            dict_date = self._extract_dictionary_date(content)
+            source, status = self._determine_dict_source_and_status(dictionary_path, content)
+            
             # Create dictionary info
             dict_info = DictionaryInfo(
                 name=os.path.basename(dictionary_path),
@@ -916,8 +1224,21 @@ class CIFDictionaryManager:
                 source_type=DictionarySource.FILE,
                 size_bytes=os.path.getsize(dictionary_path),
                 field_count=len(cif1_to_cif2),
-                description=self._extract_dictionary_description(dictionary_path)
+                description=self._extract_dictionary_description(dictionary_path),
+                version=version,
+                dict_title=dict_title,
+                dict_date=dict_date,
+                source=source,
+                status=status
             )
+            
+            # Check if there's already an active dictionary of this type
+            # If so, mark this new one as inactive by default
+            existing_active = any(
+                info.dict_type == dict_info.dict_type and info.is_active 
+                for info in self._dictionary_infos
+            )
+            dict_info.is_active = not existing_active
             
             self._dictionary_infos.append(dict_info)
             
@@ -970,7 +1291,29 @@ class CIFDictionaryManager:
                 self._additional_parsers.append(additional_parser)
                 
                 # Extract name from URL
-                dict_name = os.path.basename(urlparse(url).path) or "downloaded_dictionary.dic"
+                base_name = os.path.basename(urlparse(url).path) or "downloaded_dictionary.dic"
+                
+                # Extract metadata from dictionary
+                version = self._extract_dictionary_version(response.text)
+                dict_title = self._extract_dictionary_title(response.text)
+                dict_date = self._extract_dictionary_date(response.text)
+                source, status = self._determine_dict_source_and_status(url, response.text)
+                
+                # Create a unique name that includes source and version info
+                # This allows multiple versions of the same dictionary to coexist
+                name_parts = [base_name]
+                if source and source != 'Custom':
+                    # Remove the .dic extension temporarily
+                    base_without_ext = os.path.splitext(base_name)[0]
+                    # Add source identifier
+                    if source == 'IUCr':
+                        dict_name = f"{base_name} (IUCr Release)"
+                    elif source == 'COMCIF':
+                        dict_name = f"{base_name} (COMCIF GitHub Dev)"
+                    else:
+                        dict_name = f"{base_without_ext} ({source}).dic"
+                else:
+                    dict_name = base_name
                 
                 # Create dictionary info
                 dict_info = DictionaryInfo(
@@ -979,8 +1322,21 @@ class CIFDictionaryManager:
                     source_type=DictionarySource.URL,
                     size_bytes=len(response.text.encode('utf-8')),
                     field_count=len(cif1_to_cif2),
-                    description=self._extract_dictionary_description(temp_path, response.text)
+                    description=self._extract_dictionary_description(temp_path, response.text),
+                    version=version,
+                    dict_title=dict_title,
+                    dict_date=dict_date,
+                    source=source,
+                    status=status
                 )
+                
+                # Check if there's already an active dictionary of this type
+                # If so, mark this new one as inactive by default
+                existing_active = any(
+                    info.dict_type == dict_info.dict_type and info.is_active 
+                    for info in self._dictionary_infos
+                )
+                dict_info.is_active = not existing_active
                 
                 self._dictionary_infos.append(dict_info)
                 
@@ -1106,9 +1462,8 @@ class CIFDictionaryManager:
         
         for dict_id, dict_info in COMCIFS_DICTIONARIES.items():
             try:
-                # Skip if already loaded
+                # Check if this exact URL is already loaded
                 already_loaded = any(
-                    dict_info_obj.name.lower() == f"{dict_id}.dic" or 
                     dict_info_obj.path == dict_info['url']
                     for dict_info_obj in self._dictionary_infos
                 )
@@ -1127,14 +1482,69 @@ class CIFDictionaryManager:
         
         return results
     
+    def load_all_iucr_dictionaries(self, timeout: int = 30) -> Dict[str, bool]:
+        """
+        Load all available IUCr dictionaries from their official repositories.
+        
+        Args:
+            timeout: Request timeout in seconds for each dictionary
+            
+        Returns:
+            Dictionary mapping dictionary names to success status
+        """
+        results = {}
+        
+        for dict_id, dict_info in IUCR_DICTIONARIES.items():
+            try:
+                # Check if this exact URL is already loaded
+                already_loaded = any(
+                    dict_info_obj.path == dict_info['url']
+                    for dict_info_obj in self._dictionary_infos
+                )
+                
+                if already_loaded:
+                    results[dict_id] = True
+                    continue
+                
+                # Attempt to load dictionary
+                success = self.add_dictionary_from_url(dict_info['url'], timeout)
+                results[dict_id] = success
+                
+            except Exception as e:
+                print(f"Warning: Failed to load IUCr dictionary {dict_id}: {e}")
+                results[dict_id] = False
+        
+        return results
+    
     def get_available_comcifs_dictionaries(self) -> Dict[str, Dict[str, str]]:
         """
-        Get information about available COMCIFS dictionaries.
+        Get information about available COMCIFS dictionaries (development versions).
         
         Returns:
-            Dictionary mapping dictionary IDs to their info (name, description, url)
+            Dictionary mapping dictionary IDs to their info (name, description, url, source, status)
         """
         return COMCIFS_DICTIONARIES.copy()
+    
+    def get_available_iucr_dictionaries(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get information about available IUCr dictionaries (official release versions).
+        
+        Returns:
+            Dictionary mapping dictionary IDs to their info (name, description, url, source, status)
+        """
+        return IUCR_DICTIONARIES.copy()
+    
+    def get_all_available_dictionaries(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get information about all available dictionaries (both COMCIF and IUCr).
+        
+        Returns:
+            Dictionary with 'comcif' and 'iucr' keys, each containing their respective dictionaries
+        """
+        return {
+            'comcif': COMCIFS_DICTIONARIES.copy(),
+            'iucr': IUCR_DICTIONARIES.copy()
+        }
     
     def get_loaded_dictionaries(self) -> List[str]:
         """
@@ -1188,6 +1598,81 @@ class CIFDictionaryManager:
             print(f"Error getting detailed dictionary info: {e}")
             # Return at least basic info about the primary dictionary
             return [self._dictionary_infos[0]] if self._dictionary_infos else []
+    
+    def set_dictionary_active(self, dict_name: str, active: bool = True) -> bool:
+        """
+        Set a dictionary as active or inactive for its type.
+        When setting a dictionary active, all other dictionaries of the same type are deactivated.
+        When trying to deactivate the only active dictionary of a type, the operation is allowed.
+        
+        Args:
+            dict_name: Name of the dictionary to activate/deactivate
+            active: True to activate, False to deactivate
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Find the dictionary
+            dict_index = None
+            dict_info = None
+            for i, info in enumerate(self._dictionary_infos):
+                if info.name == dict_name:
+                    dict_index = i
+                    dict_info = info
+                    break
+            
+            if dict_info is None:
+                print(f"Dictionary not found: {dict_name}")
+                return False
+            
+            # If already in the desired state, nothing to do
+            if dict_info.is_active == active:
+                return True
+            
+            # If activating, deactivate all other dictionaries of the same type
+            if active:
+                dict_type = dict_info.dict_type
+                for i, info in enumerate(self._dictionary_infos):
+                    if info.dict_type == dict_type and i != dict_index:
+                        info.is_active = False
+                
+                # Set the active state
+                dict_info.is_active = True
+            else:
+                # Deactivating - just set it to inactive
+                # Note: This means it's possible to have no active dictionary of a type
+                dict_info.is_active = False
+            
+            # Force reload to rebuild mappings with new active state
+            self._loaded = False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error setting dictionary active state: {e}")
+            return False
+    
+    def get_active_dictionaries(self) -> List[DictionaryInfo]:
+        """
+        Get list of currently active dictionaries.
+        
+        Returns:
+            List of active DictionaryInfo objects
+        """
+        return [info for info in self._dictionary_infos if info.is_active]
+    
+    def get_dictionaries_by_type(self, dict_type: str) -> List[DictionaryInfo]:
+        """
+        Get all dictionaries of a specific type.
+        
+        Args:
+            dict_type: Dictionary type (e.g., 'core', 'powder', 'img')
+            
+        Returns:
+            List of DictionaryInfo objects of the specified type
+        """
+        return [info for info in self._dictionary_infos if info.dict_type == dict_type]
     
     def suggest_dictionaries_for_cif(self, cif_content: str) -> List[DictionarySuggestion]:
         """
@@ -1683,6 +2168,9 @@ class CIFDictionaryManager:
         """
         Remove a specific field and its data from CIF content.
         
+        Important: This method respects text blocks (semicolon-delimited) and will NOT
+        remove field-like text within blocks such as _iucr_refine_fcf_details.
+        
         Args:
             cif_content: CIF file content
             field_to_remove: Field name to remove
@@ -1693,12 +2181,26 @@ class CIFDictionaryManager:
         lines = cif_content.split('\n')
         result_lines = []
         in_loop = False
+        in_text_block = False
         loop_fields = []
         field_index = -1
         
         i = 0
         while i < len(lines):
             line = lines[i].strip()
+            
+            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
+            if line == ';':
+                in_text_block = not in_text_block
+                result_lines.append(lines[i])
+                i += 1
+                continue
+            
+            # Don't remove anything inside text blocks
+            if in_text_block:
+                result_lines.append(lines[i])
+                i += 1
+                continue
             
             if line.startswith('loop_'):
                 in_loop = True
@@ -1877,18 +2379,104 @@ class CIFDictionaryManager:
                 )
                 changes.extend(loop_changes)
             else:
-                # Handle simple fields - remove conflicts and add chosen one
-                for alias in alias_list:
-                    old_content = resolved_content
-                    resolved_content = self._remove_field_from_cif(resolved_content, alias)
-                    if old_content != resolved_content:
-                        changes.append(f"Removed conflicting field '{alias}'")
-                
-                # Add the chosen field with the chosen value (only for non-loop fields)
-                if chosen_value and chosen_value.strip() and chosen_value != "(loop data)":
-                    resolved_content = self._add_field_to_cif(resolved_content, chosen_field, chosen_value)
-                    changes.append(f"Added resolved field '{chosen_field}' with value '{chosen_value}'")
+                # Handle simple fields - replace in-place instead of remove and add
+                resolved_content, field_changes = self._resolve_simple_field_conflict(
+                    resolved_content, alias_list, chosen_field, chosen_value
+                )
+                changes.extend(field_changes)
         
+        return resolved_content, changes
+    
+    def _resolve_simple_field_conflict(self, cif_content: str, alias_list: List[str], 
+                                       chosen_field: str, chosen_value: str) -> Tuple[str, List[str]]:
+        """
+        Resolve conflicts for simple (non-loop) fields by replacing in-place.
+        
+        Finds the first occurrence of any alias field and replaces it with the chosen field,
+        then removes all other occurrences.
+        
+        Important: This method respects text blocks (semicolon-delimited) and will NOT
+        remove or modify field-like text within blocks such as _iucr_refine_fcf_details.
+        
+        Args:
+            cif_content: CIF file content
+            alias_list: List of conflicting field names (aliases)
+            chosen_field: The field name to use for resolution
+            chosen_value: The value to use
+            
+        Returns:
+            Tuple of (resolved_content, list_of_changes)
+        """
+        changes = []
+        lines = cif_content.split('\n')
+        result_lines = []
+        first_occurrence_replaced = False
+        fields_to_remove = set(alias_list)  # Track which fields to remove
+        in_text_block = False
+        
+        # Format the chosen value properly
+        if chosen_value and chosen_value.strip() and chosen_value != "(loop data)":
+            if ' ' in chosen_value or ',' in chosen_value or '[' in chosen_value or ']' in chosen_value or '{' in chosen_value or '}' in chosen_value:
+                if not (chosen_value.startswith("'") and chosen_value.endswith("'")):
+                    formatted_value = f"'{chosen_value}'"
+                else:
+                    formatted_value = chosen_value
+            else:
+                formatted_value = chosen_value
+        else:
+            formatted_value = "?"
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            line_stripped = line.strip()
+            
+            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
+            if line_stripped == ';':
+                in_text_block = not in_text_block
+                result_lines.append(line)
+                i += 1
+                continue
+            
+            # Don't modify anything inside text blocks
+            if in_text_block:
+                result_lines.append(line)
+                i += 1
+                continue
+            
+            # Check if this line contains any of the conflicting fields
+            found_conflict = False
+            for alias in fields_to_remove:
+                if line_stripped.startswith(alias + ' ') or line_stripped == alias:
+                    found_conflict = True
+                    
+                    if not first_occurrence_replaced:
+                        # Replace the first occurrence in-place
+                        indent = line[:len(line) - len(line.lstrip())]
+                        result_lines.append(f"{indent}{chosen_field} {formatted_value}")
+                        first_occurrence_replaced = True
+                        changes.append(f"Replaced '{alias}' with '{chosen_field}' (value: '{formatted_value}')")
+                        
+                        # Skip multiline value if present
+                        if i + 1 < len(lines) and not lines[i + 1].strip().startswith('_'):
+                            i += 1  # Skip the value line
+                    else:
+                        # Remove subsequent occurrences
+                        changes.append(f"Removed duplicate field '{alias}'")
+                        
+                        # Skip multiline value if present
+                        if i + 1 < len(lines) and not lines[i + 1].strip().startswith('_'):
+                            i += 1  # Skip the value line
+                    
+                    break  # Found and processed the conflict, move to next line
+            
+            if not found_conflict:
+                # Keep lines that are not conflicting fields
+                result_lines.append(line)
+            
+            i += 1
+        
+        resolved_content = '\n'.join(result_lines)
         return resolved_content, changes
     
     def _is_field_in_loop(self, cif_content: str, field_list: List[str]) -> bool:
@@ -1914,7 +2502,12 @@ class CIFDictionaryManager:
         return False
     
     def _resolve_loop_field_conflict(self, cif_content: str, alias_list: List[str], chosen_field: str) -> Tuple[str, List[str]]:
-        """Resolve conflicts for fields that are in loops by renaming and removing duplicates"""
+        """
+        Resolve conflicts for fields that are in loops by renaming and removing duplicates.
+        
+        Note: Loops cannot appear inside text blocks in CIF format, so text block
+        protection is not needed for this method.
+        """
         changes = []
         lines = cif_content.split('\n')
         result_lines = []
