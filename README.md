@@ -2,6 +2,9 @@
 
 **CIF Validation and Editing Tool** - A modern CIF (Crystallographic Information File) editor and validator with intelligent field checking, format conversion, and UTF-8 support.
 
+*Be advised that this software is in constant development and might therefore contain bugs or other unintended behaviour.
+Always check your CIF files carefully and if you encounter an issue and would like to report it, please do so via the [Issues](https://github.com/danielnrainer/CIVET/issues) section.*
+
 ## Key Features
 
 - **Smart Field Validation**: Visual indicators for adding (🆕), editing (✏️), and correcting (⚠️) fields
@@ -14,9 +17,10 @@
 
 ## Quick Start
 
-### Standalone Executable (Recommended)
+### Standalone Executable (Windows)
 1. Download `CIVET.exe` from releases
 2. Run directly - no Python installation required
+*NB: This might not be the most recent commit. For the latest updates, please run the python scripts.*
 
 ### From Source (Windows)
 ```bash
