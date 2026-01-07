@@ -4,6 +4,8 @@
 
 # _diffrn.ambient_temperature: Sample temperature during data collection (in K)
 _diffrn.ambient_temperature  293(5)
+_diffrn.ambient_temperature  175(5)
+_diffrn.ambient_temperature  100(5)
 
 # _diffrn.ambient_environment: Sample environment during measurement
 _diffrn.ambient_environment  vacuum  # options: vacuum, helium, nitrogen, air
@@ -48,13 +50,20 @@ _diffrn_measurement.device_make  'Rigaku XtaLAB Synergy-ED'
 _diffrn_measurement.method  'continuous rotation electron diffraction'  # options: 'continuous rotation electron diffraction', 'serial electron diffraction'
 
 # _diffrn_measurement.specimen_support: Grid details (or equivalent)
-_diffrn_measurement.specimen_support  'lacey carbon copper grid, 200 mesh'
+_diffrn_measurement.specimen_support  'lacey carbon coated copper TEM grid, 200 mesh'
+_diffrn_measurement.specimen_support  'holey carbon coated copper TEM grid, 200 mesh'
+_diffrn_measurement.specimen_support  'continuous carbon coated copper TEM grid, 200 mesh'
 
 # _exptl.special_details: holder make and T-control if applicable (lack of different CIF field)
+_exptl.special_details  'JEOL TEM holder with high-tilt retainer'
 _exptl.special_details  'Gatan Elsa cryo-transfer holder model 698. Temperature controller model 1905'
+_exptl.special_details  'SimpleOrigin Model 217 variable temperature dual grid cryo transfer holder. Temperature controller model 300'
+_exptl.special_details  'SimpleOrigin Model 216 variable temperature cryogenic inert gas/vacuum transfer holder. Temperature controller model 300'
 
 # _exptl_crystal.preparation: Sample preparation method
-_exptl_crystal.preparation  'suspension in ethanol, dropcast on grid, evaporation in air'
+_exptl_crystal.preparation  'sample ground between glass slides, grid dabbed in solid'
+_exptl_crystal.preparation  'sample ground with mortar and pestle, grid dabbed in solid'
+_exptl_crystal.preparation  'suspension in ethanol, sonicate for 5 min, dropcast on grid, evaporate in air at rt'
 
 # _exptl.crystals_number: Number of crystals used
 _exptl.crystals_number  1

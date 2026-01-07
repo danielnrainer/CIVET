@@ -661,7 +661,7 @@ class CIFEditor(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
 
-    def check_line(self, prefix, default_value=None, multiline=False, description=""):
+    def check_line(self, prefix, default_value=None, multiline=False, description="", suggestions=None):
         """Check and potentially update a CIF field value."""
         removable_chars = "'"
         lines = self.text_editor.toPlainText().splitlines()
@@ -682,7 +682,7 @@ class CIFEditor(QMainWindow):
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value, operation_type=operation_type)
+                    current_value, default_value, operation_type=operation_type, suggestions=suggestions)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
@@ -694,14 +694,14 @@ class CIFEditor(QMainWindow):
 
         QMessageBox.warning(self, "Line Not Found",
                           f"The line starting with '{prefix}' was not found.")
-        return self.add_missing_line(prefix, lines, default_value, multiline, description)
+        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
 
-    def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description=""):
+    def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description="", suggestions=None):
         """Add a missing CIF field with value."""
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
             f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
-            default_value if default_value else "", default_value, operation_type="add")
+            default_value if default_value else "", default_value, operation_type="add", suggestions=suggestions)
         
         if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
             return result
@@ -732,7 +732,7 @@ class CIFEditor(QMainWindow):
         self.text_editor.setText("\n".join(lines))
         return result    
     
-    def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None):
+    def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None, suggestions=None):
         """Check and potentially update a CIF field value with configuration options."""
         if config is None:
             config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
@@ -792,7 +792,7 @@ class CIFEditor(QMainWindow):
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
                     f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value, operation_type=operation_type)
+                    current_value, default_value, operation_type=operation_type, suggestions=suggestions)
                 
                 if result in [CIFInputDialog.RESULT_ABORT, CIFInputDialog.RESULT_STOP_SAVE]:
                     return result
@@ -804,11 +804,11 @@ class CIFEditor(QMainWindow):
         
         # Field not found - handle missing field
         if not field_found:
-            return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config)
+            return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config, suggestions)
         
         return QDialog.DialogCode.Accepted
     
-    def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None):
+    def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None, suggestions=None):
         """Add a missing CIF field with value, respecting configuration options."""
         if config is None:
             config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
@@ -837,7 +837,7 @@ class CIFEditor(QMainWindow):
             return QDialog.DialogCode.Accepted
         
         # Otherwise, use the normal missing line dialog
-        return self.add_missing_line(prefix, lines, default_value, multiline, description)
+        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
     
     def _replace_deprecated_field(self, deprecated_field, modern_field):
         """Replace a deprecated field with its modern equivalent in the CIF content and create deprecated section"""
@@ -1311,7 +1311,8 @@ class CIFEditor(QMainWindow):
                     field_def.default_value,
                     False,
                     field_def.description,
-                    config
+                    config,
+                    getattr(field_def, 'suggestions', None)
                 )
                 
                 if result == RESULT_ABORT:

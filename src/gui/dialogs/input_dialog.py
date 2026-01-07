@@ -1,6 +1,6 @@
 """CIF Input Dialog for field editing."""
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPalette
 
@@ -11,10 +11,11 @@ class CIFInputDialog(QDialog):
     RESULT_STOP_SAVE = 3  # User wants to stop but save changes
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
-    def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit"):
+    def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit", suggestions=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.default_value = default_value
+        self.suggestions = suggestions or []
         
         # Set background color based on operation type
         self.set_dialog_color(operation_type)
@@ -44,6 +45,19 @@ class CIFInputDialog(QDialog):
             label.setText(text.decode('utf-8'))
         layout.addWidget(label)
         
+        # Add dropdown suggestions (if provided) above the input field
+        if self.suggestions:
+            self.dropdown = QComboBox(self)
+            self.dropdown.addItems(self.suggestions)
+            # Try to pre-select the default or current value if present
+            preselect_value = str(value) if value else str(default_value) if default_value is not None else None
+            if preselect_value and preselect_value in self.suggestions:
+                self.dropdown.setCurrentText(preselect_value)
+            self.dropdown.currentTextChanged.connect(self.apply_dropdown_selection)
+            layout.addWidget(self.dropdown)
+        else:
+            self.dropdown = None
+
         # Add input field
         self.inputField = QLineEdit(self)
         # Ensure UTF-8 text handling
@@ -51,6 +65,9 @@ class CIFInputDialog(QDialog):
             self.inputField.setText(value.decode('utf-8'))
         else:
             self.inputField.setText(str(value))
+        # If a dropdown exists and no initial value is set, default to the current dropdown selection
+        if self.dropdown and not str(value):
+            self.inputField.setText(self.dropdown.currentText())
         layout.addWidget(self.inputField)
         
         # Add buttons
@@ -135,6 +152,10 @@ class CIFInputDialog(QDialog):
 
     def getValue(self):
         return self.inputField.text()
+
+    def apply_dropdown_selection(self, selected_text):
+        """Update the text field when a dropdown option is chosen."""
+        self.inputField.setText(selected_text)
         
     def abort_changes(self):
         self.done(self.RESULT_ABORT)
@@ -146,7 +167,7 @@ class CIFInputDialog(QDialog):
         self.done(self.RESULT_USE_DEFAULT)
 
     @staticmethod
-    def getText(parent, title, text, value="", default_value=None, operation_type="edit"):
+    def getText(parent, title, text, value="", default_value=None, operation_type="edit", suggestions=None):
         # Check if the value contains newlines (multiline)
         if '\n' in str(value):
             # Use multiline dialog for multiline values
@@ -215,7 +236,7 @@ class CIFInputDialog(QDialog):
                 return None, QDialog.DialogCode.Rejected
         else:
             # Use single-line dialog for single-line values
-            dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type)
+            dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type, suggestions)
             result = dialog.exec()
             
             if result == QDialog.DialogCode.Accepted:

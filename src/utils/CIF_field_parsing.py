@@ -4,11 +4,12 @@
 
 class CIFField:
     """Class representing a CIF field definition."""
-    def __init__(self, name, default_value, description="", action="CHECK"):
+    def __init__(self, name, default_value, description="", action="CHECK", suggestions=None):
         self.name = name
         self.default_value = default_value
         self.description = description
         self.action = action  # "CHECK", "DELETE", or "EDIT"
+        self.suggestions = suggestions or []
 
 def load_cif_field_rules(filepath):
     """Load CIF field rules from a CIF-style file.
@@ -30,6 +31,8 @@ def load_cif_field_rules(filepath):
     try:
         all_fields = []
         descriptions = {}
+        field_map = {}
+        field_order = []
         
         # First pass: collect descriptions from comments
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -48,7 +51,7 @@ def load_cif_field_rules(filepath):
                         field_name = value_part.split()[0].strip()
                         descriptions[field_name] = comment_part.strip()
         
-        # Second pass: collect field definitions
+        # Second pass: collect field definitions and aggregate suggestions
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
@@ -65,8 +68,6 @@ def load_cif_field_rules(filepath):
                 
                 # Detect action type (DELETE:, EDIT:, or default CHECK)
                 action = "CHECK"
-                original_line = line
-                
                 if line.upper().startswith('DELETE:'):
                     action = "DELETE"
                     line = line[7:].strip()  # Remove "DELETE:" prefix
@@ -78,11 +79,11 @@ def load_cif_field_rules(filepath):
                 if action == "DELETE":
                     if line.startswith('_'):
                         field = line
-                        value = ""  # No value needed for deletion
-                        description = descriptions.get(field, comment_desc)
-                        if comment_desc and not description:
-                            description = comment_desc
-                        all_fields.append(CIFField(field, value, description, action))
+                        description = descriptions.get(field, comment_desc) or comment_desc
+                        if field not in field_map:
+                            field_obj = CIFField(field, "", description, action, [])
+                            field_map[field] = field_obj
+                            field_order.append(field)
                     continue
                 
                 # For CHECK and EDIT actions, we need field and value
@@ -90,7 +91,6 @@ def load_cif_field_rules(filepath):
                 if len(parts) < 1:
                     continue
                 elif len(parts) == 1:
-                    # Only field name provided
                     field = parts[0]
                     value = ""
                 else:
@@ -100,19 +100,32 @@ def load_cif_field_rules(filepath):
                 if not field.startswith('_'):
                     continue
                 
-                description = descriptions.get(field, comment_desc)
-                if comment_desc and not description:
-                    description = comment_desc
-                    
+                description = descriptions.get(field, comment_desc) or comment_desc
+                
                 # Add options to description if present in comments
-                if 'options:' in description.lower():
+                if description and 'options:' in description.lower():
                     options_idx = description.lower().find('options:')
                     options_text = description[options_idx:].strip()
                     description = f"{description[:options_idx].strip()}\n{options_text}"
                 
-                # Create a CIFField object with the appropriate action
-                all_fields.append(CIFField(field, value, description, action))
+                # Aggregate repeated fields into suggestions for dropdowns
+                existing = field_map.get(field)
+                if existing and existing.action == "CHECK" and action == "CHECK":
+                    if value and value not in existing.suggestions:
+                        existing.suggestions.append(value)
+                    if not existing.default_value and value:
+                        existing.default_value = value
+                    if not existing.description and description:
+                        existing.description = description
+                else:
+                    suggestions = [value] if value else []
+                    field_obj = CIFField(field, value, description, action, suggestions)
+                    field_map[field] = field_obj
+                    field_order.append(field)
                 
+        # Preserve file order while returning aggregated fields
+        for field_name in field_order:
+            all_fields.append(field_map[field_name])
         return all_fields
     except Exception as e:
         print(f"Error loading CIF field definitions: {e}")

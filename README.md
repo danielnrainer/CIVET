@@ -19,6 +19,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **Dictionary Management**: Multi-dictionary support with automatic content-based suggestions
 - **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, HP, or custom)
 - **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
+- **Guided Suggestions**: Dropdown menu to select from several suggested values (if specified in the cif_rules)
 
 ## Quick Start
 
@@ -63,6 +64,7 @@ python CIVET/src/main.py
 ### Data Quality Improvements
 - **Malformed field detection**: Automatically identifies and fixes incorrectly formatted field names (e.g., `_diffrn_total_exposure_time` → `_diffrn.total_exposure_time`)
 - **Pre-check cleanup**: Optional automated correction before field validation to prevent duplicates
+- **Dropdown suggestions**: Multiple recommended values in `.cif_rules` now surface as selectable options before editing
 
 ### User Experience
 - **Color-coded dialogs**: Green (matches default), blue (new field), orange (differs from default)
