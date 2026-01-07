@@ -1771,6 +1771,8 @@ class CIFEditor(QMainWindow):
                 format_name = "legacy"
             
             if fixed_content != content:
+                # Ensure CIF2 header is present (per IUCr CIF2 specification)
+                fixed_content = self._ensure_cif2_header(fixed_content)
                 self.text_editor.setText(fixed_content)
                 self.modified = True
                 self.current_cif_version = target_version
@@ -2322,6 +2324,8 @@ class CIFEditor(QMainWindow):
                 fixed_content, changes = self.dict_manager.fix_malformed_fields_in_content(content, malformed)
                 
                 if changes:
+                    # Ensure CIF2 header is present (per IUCr CIF2 specification)
+                    fixed_content = self._ensure_cif2_header(fixed_content)
                     self.text_editor.setText(fixed_content)
                     self.modified = True
                     
