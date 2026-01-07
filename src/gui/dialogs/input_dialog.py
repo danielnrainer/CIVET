@@ -47,12 +47,28 @@ class CIFInputDialog(QDialog):
         
         # Add dropdown suggestions (if provided) above the input field
         if self.suggestions:
+            current_value = str(value).strip() if value else ""
+            default_str = str(default_value).strip() if default_value is not None else ""
+            dropdown_items = []
+            
+            # Build dropdown list with markers in order: default first, suggestions, then current CIF value
+            for item in self.suggestions:
+                if default_str and item == default_str:
+                    # Mark the default value
+                    dropdown_items.append(f"{item} [default value]")
+                else:
+                    dropdown_items.append(item)
+            
+            # Add current CIF value at the end if it's not already in suggestions
+            if current_value and current_value not in self.suggestions:
+                dropdown_items.append(f"{current_value} [current CIF value]")
+            
             self.dropdown = QComboBox(self)
-            self.dropdown.addItems(self.suggestions)
-            # Try to pre-select the default or current value if present
-            preselect_value = str(value) if value else str(default_value) if default_value is not None else None
-            if preselect_value and preselect_value in self.suggestions:
-                self.dropdown.setCurrentText(preselect_value)
+            self.dropdown.addItems(dropdown_items)
+            
+            # Always preselect the first item (default value)
+            self.dropdown.setCurrentIndex(0)
+            
             self.dropdown.currentTextChanged.connect(self.apply_dropdown_selection)
             layout.addWidget(self.dropdown)
         else:
@@ -65,9 +81,7 @@ class CIFInputDialog(QDialog):
             self.inputField.setText(value.decode('utf-8'))
         else:
             self.inputField.setText(str(value))
-        # If a dropdown exists and no initial value is set, default to the current dropdown selection
-        if self.dropdown and not str(value):
-            self.inputField.setText(self.dropdown.currentText())
+        # Don't override with dropdown selection - keep the current CIF value in the text field
         layout.addWidget(self.inputField)
         
         # Add buttons
@@ -155,6 +169,11 @@ class CIFInputDialog(QDialog):
 
     def apply_dropdown_selection(self, selected_text):
         """Update the text field when a dropdown option is chosen."""
+        # Strip markers if present
+        if " [default value]" in selected_text:
+            selected_text = selected_text.replace(" [default value]", "")
+        if " [current CIF value]" in selected_text:
+            selected_text = selected_text.replace(" [current CIF value]", "")
         self.inputField.setText(selected_text)
         
     def abort_changes(self):

@@ -21,7 +21,7 @@ from PyQt6.QtGui import QFont, QIcon
 
 # Add parent directories to path to import from utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory, AutoFixType
+from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory, AutoFixType, CIFFormatAnalyzer
 
 
 class IssueTreeWidget(QTreeWidget):
@@ -380,8 +380,23 @@ class FieldRulesValidationDialog(QDialog):
         self.cif1_radio.toggled.connect(self.on_format_changed)
         self.cif2_radio.toggled.connect(self.on_format_changed)
         
-        # Set default format after signals are connected
-        self.cif2_radio.setChecked(True)
+        # Set default format based on validation result or analyze rules content
+        if hasattr(self.validation_result, 'target_format_used'):
+            if self.validation_result.target_format_used == "legacy":
+                self.cif1_radio.setChecked(True)
+            else:
+                self.cif2_radio.setChecked(True)
+        else:
+            # Analyze the provided rules content to choose a sensible default
+            try:
+                rules_format = CIFFormatAnalyzer.analyze_cif_format(self.field_rules_content)
+                if rules_format == "legacy":
+                    self.cif1_radio.setChecked(True)
+                else:
+                    self.cif2_radio.setChecked(True)
+            except Exception:
+                # Fallback if analysis fails
+                self.cif2_radio.setChecked(True)
         
         self.setLayout(layout)
         

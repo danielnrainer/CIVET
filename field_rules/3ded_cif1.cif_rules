@@ -8,7 +8,9 @@ _diffrn_ambient_temperature  175(5)
 _diffrn_ambient_temperature  100(5)
 
 # _cell_measurement_temperature: Sample temperature during data collection (in K)
-_cell_measurement_temperature  293(5)
+_diffrn_ambient_temperature  293(5)
+_diffrn_ambient_temperature  175(5)
+_diffrn_ambient_temperature  100(5)
 
 # _diffrn_ambient_environment: Sample environment during measurement
 _diffrn_ambient_environment  vacuum  # options: vacuum, helium, nitrogen, air

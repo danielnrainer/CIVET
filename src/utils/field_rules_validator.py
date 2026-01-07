@@ -63,7 +63,8 @@ class ValidationResult:
     issues: List[ValidationIssue]
     total_fields: int
     unique_fields: int
-    cif_format_detected: str  # "legacy", "modern", "Mixed"
+    cif_format_detected: str  # "legacy", "modern", "Mixed" - format of the CIF file
+    target_format_used: str = "modern"  # The actual target format used for validation
     
     @property
     def has_issues(self) -> bool:
@@ -189,11 +190,20 @@ class FieldRulesValidator:
         # Extract fields from rules file
         def_fields = self._extract_fields_from_content(field_rules_content)
         
-        # Determine target format
+        # Auto-detect the actual format of the rules file itself
+        rules_format = CIFFormatAnalyzer.analyze_cif_format(field_rules_content)
+        
+        # If target format is "modern" but rules file is legacy or mixed, use legacy
+        # Mixed files often contain modern-only ED fields alongside legacy fields,
+        # so defaulting to legacy avoids false positives for fields without equivalents
+        if target_format == "modern" and rules_format in ("legacy", "Mixed"):
+            target_format = "legacy"
+        
+        # Determine CIF format if provided
         if cif_content:
             cif_format = CIFFormatAnalyzer.analyze_cif_format(cif_content)
         else:
-            cif_format = "legacy"  # Default if no CIF provided
+            cif_format = target_format  # Use target format as detected format
         
         # Find all issues
         issues = []
@@ -218,7 +228,8 @@ class FieldRulesValidator:
             issues=issues,
             total_fields=len(def_fields),
             unique_fields=len(set(def_fields)),
-            cif_format_detected=cif_format
+            cif_format_detected=cif_format,
+            target_format_used=target_format
         )
     
     def _extract_fields_from_content(self, content: str) -> List[str]:
@@ -274,7 +285,7 @@ class FieldRulesValidator:
                         issue_type=IssueType.MIXED_FORMAT,
                         category=IssueCategory.MIXED_FORMAT,
                         field_names=[field],
-                        description=f"Field {field} is in {field_format} format, but based on the current CIF file {preferred_format} is preferred",
+                        description=f"Field {field} is in {field_format} format, but {preferred_format} is the preferred target format",
                         suggested_fix=suggested_fix,
                         auto_fix_type=auto_fix_type
                     ))
@@ -363,7 +374,14 @@ class FieldRulesValidator:
         """Find fields that are deprecated and suggest modern replacements"""
         issues = []
         
+        # Load checkCIF compatibility fields to exclude from deprecated warnings
+        checkcif_compat_fields = self._load_checkcif_compatibility_fields()
+        
         for field in fields:
+            # Skip fields that are in the checkCIF compatibility list
+            if field in checkcif_compat_fields:
+                continue
+                
             if self.dict_manager.is_field_deprecated(field):
                 # Get the non-deprecated replacement (prefer CIF2 for field rules)
                 modern_replacement = self.dict_manager.get_modern_equivalent(field, prefer_format="modern")
@@ -388,6 +406,31 @@ class FieldRulesValidator:
                     ))
         
         return issues
+    
+    def _load_checkcif_compatibility_fields(self) -> Set[str]:
+        """Load fields from checkcif_compatibility.cif_rules to exclude from deprecated warnings"""
+        try:
+            from .cif_dictionary_manager import get_resource_path
+            import os
+            
+            compat_file = os.path.join(get_resource_path('field_rules'), 'checkcif_compatibility.cif_rules')
+            if not os.path.exists(compat_file):
+                return set()
+            
+            compat_fields = set()
+            with open(compat_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith('#'):
+                        continue
+                    # Extract field name (should start with underscore)
+                    if line.startswith('_'):
+                        compat_fields.add(line.split()[0])  # Get first token
+            
+            return compat_fields
+        except Exception:
+            return set()
     
     def _find_unknown_field_issues(self, fields: List[str]) -> List[ValidationIssue]:
         """Find fields that are not recognized by any dictionary"""

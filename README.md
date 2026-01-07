@@ -20,6 +20,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, HP, or custom)
 - **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
 - **Guided Suggestions**: Dropdown menu to select from several suggested values (if specified in the cif_rules)
+- **Legacy-Aware Rules Validation**: Automatically treats legacy or mixed `.cif_rules` as legacy when validating standalone files; respects checkCIF compatibility fields.
 
 ## Quick Start
 
@@ -70,6 +71,7 @@ python CIVET/src/main.py
 - **Color-coded dialogs**: Green (matches default), blue (new field), orange (differs from default)
 - **Enhanced button labels**: Clearer action descriptions in dialogs
 - **Improved workflow**: Integrated malformed field fixing in validation checks
+	- Validation dialog initializes format based on the rules file’s detected target (legacy for legacy/mixed).
 
 ## Building Executable
 ```bash
