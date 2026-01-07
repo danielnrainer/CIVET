@@ -20,7 +20,8 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, HP, or custom)
 - **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
 - **Guided Suggestions**: Dropdown menu to select from several suggested values (if specified in the cif_rules)
-- **Legacy-Aware Rules Validation**: Automatically treats legacy or mixed `.cif_rules` as legacy when validating standalone files; respects checkCIF compatibility fields.
+- **Legacy-Aware Rules Validation**: Automatically treats legacy or mixed `.cif_rules` as legacy when validating standalone files; respects checkCIF compatibility fields
+- **CIF2 Compliance**: Auto-adds `#\#CIF_2.0` header on save; both underscore and dot notations are valid CIF2
 
 ## Quick Start
 
@@ -62,16 +63,25 @@ python CIVET/src/main.py
 
 ## Recent Enhancements (v2.2.0)
 
+### CIF2 Compliance
+- **CIF2 header auto-add**: Automatically inserts `#\#CIF_2.0` header when saving files that don't have one
+- **Verified CIF2 specification**: Both underscore (`_cell_length_a`) and dot (`_cell.length_a`) notations are valid CIF2 data names per IUCr specification
+
 ### Data Quality Improvements
 - **Malformed field detection**: Automatically identifies and fixes incorrectly formatted field names (e.g., `_diffrn_total_exposure_time` → `_diffrn.total_exposure_time`)
 - **Pre-check cleanup**: Optional automated correction before field validation to prevent duplicates
-- **Dropdown suggestions**: Multiple recommended values in `.cif_rules` now surface as selectable options before editing
+- **Dropdown suggestions**: Multiple recommended values in `.cif_rules` now surface as selectable options with markers (`[default value]`, `[current CIF value]`)
 
 ### User Experience
 - **Color-coded dialogs**: Green (matches default), blue (new field), orange (differs from default)
 - **Enhanced button labels**: Clearer action descriptions in dialogs
 - **Improved workflow**: Integrated malformed field fixing in validation checks
-	- Validation dialog initializes format based on the rules file’s detected target (legacy for legacy/mixed).
+- **Legacy-aware validation**: Validation dialog initializes format based on the rules file's detected target (legacy for legacy/mixed)
+- **CheckCIF compatibility**: Fields in `checkcif_compatibility.cif_rules` excluded from deprecation warnings
+
+### Format Conversion Warnings
+- **Modern format warning**: Users selecting modern (dot notation) format are warned about potential checkCIF compatibility issues
+- **"Don't show again" option**: Warning can be suppressed via checkbox preference
 
 ## Building Executable
 ```bash

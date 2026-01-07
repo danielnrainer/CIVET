@@ -13,6 +13,8 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QFontMetrics
 from typing import List, Optional
 from utils.cif_dictionary_manager import CIFVersion
+# TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
+from utils.format_compatibility_warning import show_modern_format_warning
 
 
 class FormatConversionDialog(QDialog):
@@ -248,6 +250,12 @@ class FormatConversionDialog(QDialog):
     
     def accept_conversion(self):
         """User chose to convert to modern format"""
+        # TEMPORARY: Show warning about modern format compatibility
+        if not show_modern_format_warning(self, "CIF format conversion"):
+            # User chose to use legacy instead
+            self.keep_original()
+            return
+        
         self.user_choice = 'convert'
         self.accept()
     

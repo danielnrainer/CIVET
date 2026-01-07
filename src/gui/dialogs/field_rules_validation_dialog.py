@@ -22,6 +22,8 @@ from PyQt6.QtGui import QFont, QIcon
 # Add parent directories to path to import from utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory, AutoFixType, CIFFormatAnalyzer
+# TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
+from utils.format_compatibility_warning import show_modern_format_warning
 
 
 class IssueTreeWidget(QTreeWidget):
@@ -641,6 +643,15 @@ class FieldRulesValidationDialog(QDialog):
             hasattr(self, 'validator') and hasattr(self, 'issues_tree')):
             # Re-run validation with the new target format
             target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
+            
+            # TEMPORARY: Show warning when selecting modern format
+            if target_format == "modern":
+                if not show_modern_format_warning(self, "field rules validation"):
+                    # User chose to use legacy instead - switch back
+                    self.cif1_radio.blockSignals(True)
+                    self.cif1_radio.setChecked(True)
+                    self.cif1_radio.blockSignals(False)
+                    return
             
             # Create a new validation result with the new target format
             new_validation_result = self.validator.validate_field_rules(

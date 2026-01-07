@@ -15,6 +15,8 @@ from utils.CIF_parser import CIFParser, CIFField
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
+# TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
+from utils.format_compatibility_warning import show_modern_format_warning
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
@@ -647,10 +649,38 @@ class CIFEditor(QMainWindow):
             
         return errors
 
+    def _ensure_cif2_header(self, content: str) -> str:
+        """Ensure CIF2 header is present at the start of content.
+        
+        The CIF2 specification requires files to begin with #\\#CIF_2.0
+        Both underscore (_cell_length_a) and dot (_cell.length_a) notations
+        are valid CIF2 data names.
+        """
+        lines = content.split('\n')
+        # Check first few lines for existing header
+        for i, line in enumerate(lines[:5]):
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                return content  # Already has CIF2 header
+            if stripped.startswith('#\\#CIF_1'):
+                # Replace CIF1 header with CIF2
+                lines[i] = '#\\#CIF_2.0'
+                return '\n'.join(lines)
+            if stripped.startswith('data_'):
+                # Found data block before any header - insert CIF2 header
+                lines.insert(i, '#\\#CIF_2.0')
+                lines.insert(i + 1, '')
+                return '\n'.join(lines)
+        
+        # No header found - add at start
+        return '#\\#CIF_2.0\n\n' + content
+
     def save_to_file(self, filepath):
         try:
             with open(filepath, "w", encoding="utf-8") as file:
                 content = self.text_editor.toPlainText().strip()
+                # Ensure CIF2 header is present (per IUCr CIF2 specification)
+                content = self._ensure_cif2_header(content)
                 file.write(content)
             self.current_file = filepath
             self.modified = False
@@ -1676,6 +1706,10 @@ class CIFEditor(QMainWindow):
         if not content.strip():
             QMessageBox.information(self, "No Content", "Please open a CIF file first.")
             return
+        
+        # TEMPORARY: Show warning about modern format compatibility
+        if not show_modern_format_warning(self, "CIF format conversion"):
+            return  # User chose not to proceed
         
         try:
             converted_content, changes = self.format_converter.convert_to_cif2(content)
