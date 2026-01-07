@@ -28,3 +28,4 @@ dist/
 *.txt
 .gitignore
 
+COPILOT_INSTRUCTIONS.md

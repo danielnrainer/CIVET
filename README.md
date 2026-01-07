@@ -2,6 +2,11 @@
 
 **CIF Validation and Editing Tool** - A modern CIF (Crystallographic Information File) editor and validator with intelligent field checking, format conversion, and UTF-8 support.
 
+
+_Disclaimer_\
+The code in this project has been written in large parts by Anthropic LLM models (mainly Sonnet 4.5 and Opus 4.5).
+
+
 ## Key Features
 
 - **Smart Field Validation**: Visual indicators for adding (🆕), editing (✏️), and correcting (⚠️) fields
@@ -14,10 +19,6 @@
 
 ## Quick Start
 
-### Standalone Executable (Recommended)
-1. Download `CIVET.exe` from releases
-2. Run directly - no Python installation required
-
 ### From Source (Windows)
 ```bash
 git clone https://github.com/danielnrainer/CIVET.git
@@ -25,6 +26,10 @@ cd CIVET
 pip install -r requirements.txt
 python src/main.py
 ```
+
+### Standalone Executable (Windows)
+1. Download `CIVET.exe` from releases
+2. Run directly - no Python installation required
 
 ### From source (Linux)
 
@@ -50,18 +55,16 @@ source CIVET/civet_virtual/bin/activate
 python CIVET/src/main.py
 ```
 
-## Recent Enhancements (v2.1.0)
+## Recent Enhancements (v2.2.0)
 
-### Enhanced User Experience
-- **Color-coded dialogs**: Green (add), blue (edit), orange (differs from default)
-- **Multiline editing**: Proper display and editing of complex field values
-- **Confirmation dialogs**: Prevents accidental formatting changes
-- **Current file display**: Shows filename in window title
+### Data Quality Improvements
+- **Malformed field detection**: Automatically identifies and fixes incorrectly formatted field names (e.g., `_diffrn_total_exposure_time` → `_diffrn.total_exposure_time`)
+- **Pre-check cleanup**: Optional automated correction before field validation to prevent duplicates
 
-### Technical Improvements
-- **Complete UTF-8 support**: All text operations now handle Unicode properly
-- **Improved field parsing**: Better handling of multi-line and next-line field values
-- **Enhanced dialog system**: Context information preserved in all dialogs
+### User Experience
+- **Color-coded dialogs**: Green (matches default), blue (new field), orange (differs from default)
+- **Enhanced button labels**: Clearer action descriptions in dialogs
+- **Improved workflow**: Integrated malformed field fixing in validation checks
 
 ## Building Executable
 ```bash
@@ -78,7 +81,7 @@ _space_group_name_H-M_alt 'P 1' # Space group
 _diffrn_ambient_temperature 293 # Temperature in K
 ```
 
-Built-in sets: **3DED** (electron diffraction), **HP** (high-pressure)
+Built-in sets: **3DED** (electron diffraction)
 
 ## System Requirements
 - **Executable**: Windows 10/11 (64-bit)

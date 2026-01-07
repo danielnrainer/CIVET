@@ -64,7 +64,7 @@ class CIFInputDialog(QDialog):
         
         # Add "Use Default" button only if default value is provided
         if default_value is not None and default_value.strip():
-            useDefaultButton = QPushButton(f"Use Default ({default_value})")
+            useDefaultButton = QPushButton(f"Use suggested (default) value")
             useDefaultButton.clicked.connect(self.use_default)
             buttonBox.addWidget(useDefaultButton)
         

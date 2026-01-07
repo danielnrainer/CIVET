@@ -998,6 +998,129 @@ class CIFDictionaryManager:
         
         return known_fields.get(field_name.lower())
     
+    def find_malformed_fields(self, content: str) -> List[Dict[str, str]]:
+        """
+        Find malformed field names that look like incorrectly formatted versions 
+        of known dictionary fields.
+        
+        This detects fields like '_diffrn_total_exposure_time' which should be 
+        '_diffrn.total_exposure_time'. These are unknown fields that can be 
+        automatically corrected by converting underscores to dots.
+        
+        Args:
+            content: CIF file content
+            
+        Returns:
+            List of dictionaries with:
+                - 'original': The malformed field name as found in the CIF
+                - 'suggested': The correct field name from the dictionary
+                - 'line_number': Line number where the field appears
+                - 'line_content': Full line content
+        """
+        self._ensure_loaded()
+        malformed_fields = []
+        lines = content.splitlines()
+        
+        for line_num, line in enumerate(lines, 1):
+            line_stripped = line.strip()
+            
+            # Skip empty lines, comments, and non-field lines
+            if not line_stripped or line_stripped.startswith('#'):
+                continue
+            if not line_stripped.startswith('_'):
+                continue
+            
+            # Extract field name (first token)
+            parts = line_stripped.split(maxsplit=1)
+            field_name = parts[0]
+            
+            # Skip if field is already known
+            if self.is_known_field(field_name):
+                continue
+            
+            # Skip if already has a dot (CIF2 format) - those are either valid or truly unknown
+            if '.' in field_name:
+                continue
+            
+            # Try to guess the correct modern name by converting underscore to dot
+            # Strategy: Try placing the dot after each underscore and check if known
+            suggestion = self._guess_modern_equivalent(field_name)
+            
+            if suggestion:
+                malformed_fields.append({
+                    'original': field_name,
+                    'suggested': suggestion,
+                    'line_number': line_num,
+                    'line_content': line_stripped
+                })
+        
+        return malformed_fields
+    
+    def _guess_modern_equivalent(self, field_name: str) -> Optional[str]:
+        """
+        Try to guess the correct modern (dot notation) equivalent of a malformed field.
+        
+        For a field like '_diffrn_total_exposure_time', tries:
+            - '_diffrn.total_exposure_time' (most likely)
+            - '_diffrn_total.exposure_time'
+            - '_diffrn_total_exposure.time'
+        
+        Args:
+            field_name: Malformed field name (underscore only, no dots)
+            
+        Returns:
+            The correct modern field name if found, None otherwise
+        """
+        if not field_name.startswith('_'):
+            return None
+        
+        # Remove leading underscore for processing
+        name_without_prefix = field_name[1:]
+        parts = name_without_prefix.split('_')
+        
+        if len(parts) < 2:
+            return None
+        
+        # Try placing a dot after each underscore position
+        for i in range(1, len(parts)):
+            category = '_'.join(parts[:i])
+            attribute = '_'.join(parts[i:])
+            guessed_name = f"_{category}.{attribute}"
+            
+            # Check if this guessed name exists in the dictionary
+            if self.is_known_field(guessed_name):
+                return guessed_name
+        
+        return None
+    
+    def fix_malformed_fields_in_content(self, content: str, fixes: List[Dict[str, str]]) -> Tuple[str, List[str]]:
+        """
+        Apply malformed field fixes to CIF content.
+        
+        Args:
+            content: Original CIF content
+            fixes: List of fix dictionaries from find_malformed_fields()
+            
+        Returns:
+            Tuple of (fixed_content, list_of_changes)
+        """
+        lines = content.splitlines()
+        changes = []
+        
+        # Sort fixes by line number in reverse order to avoid index shifting
+        fixes_sorted = sorted(fixes, key=lambda x: x['line_number'], reverse=True)
+        
+        for fix in fixes_sorted:
+            line_idx = fix['line_number'] - 1  # Convert to 0-indexed
+            if 0 <= line_idx < len(lines):
+                original_line = lines[line_idx]
+                # Replace the malformed field name with the correct one
+                new_line = original_line.replace(fix['original'], fix['suggested'], 1)
+                lines[line_idx] = new_line
+                changes.append(f"Line {fix['line_number']}: {fix['original']} → {fix['suggested']}")
+        
+        return '\n'.join(lines), changes
+
     def validate_mixed_cif(self, content: str) -> Dict[str, Any]:
         """
         Validate a potentially mixed CIF file and identify issues.

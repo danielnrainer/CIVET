@@ -11,13 +11,14 @@ class CheckConfigDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Check Configuration")
         self.setModal(True)
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(500)
         
         # Initialize configuration settings
         self.auto_fill_missing = False
         self.skip_matching_defaults = False
         self.reformat_after_checks = False
         self.check_duplicates_aliases = True  # Enabled by default
+        self.fix_malformed_fields = True  # Enabled by default - new option
         
         self.init_ui()
     
@@ -35,6 +36,21 @@ class CheckConfigDialog(QDialog):
         )
         description_label.setWordWrap(True)
         layout.addWidget(description_label)
+        
+        # Create pre-check cleanup group
+        cleanup_group = QGroupBox("Pre-Check Cleanup")
+        cleanup_layout = QVBoxLayout(cleanup_group)
+        
+        # Option: Fix malformed field names (ENABLED BY DEFAULT)
+        self.fix_malformed_checkbox = QCheckBox(
+            "Fix malformed field names (RECOMMENDED)\n"
+            "(Correct fields like _diffrn_total_exposure_time → _diffrn.total_exposure_time)"
+        )
+        self.fix_malformed_checkbox.setChecked(self.fix_malformed_fields)
+        self.fix_malformed_checkbox.setStyleSheet("font-weight: bold;")
+        cleanup_layout.addWidget(self.fix_malformed_checkbox)
+        
+        layout.addWidget(cleanup_group)
         
         # Create configuration group
         config_group = QGroupBox("Checking Options")
@@ -93,6 +109,7 @@ class CheckConfigDialog(QDialog):
     def get_config(self):
         """Get the current configuration settings."""
         return {
+            'fix_malformed_fields': self.fix_malformed_checkbox.isChecked(),
             'auto_fill_missing': self.auto_fill_checkbox.isChecked(),
             'skip_matching_defaults': self.skip_defaults_checkbox.isChecked(),
             'reformat_after_checks': self.reformat_checkbox.isChecked(),

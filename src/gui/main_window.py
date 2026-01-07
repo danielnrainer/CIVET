@@ -247,6 +247,10 @@ class CIFEditor(QMainWindow):
         resolve_aliases_action = format_menu.addAction("Resolve Field Aliases")
         resolve_aliases_action.triggered.connect(self.standardize_cif_fields)
         
+        fix_malformed_action = format_menu.addAction("Fix Malformed Field Names...")
+        fix_malformed_action.triggered.connect(self.fix_malformed_field_names)
+        fix_malformed_action.setToolTip("Detect and fix incorrectly formatted field names like _diffrn_total_exposure_time → _diffrn.total_exposure_time")
+        
         check_deprecated_action = format_menu.addAction("Check Deprecated Fields")
         check_deprecated_action.triggered.connect(self.check_deprecated_fields)
         
@@ -1136,6 +1140,13 @@ class CIFEditor(QMainWindow):
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
+        # PRE-CHECK STEP: Fix malformed field names (if enabled)
+        if config.get('fix_malformed_fields', True):
+            malformed_fix_success = self._fix_malformed_fields_before_checks()
+            if not malformed_fix_success:
+                # User may have aborted, but we continue unless they explicitly cancelled
+                pass
+        
         # Single field set processing
         success = self._process_single_field_set(config, initial_state)
         if not success:
@@ -1153,6 +1164,60 @@ class CIFEditor(QMainWindow):
         
         self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+
+    def _fix_malformed_fields_before_checks(self) -> bool:
+        """
+        Check for and fix malformed field names before running field checks.
+        
+        Returns:
+            True if processing completed (fixes applied or none needed),
+            False if user explicitly cancelled
+        """
+        try:
+            content = self.text_editor.toPlainText()
+            malformed = self.dict_manager.find_malformed_fields(content)
+            
+            if not malformed:
+                return True  # No malformed fields, continue
+            
+            # Build summary
+            summary = f"Found {len(malformed)} malformed field name(s) that should be fixed:\n\n"
+            for item in malformed[:5]:  # Show first 5
+                summary += f"• {item['original']} → {item['suggested']}\n"
+            if len(malformed) > 5:
+                summary += f"• ... and {len(malformed) - 5} more\n"
+            
+            summary += "\nThese fields use incorrect underscore-only format. "
+            summary += "Fixing them will prevent duplicates when the correct fields are added during checks.\n\n"
+            summary += "Would you like to fix these field names now?"
+            
+            reply = QMessageBox.question(
+                self,
+                "Fix Malformed Field Names",
+                summary,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Cancel:
+                return False  # User cancelled the entire operation
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                fixed_content, changes = self.dict_manager.fix_malformed_fields_in_content(content, malformed)
+                if changes:
+                    self.text_editor.setText(fixed_content)
+                    self.modified = True
+            
+            return True  # Continue with checks (whether fixed or not)
+            
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Malformed Field Check Error",
+                f"An error occurred while checking for malformed fields:\n{str(e)}\n\n"
+                "Continuing with field checks..."
+            )
+            return True  # Continue despite error
 
     def _process_single_field_set(self, config, initial_state):
         """Process a single field set (3DED, HP, or Custom)."""
@@ -2168,6 +2233,79 @@ class CIFEditor(QMainWindow):
                 f"An error occurred while modernizing deprecated fields:\n{str(e)}"
             )
             return False
+
+    def fix_malformed_field_names(self):
+        """
+        Detect and fix malformed field names that look like incorrectly formatted 
+        versions of known dictionary fields.
+        
+        For example: _diffrn_total_exposure_time → _diffrn.total_exposure_time
+        
+        These fields arise when data processing software outputs field names 
+        using only underscores instead of the correct category.attribute format.
+        """
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+        
+        try:
+            # Find malformed fields
+            malformed = self.dict_manager.find_malformed_fields(content)
+            
+            if not malformed:
+                QMessageBox.information(
+                    self, 
+                    "No Malformed Fields Found",
+                    "No incorrectly formatted field names were detected.\n\n"
+                    "All unknown fields in this CIF file are either:\n"
+                    "• Valid dictionary fields\n"
+                    "• Truly custom/unknown fields that cannot be automatically corrected"
+                )
+                return
+            
+            # Build a summary of what was found
+            summary = f"Found {len(malformed)} malformed field name(s):\n\n"
+            for item in malformed:
+                summary += f"• Line {item['line_number']}: {item['original']}\n"
+                summary += f"  → Should be: {item['suggested']}\n\n"
+            
+            summary += "These fields use incorrect underscore-only format instead of the proper category.attribute format.\n\n"
+            summary += "Would you like to fix all of these field names?"
+            
+            # Ask user to confirm
+            reply = QMessageBox.question(
+                self,
+                "Fix Malformed Field Names",
+                summary,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Apply fixes
+                fixed_content, changes = self.dict_manager.fix_malformed_fields_in_content(content, malformed)
+                
+                if changes:
+                    self.text_editor.setText(fixed_content)
+                    self.modified = True
+                    
+                    change_summary = f"Fixed {len(changes)} malformed field name(s):\n\n"
+                    change_summary += "\n".join(f"• {change}" for change in changes[:10])
+                    if len(changes) > 10:
+                        change_summary += f"\n• ... and {len(changes) - 10} more"
+                    
+                    QMessageBox.information(self, "Malformed Fields Fixed", change_summary)
+                else:
+                    QMessageBox.information(self, "No Changes Made", 
+                                          "No changes were applied.")
+                    
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Fixing Malformed Fields",
+                f"An error occurred while fixing malformed field names:\n{str(e)}"
+            )
 
     def check_deprecated_fields(self):
         """Check for deprecated fields in the current CIF file and offer to replace them"""

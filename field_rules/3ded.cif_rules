@@ -122,7 +122,7 @@ _refine_ls.sample_shape_expression  .
 # _refine_ls.sample_shape_details: Further details on how the sample shape/thickness are approximated
 _refine_ls.sample_shape_details    .
 
-# _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2
+# _diffrn.flux_density: Beam flux density, for electrons in e-/Å^2/s
 _diffrn.flux_density  ?
 
 # _diffrn.total_dose: Total electron dose in MGy, probably not sensible unless crystal volume known
