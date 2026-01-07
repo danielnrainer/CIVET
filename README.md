@@ -7,6 +7,9 @@ _Disclaimer_\
 The code in this project has been written in large parts by Anthropic LLM models (mainly Sonnet 4.5 and Opus 4.5).
 
 
+*Be advised that this software is in constant development and might therefore contain bugs or other unintended behaviour.
+Always check your CIF files carefully and if you encounter an issue and would like to report it, please do so via the [Issues](https://github.com/danielnrainer/CIVET/issues) section.*
+
 ## Key Features
 
 - **Smart Field Validation**: Visual indicators for adding (🆕), editing (✏️), and correcting (⚠️) fields
