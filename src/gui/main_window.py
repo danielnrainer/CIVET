@@ -1303,7 +1303,7 @@ class CIFEditor(QMainWindow):
             content = self.text_editor.toPlainText()
             self.cif_parser.parse_file(content)
             
-            # For custom sets, handle DELETE/EDIT operations first
+            # For custom sets, handle DELETE/EDIT/APPEND operations first
             if self.current_field_set == 'Custom':
                 current_content = content
                 operations_applied = []
@@ -1322,8 +1322,14 @@ class CIFEditor(QMainWindow):
                             if edited:
                                 operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
                                 current_content = '\n'.join(lines)
+                        elif field_def.action == 'APPEND':
+                            lines = current_content.splitlines()
+                            lines, appended = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
+                            if appended:
+                                operations_applied.append(f"APPENDED to {field_def.name}")
+                                current_content = '\n'.join(lines)
                 
-                # Update content after DELETE/EDIT operations
+                # Update content after DELETE/EDIT/APPEND operations
                 if operations_applied:
                     self.text_editor.setText(current_content)
                     ops_summary = '\n'.join(operations_applied)
@@ -1332,8 +1338,8 @@ class CIFEditor(QMainWindow):
             
             # Process CHECK actions (standard field checking)
             for field_def in fields:
-                # Skip DELETE/EDIT actions as they're already processed
-                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT']:
+                # Skip DELETE/EDIT/APPEND actions as they're already processed
+                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT', 'APPEND']:
                     continue
                     
                 result = self.check_line_with_config(

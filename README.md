@@ -93,9 +93,15 @@ pyinstaller CIVET.spec
 Create validation rules using `.cif_rules` files:
 ```
 # Example custom field rules
-_chemical_formula_sum ? # Chemical formula
-_space_group_name_H-M_alt 'P 1' # Space group
-_diffrn_ambient_temperature 293 # Temperature in K
+_chemical_formula_sum         ?        # Chemical formula
+_space_group_name_H-M_alt     'P 1'    # Space group
+_diffrn_ambient_temperature   293      # Temperature in K
+
+# Special actions:
+DELETE: _field_to_remove           # Removes field from CIF
+EDIT: _field_name new_value        # Replaces field value
+APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  # Appends to multiline field
+    Multiple APPEND entries (in the same .cif_rules file) for the same CIF field (data name) will be concatenated 
 ```
 
 Built-in sets: **3DED** (electron diffraction)
