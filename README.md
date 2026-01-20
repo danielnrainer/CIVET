@@ -61,7 +61,7 @@ source CIVET/civet_virtual/bin/activate
 python CIVET/src/main.py
 ```
 
-## Recent Enhancements (v2.2.0)
+## Recent Enhancements (v1.1)
 
 ### CIF2 Compliance
 - **CIF2 header auto-add**: Automatically inserts `#\#CIF_2.0` header when saving files that don't have one
@@ -117,5 +117,6 @@ BSD Clause License - see [LICENSE](LICENSE)
 ```
 CIVET - CIF Validation and Editing Tool
 GitHub: https://github.com/danielnrainer/CIVET
+Zenodo: https://doi.org/10.5281/zenodo.17328490
 ```
 

@@ -26,6 +26,9 @@ a = Analysis(
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file
         ('README.md', '.'),                                    # Include readme file
+        
+        # Version information
+        ('src/version.py', '.'),                               # Version module for About dialog
     ],
     hiddenimports=[
         # PyQt6 core modules - Essential for GUI functionality
@@ -49,6 +52,8 @@ a = Analysis(
         'gui.dialogs.dictionary_suggestion_dialog',  # New dictionary suggestion dialog
         'gui.dialogs.field_rules_validation_dialog', # New field validation dialog
         'gui.dialogs.format_conversion_dialog',      # New format conversion dialog
+        'gui.dialogs.about_dialog',                  # About dialog
+        'version',                                   # Version information module
         
         # Utility modules - Core functionality
         'utils',
@@ -125,5 +130,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='civet.ico'  # CIVET application icon
+    icon='civet.ico'                      # CIVET application icon
 )

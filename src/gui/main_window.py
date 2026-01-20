@@ -25,6 +25,7 @@ from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
 from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
 from .dialogs.format_conversion_dialog import suggest_format_conversion
 from .dialogs.critical_issues_dialog import CriticalIssuesDialog
+from .dialogs.about_dialog import AboutDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -332,6 +333,12 @@ class CIFEditor(QMainWindow):
         # Field definition validation
         validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
         validate_field_defs_action.triggered.connect(self.validate_field_rules)
+        
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+        
+        about_action = help_menu.addAction("About CIVET...")
+        about_action.triggered.connect(self.show_about_dialog)
         
         # Enable undo/redo
         self.text_editor.setUndoRedoEnabled(True)
@@ -2619,6 +2626,18 @@ class CIFEditor(QMainWindow):
             print(f"Dictionary info dialog error: {error_details}")
             QMessageBox.critical(self, "Error", 
                                f"Failed to show dictionary information:\n{str(e)}\n\nCheck console for details.")
+    
+    def show_about_dialog(self):
+        """Show the About dialog with version and credits."""
+        try:
+            dialog = AboutDialog(self)
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"About dialog error: {error_details}")
+            QMessageBox.critical(self, "Error", 
+                               f"Failed to show About dialog:\n{str(e)}")
     
     def suggest_dictionaries(self):
         """Analyze current CIF content and suggest relevant dictionaries."""
