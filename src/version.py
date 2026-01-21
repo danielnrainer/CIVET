@@ -23,7 +23,7 @@ APP_COPYRIGHT = "Copyright © 2025 Daniel N. Rainer"
 
 # Repository and citation information
 GITHUB_URL = "https://github.com/danielnrainer/CIVET"
-ZENODO_DOI = "10.5281/zenodo.17328490"  # Update with actual DOI when available
+ZENODO_DOI = "10.5281/zenodo.17328490"
 ZENODO_URL = f"https://doi.org/{ZENODO_DOI}"
 
 # For Windows version info (used by PyInstaller)

@@ -1189,3 +1189,295 @@ class CIFParser:
         total_length = len(field_name) + 4 + len(formatted_value)  # 4 spaces for formatting
         
         return total_length > 80
+
+
+def _get_civet_signature() -> str:
+    """Get the CIVET signature string for audit fields."""
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    try:
+        from version import __version__, APP_NAME, APP_AUTHOR, GITHUB_URL
+    except ImportError:
+        __version__ = "unknown"
+        APP_NAME = "CIVET"
+        APP_AUTHOR = "Daniel N. Rainer"
+        GITHUB_URL = "https://github.com/danielnrainer/CIVET"
+    return f"\n{APP_NAME} v{__version__} ({APP_AUTHOR}, {GITHUB_URL})"
+
+
+def _find_audit_field(lines: list, field_names: list) -> tuple:
+    """
+    Find an audit field in content, checking both modern and legacy notation.
+    
+    Args:
+        lines: List of content lines
+        field_names: List of possible field names (e.g., ['_audit.creation_method', '_audit_creation_method'])
+    
+    Returns:
+        Tuple of (field_line_index, is_multiline, actual_field_name) or (-1, False, None) if not found
+    """
+    for i, line in enumerate(lines):
+        line_lower = line.strip().lower()
+        for field_name in field_names:
+            if line_lower.startswith(field_name.lower()):
+                # Check if next non-empty line is semicolon (multiline)
+                is_multiline = False
+                if i + 1 < len(lines) and lines[i + 1].strip() == ';':
+                    is_multiline = True
+                return (i, is_multiline, field_name)
+    return (-1, False, None)
+
+
+def _detect_cif_format_simple(content: str) -> str:
+    """
+    Simple fallback detection of CIF format when CIFDictionaryManager is not available.
+    
+    This is a simplified version - callers with access to CIFDictionaryManager should
+    use dict_manager.detect_cif_format() and pass the result to avoid duplication.
+    
+    Returns:
+        'modern' if dot notation found, 'legacy' otherwise
+    """
+    # Check for common modern-format fields (fields with dot notation)
+    if re.search(r'_[a-zA-Z]+\.[a-zA-Z]', content):
+        return 'modern'
+    return 'legacy'
+
+
+def update_audit_creation_method(content: str, cif_format: str = None) -> str:
+    """
+    Update _audit_creation_method (or _audit.creation_method) to include CIVET information.
+    
+    Handles both modern (dot) and legacy (underscore) notation.
+    If the field exists and is multiline, appends CIVET signature.
+    If the field exists as single-line, converts to multiline and appends.
+    If the field doesn't exist, creates it using the detected format.
+    
+    Args:
+        content: CIF file content
+        cif_format: Optional. 'modern' or 'legacy'. If not provided, auto-detects.
+                   Callers with CIFDictionaryManager should use dict_manager.detect_cif_format()
+                   and pass the result here.
+        
+    Returns:
+        Updated content with CIVET info in _audit_creation_method
+    """
+    civet_signature = _get_civet_signature()
+    lines = content.split('\n')
+    
+    # Field name variants (modern first, then legacy)
+    method_fields = ['_audit.creation_method', '_audit_creation_method']
+    date_fields = ['_audit.creation_date', '_audit_creation_date']
+    
+    # Detect format to use for new fields (use provided or auto-detect)
+    if cif_format is None:
+        cif_format = _detect_cif_format_simple(content)
+    else:
+        cif_format = cif_format.lower()  # Normalize to lowercase
+    
+    # Check if CIVET is already mentioned anywhere in the audit method field
+    field_line_index, is_multiline, found_field_name = _find_audit_field(lines, method_fields)
+    
+    if field_line_index >= 0:
+        # Check if CIVET already present in this field
+        in_field = False
+        for i, line in enumerate(lines):
+            if i == field_line_index:
+                # Check single-line value
+                if 'civet' in line.lower():
+                    return content
+                in_field = True
+            elif in_field:
+                if line.strip() == ';' and i > field_line_index + 1:
+                    break  # End of multiline
+                if 'civet' in line.lower():
+                    return content
+                if not is_multiline:
+                    break  # Single line, stop after checking
+    
+    result_lines = []
+    
+    if field_line_index >= 0 and is_multiline:
+        # Append to existing multiline field
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            result_lines.append(line)
+            
+            if i == field_line_index:
+                i += 1
+                # Copy opening semicolon
+                if i < len(lines):
+                    result_lines.append(lines[i])
+                    i += 1
+                
+                # Copy content until closing semicolon, then append
+                while i < len(lines):
+                    if lines[i].strip() == ';':
+                        # Append CIVET signature before closing semicolon
+                        result_lines.append(civet_signature)
+                        result_lines.append(lines[i])  # Closing semicolon
+                        i += 1
+                        break
+                    else:
+                        result_lines.append(lines[i])
+                        i += 1
+                continue
+            
+            i += 1
+    
+    elif field_line_index >= 0 and not is_multiline:
+        # Convert single-line to multiline and append
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            if i == field_line_index:
+                # Extract existing value using the actual field name found
+                pattern = rf'^{re.escape(found_field_name)}\s+(.+)$'
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    existing_value = match.group(1).strip().strip("'\"")
+                    # Convert to multiline format, keeping original field name
+                    result_lines.append(found_field_name)
+                    result_lines.append(';')
+                    result_lines.append(existing_value)
+                    result_lines.append(civet_signature)
+                    result_lines.append(';')
+                else:
+                    result_lines.append(line)
+            else:
+                result_lines.append(line)
+            
+            i += 1
+    
+    else:
+        # Field doesn't exist - create it
+        result_lines = lines[:]
+        
+        # Determine field name based on detected format
+        new_field_name = '_audit.creation_method' if cif_format == 'modern' else '_audit_creation_method'
+        
+        # Find insertion point (after _audit_creation_date or after data_ block)
+        insert_index = None
+        date_line_index, date_is_multiline, _ = _find_audit_field(result_lines, date_fields)
+        
+        if date_line_index >= 0:
+            insert_index = date_line_index + 1
+            # Skip value line(s)
+            if date_is_multiline:
+                insert_index += 1  # Skip opening semicolon
+                while insert_index < len(result_lines) and result_lines[insert_index].strip() != ';':
+                    insert_index += 1
+                if insert_index < len(result_lines):
+                    insert_index += 1  # Skip closing semicolon
+            else:
+                # Single line - value is on same line, just move past
+                pass
+        else:
+            # Find data_ block
+            for idx, line in enumerate(result_lines):
+                if line.strip().lower().startswith('data_'):
+                    insert_index = idx + 1
+                    break
+        
+        if insert_index is None:
+            insert_index = 1  # After first line
+        
+        # Insert new field as multiline
+        new_field_lines = [
+            new_field_name,
+            ';',
+            civet_signature,
+            ';'
+        ]
+        for j, new_line in enumerate(new_field_lines):
+            result_lines.insert(insert_index + j, new_line)
+    
+    return '\n'.join(result_lines)
+
+
+def update_audit_creation_date(content: str, cif_format: str = None) -> str:
+    """
+    Update _audit_creation_date (or _audit.creation_date) to the current date.
+    
+    Handles both modern (dot) and legacy (underscore) notation.
+    If the field exists, updates its value.
+    If the field doesn't exist, creates it using the detected format.
+    
+    Args:
+        content: CIF file content
+        cif_format: Optional. 'modern' or 'legacy'. If not provided, auto-detects.
+                   Callers with CIFDictionaryManager should use dict_manager.detect_cif_format()
+                   and pass the result here.
+        
+    Returns:
+        Updated content with current date in _audit_creation_date
+    """
+    from datetime import date
+    
+    today = date.today().isoformat()  # Format: YYYY-MM-DD
+    lines = content.split('\n')
+    
+    # Field name variants
+    date_fields = ['_audit.creation_date', '_audit_creation_date']
+    
+    # Detect format for new fields (use provided or auto-detect)
+    if cif_format is None:
+        cif_format = _detect_cif_format_simple(content)
+    else:
+        cif_format = cif_format.lower()  # Normalize to lowercase
+    
+    # Find existing field
+    field_line_index, is_multiline, found_field_name = _find_audit_field(lines, date_fields)
+    
+    result_lines = []
+    
+    if field_line_index >= 0:
+        # Update existing field
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            if i == field_line_index:
+                if is_multiline:
+                    # Replace multiline with single line
+                    result_lines.append(f"{found_field_name} {today}")
+                    i += 1
+                    # Skip the multiline content
+                    if i < len(lines) and lines[i].strip() == ';':
+                        i += 1  # Skip opening semicolon
+                        while i < len(lines) and lines[i].strip() != ';':
+                            i += 1
+                        if i < len(lines):
+                            i += 1  # Skip closing semicolon
+                    continue
+                else:
+                    # Replace single-line value
+                    result_lines.append(f"{found_field_name} {today}")
+            else:
+                result_lines.append(line)
+            
+            i += 1
+    else:
+        # Field doesn't exist - create it
+        result_lines = lines[:]
+        
+        # Determine field name based on detected format
+        new_field_name = '_audit.creation_date' if cif_format == 'modern' else '_audit_creation_date'
+        
+        # Find insertion point (after data_ block)
+        insert_index = None
+        for idx, line in enumerate(result_lines):
+            if line.strip().lower().startswith('data_'):
+                insert_index = idx + 1
+                break
+        
+        if insert_index is None:
+            insert_index = 1  # After first line
+        
+        # Insert new field as single line
+        result_lines.insert(insert_index, f"{new_field_name} {today}")
+    
+    return '\n'.join(result_lines)

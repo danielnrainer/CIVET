@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Dict, List, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker
-from utils.CIF_parser import CIFParser, CIFField
+from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, update_audit_creation_date
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
@@ -688,6 +688,12 @@ class CIFEditor(QMainWindow):
                 content = self.text_editor.toPlainText().strip()
                 # Ensure CIF2 header is present (per IUCr CIF2 specification)
                 content = self._ensure_cif2_header(content)
+                # Detect CIF format using existing dict_manager
+                cif_format = self.dict_manager.detect_cif_format(content)
+                # Update _audit_creation_date to current date (only on save)
+                content = update_audit_creation_date(content, cif_format)
+                # Update _audit_creation_method to include CIVET info
+                content = update_audit_creation_method(content, cif_format)
                 file.write(content)
             self.current_file = filepath
             self.modified = False
@@ -1194,6 +1200,14 @@ class CIFEditor(QMainWindow):
             duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
             if not duplicate_check_success:
                 return  # User aborted or there was an error
+        
+        # Update _audit_creation_method to include CIVET info after successful checks
+        content = self.text_editor.toPlainText()
+        cif_format = self.dict_manager.detect_cif_format(content)
+        updated_content = update_audit_creation_method(content, cif_format)
+        if updated_content != content:
+            self.text_editor.setText(updated_content)
+            self.modified = True
         
         # If we get here, checks completed successfully
         if config.get('reformat_after_checks', False):
