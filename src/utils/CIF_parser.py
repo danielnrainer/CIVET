@@ -466,7 +466,10 @@ class CIFParser:
         return loop, i - start_index
     
     def _parse_data_line(self, line: str) -> List[str]:
-        """Parse a line of data values, handling quoted strings properly."""
+        """Parse a line of data values, handling quoted and triple-quoted strings properly.
+        
+        Handles CIF2 triple-quoted strings (''' and \""") as well as single-quoted strings.
+        """
         values = []
         i = 0
         
@@ -478,8 +481,23 @@ class CIFParser:
             if i >= len(line):
                 break
             
-            # Handle quoted strings
-            if line[i] in ("'", '"'):
+            # Check for triple-quoted strings (CIF2)
+            if i + 2 < len(line) and line[i] in ("'", '"') and line[i:i+3] in ("'''", '"""'):
+                triple_quote = line[i:i+3]
+                i += 3  # Skip opening triple quote
+                value = ""
+                
+                # Find closing triple quote
+                while i < len(line):
+                    if i + 2 < len(line) and line[i:i+3] == triple_quote:
+                        i += 3  # Skip closing triple quote
+                        break
+                    value += line[i]
+                    i += 1
+                
+                values.append(value)
+            # Handle single/double quoted strings
+            elif line[i] in ("'", '"'):
                 quote_char = line[i]
                 i += 1  # Skip opening quote
                 value = ""

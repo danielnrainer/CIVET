@@ -15,10 +15,14 @@ from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, 
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
+from utils.data_name_validator import DataNameValidator, FieldCategory
+from utils.registered_prefixes import get_config_directory, ensure_config_directory, get_prefix_data_source
+from utils.cif2_value_formatting import format_cif2_value, is_multiline, needs_quoting
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
 from utils.format_compatibility_warning import show_modern_format_warning
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
                      RESULT_ABORT, RESULT_STOP_SAVE)
+from .dialogs.data_name_validation_dialog import DataNameValidationDialog
 from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
 from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
@@ -26,6 +30,7 @@ from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
 from .dialogs.format_conversion_dialog import suggest_format_conversion
 from .dialogs.critical_issues_dialog import CriticalIssuesDialog
 from .dialogs.about_dialog import AboutDialog
+from .dialogs.recognised_prefixes_dialog import RecognisedPrefixesDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 
 
@@ -59,7 +64,17 @@ class CIFEditor(QMainWindow):
         self.custom_field_rules_file = None
         self.current_field_set = '3DED'  # Default to 3DED
         
+        # Initialize data name validator
+        self.data_name_validator = DataNameValidator(self.dict_manager)
+        
         self.init_ui()
+        
+        # Set up syntax highlighter field validator callback
+        def _field_validator_callback(field_name: str) -> str:
+            result = self.data_name_validator.validate_field(field_name)
+            return result.category.value
+        self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
+        
         self.update_dictionary_status()
         self.select_initial_file()
 
@@ -227,6 +242,12 @@ class CIFEditor(QMainWindow):
         
         format_action = action_menu.addAction("Reformat File")
         format_action.triggered.connect(self.reformat_file)
+        
+        action_menu.addSeparator()
+        
+        validate_names_action = action_menu.addAction("Validate Data Names...")
+        validate_names_action.triggered.connect(self.validate_data_names)
+        validate_names_action.setToolTip("Validate all data names against loaded dictionaries and registered prefixes")
 
         # CIF Format menu
         format_menu = menubar.addMenu("CIF Format")
@@ -334,6 +355,18 @@ class CIFEditor(QMainWindow):
         validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
         validate_field_defs_action.triggered.connect(self.validate_field_rules)
         
+        settings_menu.addSeparator()
+        
+        # Config directory access
+        open_config_action = settings_menu.addAction("Open Config Directory...")
+        open_config_action.triggered.connect(self.open_config_directory)
+        
+        reload_prefixes_action = settings_menu.addAction("Reload Prefix Configuration")
+        reload_prefixes_action.triggered.connect(self.reload_prefix_configuration)
+        
+        show_prefixes_action = settings_menu.addAction("View Recognised Prefixes...")
+        show_prefixes_action.triggered.connect(self.show_recognised_prefixes)
+        
         # Help menu
         help_menu = menubar.addMenu("Help")
         
@@ -398,106 +431,128 @@ class CIFEditor(QMainWindow):
         # No value found
         return ""
 
-    def update_field_value(self, lines, field_index, field_name, new_value):
-        """Update the value for a CIF field, handling cases where value might be on next line or in semicolon blocks."""
-        removable_chars = "'"
-        current_line = lines[field_index]
+    def _format_cif_value_for_line(self, value: str) -> str:
+        """
+        Format a single-line CIF value with proper quoting for CIF2.
         
-        # Check if current line has a value
+        Handles CIF2 special characters [ ] { } which require quoting.
+        
+        Args:
+            value: The raw value to format
+            
+        Returns:
+            Properly formatted/quoted value for inclusion on a single line
+        """
+        if not value:
+            return "''"
+        
+        # Use the CIF2 formatting utility
+        formatted = format_cif2_value(value, prefer_triple_quotes=False)
+        
+        # If the formatter returns a semicolon block, we need to handle separately
+        if formatted.startswith(';'):
+            # Shouldn't happen for single-line, but use quotes as fallback
+            return f"'{value}'"
+        
+        return formatted
+    
+    def _insert_multiline_value(self, lines: list, insert_after_index: int, value: str) -> int:
+        """
+        Insert a multiline value as a semicolon-delimited block.
+        
+        Args:
+            lines: The list of lines to modify
+            insert_after_index: Index after which to insert the block
+            value: The multiline value content
+            
+        Returns:
+            Number of lines inserted
+        """
+        value_lines = value.split('\n')
+        semicolon_lines = [';'] + value_lines + [';']
+        for i, line in enumerate(semicolon_lines):
+            lines.insert(insert_after_index + 1 + i, line)
+        return len(semicolon_lines)
+
+    def update_field_value(self, lines, field_index, field_name, new_value):
+        """
+        Update the value for a CIF field, handling various value formats.
+        
+        Properly handles:
+        - Single-line values (with CIF2-compliant quoting for [ ] { })
+        - Multiline semicolon-delimited values
+        - Values on the same line or next line
+        """
+        # Strip outer quotes from the new value if present
+        stripped_value = new_value.strip()
+        if (stripped_value.startswith("'") and stripped_value.endswith("'")) or \
+           (stripped_value.startswith('"') and stripped_value.endswith('"')):
+            stripped_value = stripped_value[1:-1]
+        
+        current_line = lines[field_index]
         line_parts = current_line.split()
+        is_value_multiline = is_multiline(stripped_value)
+        
         if len(line_parts) > 1:
             # Value is on the same line as field name
-            stripped_value = new_value.strip(removable_chars)
-            if ' ' in stripped_value or ',' in stripped_value or '\n' in stripped_value:
-                # If value contains spaces, commas, or newlines, use quotes or semicolons
-                if '\n' in stripped_value:
-                    # Multiline value - use semicolon format
-                    lines[field_index] = field_name
-                    # Insert semicolon block after current line
-                    semicolon_lines = [';'] + stripped_value.split('\n') + [';']
-                    for i, semicolon_line in enumerate(semicolon_lines):
-                        lines.insert(field_index + 1 + i, semicolon_line)
-                else:
-                    # Single line with spaces/commas - use quotes
-                    formatted_value = f"'{stripped_value}'"
-                    lines[field_index] = f"{field_name} {formatted_value}"
+            if is_value_multiline:
+                # Convert to semicolon format
+                lines[field_index] = field_name
+                self._insert_multiline_value(lines, field_index, stripped_value)
             else:
-                # Simple value without spaces
-                lines[field_index] = f"{field_name} {stripped_value}"
+                # Single line value - use proper CIF2 quoting
+                formatted_value = self._format_cif_value_for_line(stripped_value)
+                lines[field_index] = f"{field_name} {formatted_value}"
         else:
-            # No value on same line, check if next line has value
+            # No value on same line, check next line
             if field_index + 1 < len(lines):
                 next_line = lines[field_index + 1].strip()
                 
                 if next_line == ';':
-                    # It's a semicolon-delimited multiline value - replace the entire block
-                    # Find the end of the semicolon block
+                    # Existing semicolon-delimited value - find and replace block
                     end_index = field_index + 1
                     for i in range(field_index + 2, len(lines)):
                         if lines[i].strip() == ';':
                             end_index = i
                             break
                     
-                    # Remove the old semicolon block
+                    # Remove old block
                     del lines[field_index + 1:end_index + 1]
                     
-                    # Insert new semicolon block
-                    stripped_value = new_value.strip(removable_chars)
-                    if '\n' in stripped_value:
-                        # Multiline value
-                        semicolon_lines = [';'] + stripped_value.split('\n') + [';']
+                    # Insert new value
+                    if is_value_multiline:
+                        self._insert_multiline_value(lines, field_index, stripped_value)
                     else:
-                        # Single line value
+                        # Single line - still use semicolon format if replacing a block
                         semicolon_lines = [';', stripped_value, ';']
-                    
-                    for i, semicolon_line in enumerate(semicolon_lines):
-                        lines.insert(field_index + 1 + i, semicolon_line)
+                        for i, line in enumerate(semicolon_lines):
+                            lines.insert(field_index + 1 + i, line)
                 
                 elif next_line and not next_line.startswith('_') and not next_line.startswith('#'):
-                    # Next line has a regular value, replace it
-                    stripped_value = new_value.strip(removable_chars)
-                    if '\n' in stripped_value:
-                        # Convert to semicolon format
+                    # Next line has a regular value
+                    if is_value_multiline:
+                        # Replace with semicolon format
                         lines[field_index + 1] = ';'
-                        semicolon_lines = stripped_value.split('\n') + [';']
-                        for i, semicolon_line in enumerate(semicolon_lines):
-                            lines.insert(field_index + 2 + i, semicolon_line)
+                        value_lines = stripped_value.split('\n') + [';']
+                        for i, line in enumerate(value_lines):
+                            lines.insert(field_index + 2 + i, line)
                     else:
-                        # Simple replacement
-                        if ' ' in stripped_value or ',' in stripped_value:
-                            formatted_value = f"'{stripped_value}'"
-                        else:
-                            formatted_value = stripped_value
+                        # Simple replacement with proper quoting
+                        formatted_value = self._format_cif_value_for_line(stripped_value)
                         lines[field_index + 1] = f" {formatted_value}"
                 else:
-                    # Next line doesn't have value, add value to current line
-                    stripped_value = new_value.strip(removable_chars)
-                    if '\n' in stripped_value:
-                        # Multiline value - use semicolon format
-                        semicolon_lines = [';'] + stripped_value.split('\n') + [';']
-                        for i, semicolon_line in enumerate(semicolon_lines):
-                            lines.insert(field_index + 1 + i, semicolon_line)
+                    # Next line doesn't have value, add to current or as new lines
+                    if is_value_multiline:
+                        self._insert_multiline_value(lines, field_index, stripped_value)
                     else:
-                        # Single line value
-                        if ' ' in stripped_value or ',' in stripped_value:
-                            formatted_value = f"'{stripped_value}'"
-                        else:
-                            formatted_value = stripped_value
+                        formatted_value = self._format_cif_value_for_line(stripped_value)
                         lines[field_index] = f"{field_name} {formatted_value}"
             else:
-                # No next line, add value to current line
-                stripped_value = new_value.strip(removable_chars)
-                if '\n' in stripped_value:
-                    # Multiline value - use semicolon format
-                    semicolon_lines = [';'] + stripped_value.split('\n') + [';']
-                    for i, semicolon_line in enumerate(semicolon_lines):
-                        lines.insert(field_index + 1 + i, semicolon_line)
+                # No next line
+                if is_value_multiline:
+                    self._insert_multiline_value(lines, field_index, stripped_value)
                 else:
-                    # Single line value
-                    if ' ' in stripped_value or ',' in stripped_value:
-                        formatted_value = f"'{stripped_value}'"
-                    else:
-                        formatted_value = stripped_value
+                    formatted_value = self._format_cif_value_for_line(stripped_value)
                     lines[field_index] = f"{field_name} {formatted_value}"
 
     def select_initial_file(self):
@@ -1183,7 +1238,13 @@ class CIFEditor(QMainWindow):
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
-        # PRE-CHECK STEP: Fix malformed field names (if enabled)
+        # PRE-CHECK STEP 1: Validate data names against dictionaries (if enabled)
+        if config.get('validate_data_names', True):
+            validation_success = self._validate_data_names_before_checks()
+            if not validation_success:
+                return  # User cancelled or aborted
+        
+        # PRE-CHECK STEP 2: Fix malformed field names (if enabled)
         if config.get('fix_malformed_fields', True):
             malformed_fix_success = self._fix_malformed_fields_before_checks()
             if not malformed_fix_success:
@@ -1215,6 +1276,74 @@ class CIFEditor(QMainWindow):
         
         self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+
+    def _validate_data_names_before_checks(self) -> bool:
+        """
+        Validate all data names against dictionaries before running field checks.
+        
+        Shows the validation dialog if there are unknown or deprecated fields.
+        
+        Returns:
+            True if processing completed (validation passed or user accepted),
+            False if user explicitly cancelled
+        """
+        try:
+            content = self.text_editor.toPlainText()
+            if not content.strip():
+                return True  # No content, continue
+            
+            # Clear validator cache and run validation
+            self.data_name_validator.clear_cache()
+            report = self.data_name_validator.validate_cif_content(content)
+            
+            # Check if there are any issues to report
+            has_issues = (len(report.unknown_fields) > 0 or 
+                         len(report.deprecated_fields) > 0)
+            
+            if not has_issues:
+                return True  # All fields valid, continue
+            
+            # Build a quick summary
+            issues = []
+            if report.unknown_fields:
+                issues.append(f"{len(report.unknown_fields)} unknown field(s)")
+            if report.deprecated_fields:
+                issues.append(f"{len(report.deprecated_fields)} deprecated field(s)")
+            
+            # Ask user if they want to review
+            reply = QMessageBox.question(
+                self,
+                "Data Name Validation",
+                f"Found {', '.join(issues)} in the CIF file.\n\n"
+                "Would you like to review and resolve these before continuing with checks?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Cancel:
+                return False  # User cancelled the entire operation
+            
+            if reply == QMessageBox.StandardButton.No:
+                return True  # User chose to skip validation, continue with checks
+            
+            # Show the full validation dialog
+            dialog = DataNameValidationDialog(report, self.data_name_validator, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Apply pending actions
+                self._apply_validation_actions(dialog)
+                # Rehighlight to reflect changes
+                self.text_editor.highlighter.rehighlight()
+            
+            return True  # Continue with checks
+            
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Data Name Validation Error",
+                f"An error occurred during data name validation:\n{str(e)}\n\n"
+                "Continuing with field checks..."
+            )
+            return True  # Continue despite error
 
     def _fix_malformed_fields_before_checks(self) -> bool:
         """
@@ -2561,6 +2690,15 @@ class CIFEditor(QMainWindow):
             self.dict_manager = new_dict_manager
             self.format_converter = CIFFormatConverter(self.dict_manager)
             
+            # Update data name validator with new dictionary manager
+            self.data_name_validator = DataNameValidator(self.dict_manager)
+            # Re-setup the syntax highlighter callback
+            def _field_validator_callback(field_name: str) -> str:
+                result = self.data_name_validator.validate_field(field_name)
+                return result.category.value
+            self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
+            self.cif_text_editor.highlighter.rehighlight()
+            
             # Update status displays
             self.update_dictionary_status()
             self.status_bar.showMessage(f"Successfully loaded dictionary: {os.path.basename(file_path)}", 5000)
@@ -2597,6 +2735,10 @@ class CIFEditor(QMainWindow):
             if success:
                 # Update the format converter with the enhanced dictionary manager
                 self.format_converter = CIFFormatConverter(self.dict_manager)
+                
+                # Clear data name validator cache since dictionaries changed
+                self.data_name_validator.clear_cache()
+                self.cif_text_editor.highlighter.rehighlight()
                 
                 # Update status displays
                 self.update_dictionary_status()
@@ -2652,6 +2794,149 @@ class CIFEditor(QMainWindow):
             print(f"About dialog error: {error_details}")
             QMessageBox.critical(self, "Error", 
                                f"Failed to show About dialog:\n{str(e)}")
+    
+    def validate_data_names(self):
+        """Validate all data names in the current CIF against dictionaries."""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "No CIF content to validate.")
+            return
+        
+        try:
+            # Clear validator cache and run validation
+            self.data_name_validator.clear_cache()
+            report = self.data_name_validator.validate_cif_content(content)
+            
+            # Show dialog
+            dialog = DataNameValidationDialog(report, self.data_name_validator, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Apply pending actions
+                self._apply_validation_actions(dialog)
+                # Rehighlight to reflect changes
+                self.cif_text_editor.highlighter.rehighlight()
+                
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Data name validation error: {error_details}")
+            QMessageBox.critical(self, "Validation Error", 
+                               f"Failed to validate data names:\n{str(e)}\n\nCheck console for details.")
+    
+    def _apply_validation_actions(self, dialog: DataNameValidationDialog):
+        """
+        Apply the actions from the validation dialog.
+        
+        This handles:
+        - Deleting fields marked for deletion
+        - Updating deprecated fields to their modern equivalents
+        - Correcting embedded local prefix format (e.g., _chemical_oxdiff_formula → _chemical_oxdiff.formula)
+        - The dialog already updates the validator's allowed lists
+        """
+        content = self.text_editor.toPlainText()
+        modified = False
+        
+        # Get fields to delete
+        fields_to_delete = dialog.get_fields_to_delete()
+        
+        # Get deprecated updates (old_name -> new_name)
+        deprecated_updates = dialog.get_deprecated_updates()
+        
+        # Get format corrections (old_name -> corrected_name)
+        format_corrections = dialog.get_format_corrections()
+        
+        if fields_to_delete or deprecated_updates or format_corrections:
+            lines = content.split('\n')
+            new_lines = []
+            in_multiline = False
+            skip_until_semicolon = False
+            
+            for line in lines:
+                # Handle semicolon-delimited multiline values
+                stripped = line.strip()
+                if stripped.startswith(';'):
+                    if skip_until_semicolon:
+                        # This is the closing semicolon of a deleted field
+                        skip_until_semicolon = False
+                        continue
+                    in_multiline = not in_multiline
+                    new_lines.append(line)
+                    continue
+                
+                if skip_until_semicolon:
+                    # Skip lines that are part of a deleted multiline field
+                    continue
+                
+                if in_multiline:
+                    new_lines.append(line)
+                    continue
+                
+                # Check if this line contains a field
+                if stripped.startswith('_'):
+                    parts = stripped.split(None, 1)
+                    field_name = parts[0].lower() if parts else ''
+                    
+                    # Check if field should be deleted
+                    if field_name in fields_to_delete:
+                        modified = True
+                        # Check if this is a multiline value
+                        if len(parts) == 1:
+                            # Value might be on next line - check for semicolon
+                            # We'll handle this by skipping until next non-value line
+                            continue
+                        elif parts[1].strip().startswith(';'):
+                            # Multiline value starting with semicolon
+                            skip_until_semicolon = True
+                            continue
+                        else:
+                            # Single line value, skip this line
+                            continue
+                    
+                    # Check if field should be updated (deprecated -> modern)
+                    if field_name in deprecated_updates:
+                        new_name = deprecated_updates[field_name]
+                        if len(parts) > 1:
+                            # Field has value on same line
+                            new_lines.append(f"{new_name} {parts[1]}")
+                        else:
+                            # Field name only
+                            new_lines.append(new_name)
+                        modified = True
+                        continue
+                    
+                    # Check if field should have format corrected (embedded local prefix)
+                    if field_name in format_corrections:
+                        corrected_name = format_corrections[field_name]
+                        if len(parts) > 1:
+                            # Field has value on same line
+                            new_lines.append(f"{corrected_name} {parts[1]}")
+                        else:
+                            # Field name only
+                            new_lines.append(corrected_name)
+                        modified = True
+                        continue
+                
+                new_lines.append(line)
+            
+            if modified:
+                new_content = '\n'.join(new_lines)
+                self.text_editor.setText(new_content)
+                self.modified = True
+                self.update_status_bar()
+                
+                # Show summary of changes
+                changes_summary = []
+                if fields_to_delete:
+                    changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
+                if deprecated_updates:
+                    changes_summary.append(f"Updated {len(deprecated_updates)} deprecated field(s)")
+                if format_corrections:
+                    changes_summary.append(f"Corrected format of {len(format_corrections)} field(s)")
+                
+                QMessageBox.information(
+                    self, 
+                    "Changes Applied",
+                    "The following changes were applied:\n• " + "\n• ".join(changes_summary)
+                )
     
     def suggest_dictionaries(self):
         """Analyze current CIF content and suggest relevant dictionaries."""
@@ -2798,6 +3083,110 @@ class CIFEditor(QMainWindow):
             
             if file_path:
                 self._validate_field_rules_file(file_path)
+    
+    def open_config_directory(self):
+        """
+        Open the CIVET configuration directory in the system file explorer.
+        
+        Creates the directory if it doesn't exist and shows information about
+        what configuration files can be placed there.
+        """
+        import subprocess
+        
+        try:
+            # Ensure config directory exists
+            config_dir = ensure_config_directory()
+            
+            # Open in file explorer
+            if sys.platform == 'win32':
+                os.startfile(str(config_dir))
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', str(config_dir)], check=True)
+            else:
+                subprocess.run(['xdg-open', str(config_dir)], check=True)
+            
+            # Show info about the config directory
+            prefix_source = get_prefix_data_source()
+            user_prefixes_file = config_dir / 'registered_prefixes.json'
+            
+            info_text = (
+                f"<b>Configuration Directory:</b><br>"
+                f"<code>{config_dir}</code><br><br>"
+                f"<b>Available Configuration Files:</b><br>"
+                f"• <b>registered_prefixes.json</b> - Custom CIF data name prefixes<br><br>"
+                f"<b>Current Prefix Source:</b><br>"
+                f"<code>{prefix_source}</code><br><br>"
+                f"Can also be found on the CIVET GitHub page:"
+                f"https://github.com/danielnrainer/CIVET/tree/main/dictionaries"
+            )
+            
+            if not user_prefixes_file.exists():
+                info_text += (
+                    "<b>Tip:</b> To customize registered prefixes, copy "
+                    "<code>registered_prefixes.json</code> from the application "
+                    "directory or GitHub to this config folder and edit as needed. "
+                    "Restart CIVET to apply changes."
+                )
+            else:
+                info_text += (
+                    "<b>Note:</b> Custom prefixes file detected. "
+                    "Use <i>Settings → Dictionary Information</i> to reload after editing."
+                )
+            
+            QMessageBox.information(self, "CIVET Config Directory", info_text)
+            
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Could not open config directory:\n{str(e)}"
+            )
+    
+    def reload_prefix_configuration(self):
+        """
+        Reload the registered prefixes configuration from JSON files.
+        
+        Useful after editing the registered_prefixes.json file in the config directory.
+        """
+        from utils.registered_prefixes import reload_prefix_data, get_prefix_data_source, get_registered_prefixes
+        
+        try:
+            source = reload_prefix_data()
+            prefix_count = len(get_registered_prefixes())
+            
+            # Clear the data name validator cache to use new prefixes
+            if hasattr(self, 'data_name_validator'):
+                self.data_name_validator.clear_cache()
+            
+            # Note: We don't call rehighlight() here because it can be very slow
+            # for large documents. The new prefixes will be used on the next
+            # highlighting pass (e.g., when editing or scrolling).
+            
+            QMessageBox.information(
+                self, "Prefix Configuration Reloaded",
+                f"Successfully loaded {prefix_count} registered prefixes.\n\n"
+                f"Source: {source}\n\n"
+                "Note: Syntax highlighting will update as you edit the document."
+            )
+            
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Reload Error",
+                f"Failed to reload prefix configuration:\n{str(e)}"
+            )
+    
+    def show_recognised_prefixes(self):
+        """Show dialog with all recognised CIF data name prefixes."""
+        try:
+            dialog = RecognisedPrefixesDialog(self.data_name_validator, self)
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Recognised prefixes dialog error: {error_details}")
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to show recognised prefixes dialog:\n{str(e)}"
+            )
     
     def _validate_field_rules_file(self, file_path: str):
         """Validate a specific field definition file."""

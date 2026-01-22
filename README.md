@@ -83,6 +83,20 @@ python CIVET/src/main.py
 - **Modern format warning**: Users selecting modern (dot notation) format are warned about potential checkCIF compatibility issues
 - **"Don't show again" option**: Warning can be suppressed via checkbox preference
 
+### Data Name Validation
+- **IUCr registered prefix support**: Validates CIF data names against 60+ official IUCr registered prefixes
+- **Customizable prefix list**: User-editable registered prefixes (via Settings → View Recognised Prefixes...)
+- **Validation-aware syntax highlighting**: Color-coded field names based on validation status:
+  - Blue: Valid (known in CIF dictionaries)
+  - Cyan: Registered (IUCr official prefix)
+  - Orange: Unknown (not recognized)
+  - Dark yellow with strikethrough: Deprecated
+
+### CIF2 Value Formatting
+- **Smart bracket quoting**: Automatically quotes values containing CIF2 special characters (`[`, `]`, `{`, `}`)
+- **Triple-quoted string support**: Supports `'''...'\'\'` and `"""..."""` for multiline values (CIF2 feature)
+- **Syntax highlighting**: Proper highlighting for single-line and multi-line triple-quoted strings
+
 ## Building Executable
 ```bash
 pip install pyinstaller

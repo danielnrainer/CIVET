@@ -19,6 +19,7 @@ class CheckConfigDialog(QDialog):
         self.reformat_after_checks = False
         self.check_duplicates_aliases = True  # Enabled by default
         self.fix_malformed_fields = True  # Enabled by default - new option
+        self.validate_data_names = True  # Enabled by default - validate against dictionaries
         
         self.init_ui()
     
@@ -49,6 +50,15 @@ class CheckConfigDialog(QDialog):
         self.fix_malformed_checkbox.setChecked(self.fix_malformed_fields)
         self.fix_malformed_checkbox.setStyleSheet("font-weight: bold;")
         cleanup_layout.addWidget(self.fix_malformed_checkbox)
+        
+        # Option: Validate data names against dictionaries (ENABLED BY DEFAULT)
+        self.validate_data_names_checkbox = QCheckBox(
+            "Validate data names against dictionaries (RECOMMENDED)\n"
+            "(Check all field names are valid, flag unknown/deprecated fields)"
+        )
+        self.validate_data_names_checkbox.setChecked(self.validate_data_names)
+        self.validate_data_names_checkbox.setStyleSheet("font-weight: bold;")
+        cleanup_layout.addWidget(self.validate_data_names_checkbox)
         
         layout.addWidget(cleanup_group)
         
@@ -110,6 +120,7 @@ class CheckConfigDialog(QDialog):
         """Get the current configuration settings."""
         return {
             'fix_malformed_fields': self.fix_malformed_checkbox.isChecked(),
+            'validate_data_names': self.validate_data_names_checkbox.isChecked(),
             'auto_fill_missing': self.auto_fill_checkbox.isChecked(),
             'skip_matching_defaults': self.skip_defaults_checkbox.isChecked(),
             'reformat_after_checks': self.reformat_checkbox.isChecked(),

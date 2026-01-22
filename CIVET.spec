@@ -22,6 +22,9 @@ a = Analysis(
         ('dictionaries/cif_rstr.dic', 'dictionaries'),        # SHELXL restraints dictionary
         ('dictionaries/cif_shelxl.dic', 'dictionaries'),      # SHELXL dictionary
         ('dictionaries/cif_twin.dic', 'dictionaries'),        # Twinning dictionary
+        ('dictionaries/registered_prefixes.json', 'dictionaries'),  # Registered CIF prefixes (can be customized)
+        
+        # Configuration files
         
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file

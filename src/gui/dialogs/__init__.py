@@ -4,6 +4,8 @@ from .input_dialog import CIFInputDialog
 from .multiline_dialog import MultilineInputDialog
 from .config_dialog import CheckConfigDialog
 from .about_dialog import AboutDialog
+from .data_name_validation_dialog import DataNameValidationDialog
+from .recognised_prefixes_dialog import RecognisedPrefixesDialog
 
 # Dialog result codes for consistency
 RESULT_ABORT = 2
@@ -14,6 +16,8 @@ __all__ = [
     'MultilineInputDialog', 
     'CheckConfigDialog',
     'AboutDialog',
+    'DataNameValidationDialog',
+    'RecognisedPrefixesDialog',
     'RESULT_ABORT',
     'RESULT_STOP_SAVE'
 ]

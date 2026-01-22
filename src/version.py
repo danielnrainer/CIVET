@@ -19,7 +19,7 @@ APP_NAME = "CIVET"
 APP_FULL_NAME = "CIF Validation and Editing Tool"
 APP_DESCRIPTION = "A modern desktop application for editing and validating Crystallographic Information Files (CIF)"
 APP_AUTHOR = "Daniel N. Rainer"
-APP_COPYRIGHT = "Copyright © 2025 Daniel N. Rainer"
+APP_COPYRIGHT = "Copyright © 2026 Daniel N. Rainer"
 
 # Repository and citation information
 GITHUB_URL = "https://github.com/danielnrainer/CIVET"
