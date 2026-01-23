@@ -1328,11 +1328,24 @@ class CIFEditor(QMainWindow):
             
             # Show the full validation dialog
             dialog = DataNameValidationDialog(report, self.data_name_validator, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Apply pending actions
+            
+            # Connect the changes_requested signal to apply actions and refresh
+            def on_changes_requested():
                 self._apply_validation_actions(dialog)
-                # Rehighlight to reflect changes
-                self.text_editor.highlighter.rehighlight()
+                # Clear cache and re-run validation
+                self.data_name_validator.clear_cache()
+                new_content = self.text_editor.toPlainText()
+                new_report = self.data_name_validator.validate_cif_content(new_content)
+                dialog.refresh_validation(new_report)
+            
+            dialog.changes_requested.connect(on_changes_requested)
+            
+            # Show dialog (stays open until user closes it)
+            dialog.exec()
+            
+            # If changes were applied, do final cleanup
+            if dialog.has_changes_applied():
+                self.data_name_validator.clear_cache()
             
             return True  # Continue with checks
             
@@ -2809,11 +2822,24 @@ class CIFEditor(QMainWindow):
             
             # Show dialog
             dialog = DataNameValidationDialog(report, self.data_name_validator, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Apply pending actions
+            
+            # Connect the changes_requested signal to apply actions and refresh
+            def on_changes_requested():
                 self._apply_validation_actions(dialog)
-                # Rehighlight to reflect changes
-                self.cif_text_editor.highlighter.rehighlight()
+                # Clear cache and re-run validation
+                self.data_name_validator.clear_cache()
+                new_content = self.text_editor.toPlainText()
+                new_report = self.data_name_validator.validate_cif_content(new_content)
+                dialog.refresh_validation(new_report)
+            
+            dialog.changes_requested.connect(on_changes_requested)
+            
+            # Show dialog (it will stay open until user closes it)
+            dialog.exec()
+            
+            # If any changes were applied during the session, do final cleanup
+            if dialog.has_changes_applied():
+                self.data_name_validator.clear_cache()
                 
         except Exception as e:
             import traceback

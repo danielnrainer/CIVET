@@ -10,14 +10,225 @@ from typing import Dict, List, Optional, Set
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QComboBox, QGroupBox, QWidget, QDialogButtonBox, QFrame,
-    QSizePolicy, QMessageBox
+    QSizePolicy, QMessageBox, QInputDialog, QListWidget, QListWidgetItem
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 from utils.data_name_validator import (
     ValidationReport, FieldValidationResult, FieldCategory, FieldAction, DataNameValidator
 )
+
+
+class ManagePrefixesDialog(QDialog):
+    """Dialog for managing allowed prefixes and fields."""
+    
+    def __init__(
+        self,
+        validator: DataNameValidator,
+        pending_prefixes: Set[str],
+        pending_fields: Set[str],
+        parent: Optional[QWidget] = None
+    ):
+        super().__init__(parent)
+        self.validator = validator
+        self.pending_prefixes = pending_prefixes.copy()
+        self.pending_fields = pending_fields.copy()
+        
+        # Track additions and removals
+        self.prefixes_to_add: Set[str] = set()
+        self.prefixes_to_remove: Set[str] = set()
+        self.fields_to_add: Set[str] = set()
+        self.fields_to_remove: Set[str] = set()
+        
+        self._setup_ui()
+        self._populate_lists()
+    
+    def _setup_ui(self) -> None:
+        """Build the dialog UI."""
+        self.setWindowTitle("Manage Allowed Prefixes & Fields")
+        self.setModal(True)
+        self.setMinimumSize(500, 400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Prefixes section
+        prefixes_group = QGroupBox("Allowed Prefixes")
+        prefixes_layout = QVBoxLayout(prefixes_group)
+        
+        self.prefixes_list = QListWidget()
+        self.prefixes_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        prefixes_layout.addWidget(self.prefixes_list)
+        
+        prefix_btn_layout = QHBoxLayout()
+        add_prefix_btn = QPushButton("Add Prefix...")
+        add_prefix_btn.clicked.connect(self._on_add_prefix)
+        prefix_btn_layout.addWidget(add_prefix_btn)
+        
+        self.remove_prefix_btn = QPushButton("Remove Selected")
+        self.remove_prefix_btn.clicked.connect(self._on_remove_prefix)
+        self.remove_prefix_btn.setEnabled(False)
+        prefix_btn_layout.addWidget(self.remove_prefix_btn)
+        
+        prefix_btn_layout.addStretch()
+        prefixes_layout.addLayout(prefix_btn_layout)
+        
+        layout.addWidget(prefixes_group)
+        
+        # Fields section
+        fields_group = QGroupBox("Allowed Fields")
+        fields_layout = QVBoxLayout(fields_group)
+        
+        self.fields_list = QListWidget()
+        self.fields_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        fields_layout.addWidget(self.fields_list)
+        
+        field_btn_layout = QHBoxLayout()
+        add_field_btn = QPushButton("Add Field...")
+        add_field_btn.clicked.connect(self._on_add_field)
+        field_btn_layout.addWidget(add_field_btn)
+        
+        self.remove_field_btn = QPushButton("Remove Selected")
+        self.remove_field_btn.clicked.connect(self._on_remove_field)
+        self.remove_field_btn.setEnabled(False)
+        field_btn_layout.addWidget(self.remove_field_btn)
+        
+        field_btn_layout.addStretch()
+        fields_layout.addLayout(field_btn_layout)
+        
+        layout.addWidget(fields_group)
+        
+        # Connect selection changes
+        self.prefixes_list.itemSelectionChanged.connect(self._on_prefix_selection_changed)
+        self.fields_list.itemSelectionChanged.connect(self._on_field_selection_changed)
+        
+        # Dialog buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        button_layout.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _populate_lists(self) -> None:
+        """Populate the lists with current and pending items."""
+        # Prefixes
+        self.prefixes_list.clear()
+        current_prefixes = self.validator.get_allowed_prefixes()
+        
+        for prefix in sorted(current_prefixes):
+            item = QListWidgetItem(prefix)
+            item.setData(Qt.ItemDataRole.UserRole, ("current", prefix))
+            self.prefixes_list.addItem(item)
+        
+        for prefix in sorted(self.pending_prefixes - current_prefixes):
+            item = QListWidgetItem(f"{prefix} (pending)")
+            item.setForeground(QColor("#27ae60"))
+            item.setData(Qt.ItemDataRole.UserRole, ("pending", prefix))
+            self.prefixes_list.addItem(item)
+        
+        # Fields
+        self.fields_list.clear()
+        current_fields = self.validator.get_allowed_fields()
+        
+        for field in sorted(current_fields):
+            item = QListWidgetItem(field)
+            item.setData(Qt.ItemDataRole.UserRole, ("current", field))
+            self.fields_list.addItem(item)
+        
+        for field in sorted(self.pending_fields - current_fields):
+            item = QListWidgetItem(f"{field} (pending)")
+            item.setForeground(QColor("#27ae60"))
+            item.setData(Qt.ItemDataRole.UserRole, ("pending", field))
+            self.fields_list.addItem(item)
+    
+    def _on_prefix_selection_changed(self) -> None:
+        """Enable/disable remove button based on selection."""
+        self.remove_prefix_btn.setEnabled(bool(self.prefixes_list.selectedItems()))
+    
+    def _on_field_selection_changed(self) -> None:
+        """Enable/disable remove button based on selection."""
+        self.remove_field_btn.setEnabled(bool(self.fields_list.selectedItems()))
+    
+    def _on_add_prefix(self) -> None:
+        """Add a new prefix."""
+        text, ok = QInputDialog.getText(
+            self,
+            "Add Prefix",
+            "Enter prefix name (without underscores):",
+            text=""
+        )
+        if ok and text.strip():
+            prefix = text.strip().lower().strip('_')
+            if prefix:
+                self.prefixes_to_add.add(prefix)
+                self.prefixes_to_remove.discard(prefix)
+                self.pending_prefixes.add(prefix)
+                self._populate_lists()
+    
+    def _on_remove_prefix(self) -> None:
+        """Remove the selected prefix."""
+        items = self.prefixes_list.selectedItems()
+        if items:
+            data = items[0].data(Qt.ItemDataRole.UserRole)
+            if data:
+                status, prefix = data
+                if status == "current":
+                    self.prefixes_to_remove.add(prefix)
+                else:
+                    self.pending_prefixes.discard(prefix)
+                    self.prefixes_to_add.discard(prefix)
+                self._populate_lists()
+    
+    def _on_add_field(self) -> None:
+        """Add a new field."""
+        text, ok = QInputDialog.getText(
+            self,
+            "Add Field",
+            "Enter field name (e.g., _my_custom_field):",
+            text="_"
+        )
+        if ok and text.strip():
+            field = text.strip().lower()
+            if not field.startswith('_'):
+                field = '_' + field
+            self.fields_to_add.add(field)
+            self.fields_to_remove.discard(field)
+            self.pending_fields.add(field)
+            self._populate_lists()
+    
+    def _on_remove_field(self) -> None:
+        """Remove the selected field."""
+        items = self.fields_list.selectedItems()
+        if items:
+            data = items[0].data(Qt.ItemDataRole.UserRole)
+            if data:
+                status, field = data
+                if status == "current":
+                    self.fields_to_remove.add(field)
+                else:
+                    self.pending_fields.discard(field)
+                    self.fields_to_add.discard(field)
+                self._populate_lists()
+    
+    def get_prefix_changes(self) -> tuple[Set[str], Set[str]]:
+        """Get prefix additions and removals."""
+        return self.prefixes_to_add, self.prefixes_to_remove
+    
+    def get_field_changes(self) -> tuple[Set[str], Set[str]]:
+        """Get field additions and removals."""
+        return self.fields_to_add, self.fields_to_remove
+    
+    def get_updated_pending(self) -> tuple[Set[str], Set[str]]:
+        """Get updated pending sets."""
+        return self.pending_prefixes, self.pending_fields
 
 
 class DataNameValidationDialog(QDialog):
@@ -27,7 +238,14 @@ class DataNameValidationDialog(QDialog):
     This dialog shows categorized validation results (valid, registered local,
     unknown, deprecated fields) and allows users to take actions on each field
     such as allowing prefixes, deleting fields, or updating deprecated fields.
+    
+    The dialog supports applying changes without closing - it emits the
+    changes_requested signal, and the caller should apply changes and call
+    refresh_validation() with the new report to update the dialog contents.
     """
+    
+    # Emitted when user clicks "Apply Changes" - caller should apply and call refresh_validation()
+    changes_requested = pyqtSignal()
     
     # Category display configuration
     CATEGORY_CONFIG = {
@@ -44,7 +262,7 @@ class DataNameValidationDialog(QDialog):
             'expanded': True,
         },
         FieldCategory.REGISTERED_LOCAL: {
-            'icon': 'ⓘ',
+            'icon': 'ℹ️',
             'color': '#3498db',  # Blue
             'label': 'Registered Local Fields',
             'expanded': False,
@@ -56,7 +274,7 @@ class DataNameValidationDialog(QDialog):
             'expanded': False,
         },
         FieldCategory.VALID: {
-            'icon': '✓',
+            'icon': '✅',
             'color': '#27ae60',  # Green
             'label': 'Valid Fields',
             'expanded': False,
@@ -88,6 +306,9 @@ class DataNameValidationDialog(QDialog):
         self._format_corrections: Dict[str, str] = {}  # old_name -> corrected_name
         self._prefixes_to_allow: Set[str] = set()
         self._fields_to_allow: Set[str] = set()
+        
+        # Track whether any changes have been applied
+        self._changes_applied = False
         
         # Tree item references for updating UI after actions
         self._field_items: Dict[str, QTreeWidgetItem] = {}
@@ -130,13 +351,16 @@ class DataNameValidationDialog(QDialog):
         summary_layout = QHBoxLayout(summary_frame)
         summary_layout.setContentsMargins(12, 8, 12, 8)
         
-        # Total count
-        total_label = QLabel(f"<b>Summary:</b> {self.validation_report.total_fields} fields checked")
-        summary_layout.addWidget(total_label)
+        # Total count - store reference for updates
+        self.summary_total_label = QLabel(
+            f"<b>Summary:</b> {self.validation_report.total_fields} fields checked"
+        )
+        summary_layout.addWidget(self.summary_total_label)
         
         summary_layout.addStretch()
         
-        # Category counts with icons
+        # Category counts with icons - store references for updates
+        self.count_labels: Dict[FieldCategory, QLabel] = {}
         counts = [
             (FieldCategory.VALID, len(self.validation_report.valid_fields)),
             (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
@@ -146,13 +370,15 @@ class DataNameValidationDialog(QDialog):
         ]
         
         for category, count in counts:
-            if count > 0:
-                config = self.CATEGORY_CONFIG[category]
-                count_label = QLabel(
-                    f"<span style='color: {config['color']};'>{config['icon']}</span> {count}"
-                )
-                count_label.setToolTip(f"{count} {config['label'].lower()}")
-                summary_layout.addWidget(count_label)
+            config = self.CATEGORY_CONFIG[category]
+            count_label = QLabel(
+                f"<span style='color: {config['color']};'>{config['icon']}</span> {count}"
+            )
+            count_label.setToolTip(f"{count} {config['label'].lower()}")
+            if count == 0:
+                count_label.hide()
+            summary_layout.addWidget(count_label)
+            self.count_labels[category] = count_label
         
         layout.addWidget(summary_frame)
     
@@ -179,7 +405,7 @@ class DataNameValidationDialog(QDialog):
             )
         if self.validation_report.registered_local_fields:
             self.filter_combo.addItem(
-                f"ⓘ Registered Local ({len(self.validation_report.registered_local_fields)})",
+                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
                 FieldCategory.REGISTERED_LOCAL
             )
         if self.validation_report.user_allowed_fields:
@@ -189,7 +415,7 @@ class DataNameValidationDialog(QDialog):
             )
         if self.validation_report.valid_fields:
             self.filter_combo.addItem(
-                f"✓ Valid ({len(self.validation_report.valid_fields)})",
+                f"✅ Valid ({len(self.validation_report.valid_fields)})",
                 FieldCategory.VALID
             )
         
@@ -207,7 +433,7 @@ class DataNameValidationDialog(QDialog):
         self.tree.setHeaderLabels(["Field", "Details"])
         self.tree.setRootIsDecorated(True)
         self.tree.setAlternatingRowColors(True)
-        self.tree.setColumnWidth(0, 350)
+        self.tree.setColumnWidth(0, 250)
         self.tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         layout.addWidget(self.tree, stretch=1)
@@ -670,43 +896,32 @@ class DataNameValidationDialog(QDialog):
     
     def _on_manage_prefixes(self) -> None:
         """Open dialog to manage allowed prefixes and fields."""
-        # Get current lists
-        allowed_prefixes = self.validator.get_allowed_prefixes()
-        allowed_fields = self.validator.get_allowed_fields()
-        
-        # Build message with current settings
-        msg_parts = []
-        
-        if allowed_prefixes:
-            msg_parts.append(f"<b>Allowed Prefixes:</b><br>{'<br>'.join(sorted(allowed_prefixes))}")
-        else:
-            msg_parts.append("<b>Allowed Prefixes:</b> (none)")
-        
-        if allowed_fields:
-            msg_parts.append(f"<b>Allowed Fields:</b><br>{'<br>'.join(sorted(allowed_fields))}")
-        else:
-            msg_parts.append("<b>Allowed Fields:</b> (none)")
-        
-        if self._prefixes_to_allow:
-            msg_parts.append(
-                f"<b>Pending Prefix Additions:</b><br>{'<br>'.join(sorted(self._prefixes_to_allow))}"
-            )
-        
-        if self._fields_to_allow:
-            msg_parts.append(
-                f"<b>Pending Field Additions:</b><br>{'<br>'.join(sorted(self._fields_to_allow))}"
-            )
-        
-        msg_parts.append(
-            "<br><i>Click 'Apply Changes' to save pending additions, "
-            "or use the action buttons on individual fields to add new items.</i>"
+        dialog = ManagePrefixesDialog(
+            self.validator,
+            self._prefixes_to_allow,
+            self._fields_to_allow,
+            self
         )
         
-        QMessageBox.information(
-            self,
-            "Allowed Prefixes & Fields",
-            "<br><br>".join(msg_parts)
-        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get changes from the dialog
+            prefixes_to_add, prefixes_to_remove = dialog.get_prefix_changes()
+            fields_to_add, fields_to_remove = dialog.get_field_changes()
+            updated_prefixes, updated_fields = dialog.get_updated_pending()
+            
+            # Apply removals immediately (these affect saved settings)
+            for prefix in prefixes_to_remove:
+                self.validator.remove_allowed_prefix(prefix)
+            for field in fields_to_remove:
+                self.validator.remove_allowed_field(field)
+            
+            # Update pending sets
+            self._prefixes_to_allow = updated_prefixes
+            self._fields_to_allow = updated_fields
+            
+            # Update UI
+            self._update_prefixes_label()
+            self._update_apply_button()
     
     def _update_apply_button(self) -> None:
         """Update the apply button state based on pending actions."""
@@ -748,7 +963,11 @@ class DataNameValidationDialog(QDialog):
         self.prefixes_label.setText(f"Currently allowed: {prefixes_text}")
     
     def _on_apply_changes(self) -> None:
-        """Apply all pending changes and close the dialog."""
+        """Apply all pending changes without closing the dialog.
+        
+        Emits changes_requested signal for the caller to apply changes.
+        The caller should then call refresh_validation() with new results.
+        """
         # Apply prefix additions
         for prefix in self._prefixes_to_allow:
             self.validator.add_allowed_prefix(prefix)
@@ -762,7 +981,122 @@ class DataNameValidationDialog(QDialog):
             if action == FieldAction.IGNORE_SESSION:
                 self.validator.add_session_ignored(field_name)
         
-        self.accept()
+        # Mark that changes have been applied
+        self._changes_applied = True
+        
+        # Emit signal for caller to apply CIF modifications and refresh
+        self.changes_requested.emit()
+    
+    def refresh_validation(self, new_report: ValidationReport) -> None:
+        """
+        Refresh the dialog with new validation results.
+        
+        Call this after applying changes to update the dialog contents in place.
+        
+        Args:
+            new_report: New ValidationReport after changes have been applied
+        """
+        self.validation_report = new_report
+        
+        # Clear pending actions (they've been applied)
+        self._pending_actions.clear()
+        self._fields_to_delete.clear()
+        self._deprecated_updates.clear()
+        self._format_corrections.clear()
+        self._prefixes_to_allow.clear()
+        self._fields_to_allow.clear()
+        
+        # Refresh UI
+        self._update_summary_section()
+        self._update_filter_section()
+        self._populate_tree()
+        self._update_prefixes_label()
+        self._update_apply_button()
+    
+    def _update_summary_section(self) -> None:
+        """Update the summary frame with current counts."""
+        # Find and update the total label
+        if hasattr(self, 'summary_total_label'):
+            self.summary_total_label.setText(
+                f"<b>Summary:</b> {self.validation_report.total_fields} fields checked"
+            )
+        
+        # Update count labels
+        counts = [
+            (FieldCategory.VALID, len(self.validation_report.valid_fields)),
+            (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
+            (FieldCategory.USER_ALLOWED, len(self.validation_report.user_allowed_fields)),
+            (FieldCategory.UNKNOWN, len(self.validation_report.unknown_fields)),
+            (FieldCategory.DEPRECATED, len(self.validation_report.deprecated_fields)),
+        ]
+        
+        # Update or rebuild count labels
+        if hasattr(self, 'count_labels'):
+            for category, label in list(self.count_labels.items()):
+                # Find new count for this category
+                count = next((c for cat, c in counts if cat == category), 0)
+                if count > 0:
+                    config = self.CATEGORY_CONFIG[category]
+                    label.setText(
+                        f"<span style='color: {config['color']};'>{config['icon']}</span> {count}"
+                    )
+                    label.setToolTip(f"{count} {config['label'].lower()}")
+                    label.show()
+                else:
+                    label.hide()
+    
+    def _update_filter_section(self) -> None:
+        """Update the filter dropdown with current category counts."""
+        # Remember current selection
+        current_data = self.filter_combo.currentData()
+        
+        # Update items with new counts
+        self.filter_combo.blockSignals(True)
+        self.filter_combo.clear()
+        self.filter_combo.addItem("All Categories", None)
+        
+        if self.validation_report.unknown_fields:
+            self.filter_combo.addItem(
+                f"⚠ Unknown ({len(self.validation_report.unknown_fields)})",
+                FieldCategory.UNKNOWN
+            )
+        if self.validation_report.deprecated_fields:
+            self.filter_combo.addItem(
+                f"⚡ Deprecated ({len(self.validation_report.deprecated_fields)})",
+                FieldCategory.DEPRECATED
+            )
+        if self.validation_report.registered_local_fields:
+            self.filter_combo.addItem(
+                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
+                FieldCategory.REGISTERED_LOCAL
+            )
+        if self.validation_report.user_allowed_fields:
+            self.filter_combo.addItem(
+                f"👤 User Allowed ({len(self.validation_report.user_allowed_fields)})",
+                FieldCategory.USER_ALLOWED
+            )
+        if self.validation_report.valid_fields:
+            self.filter_combo.addItem(
+                f"✅ Valid ({len(self.validation_report.valid_fields)})",
+                FieldCategory.VALID
+            )
+        
+        # Try to restore selection
+        for i in range(self.filter_combo.count()):
+            if self.filter_combo.itemData(i) == current_data:
+                self.filter_combo.setCurrentIndex(i)
+                break
+        
+        self.filter_combo.blockSignals(False)
+    
+    def has_changes_applied(self) -> bool:
+        """
+        Check if any changes have been applied during this dialog session.
+        
+        Returns:
+            True if changes were applied, False otherwise
+        """
+        return self._changes_applied
     
     def get_pending_actions(self) -> Dict[str, FieldAction]:
         """

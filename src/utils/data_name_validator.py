@@ -24,7 +24,8 @@ from utils.registered_prefixes import (
     is_registered_prefix,
     get_prefix_from_field,
     suggest_dictionary_for_prefix,
-    get_prefix_info
+    get_prefix_info,
+    get_registered_prefixes_lower
 )
 
 if TYPE_CHECKING:
@@ -224,13 +225,45 @@ class DataNameValidator:
         # Field is unknown - check for embedded local prefix in category extension
         embedded_prefix, suggested_format = self._detect_embedded_local_prefix(field_name)
         
+        # Check if embedded local prefix is user allowed
+        if embedded_prefix and embedded_prefix.lower() in {p.lower() for p in self._user_allowed_prefixes}:
+            result = FieldValidationResult(
+                field_name=field_name,
+                category=FieldCategory.USER_ALLOWED,
+                line_number=line_number,
+                description=f"Embedded prefix '{embedded_prefix}' allowed by user",
+                prefix=prefix,
+                embedded_prefix=embedded_prefix,
+                suggested_format=suggested_format or ""
+            )
+            self._validation_cache[cache_key] = result
+            return result
+        
+        # Check if embedded local prefix is a registered IUCr prefix
+        if embedded_prefix and embedded_prefix.lower() in get_registered_prefixes_lower():
+            from utils.registered_prefixes import get_prefix_info as get_info
+            prefix_info = get_info(embedded_prefix) or ""
+            suggested_dict = suggest_dictionary_for_prefix(embedded_prefix) or ""
+            result = FieldValidationResult(
+                field_name=field_name,
+                category=FieldCategory.REGISTERED_LOCAL,
+                line_number=line_number,
+                description=f"Uses registered embedded prefix '{embedded_prefix}'" + (f": {prefix_info}" if prefix_info else ""),
+                suggested_dictionary=suggested_dict,
+                prefix=prefix,
+                embedded_prefix=embedded_prefix,
+                suggested_format=suggested_format or ""
+            )
+            self._validation_cache[cache_key] = result
+            return result
+        
         suggested_dict = suggest_dictionary_for_prefix(prefix) if prefix else ""
         
         if embedded_prefix:
             # This appears to be a category extension with embedded local prefix
             description = (
                 f"Unknown field with embedded local prefix '{embedded_prefix}'. "
-                f"Consider using proper format: {suggested_format}"
+                # f"Consider using proper format: {suggested_format}"
             )
         else:
             description = "Not found in loaded dictionaries"
@@ -393,10 +426,11 @@ class DataNameValidator:
                         without_embedded = '_' + '_'.join(parts[:i]) + '_' + '_'.join(attribute_parts)
                         
                         # Build the suggested corrected format
-                        # _chemical_oxdiff_formula -> _chemical_oxdiff.formula
-                        category_with_prefix = '_'.join(parts[:i]) + '_' + embedded_prefix
-                        attribute = '_'.join(attribute_parts)
-                        suggested = f"_{category_with_prefix}.{attribute}"
+                        # Per IUCr Volume G Ch3.1: local prefix goes after the dot
+                        # _chemical_oxdiff_formula -> _chemical.oxdiff_formula
+                        category = '_'.join(parts[:i])
+                        local_attribute = '_'.join(remaining_parts)  # oxdiff_formula
+                        suggested = f"_{category}.{local_attribute}"
                         
                         return (embedded_prefix, suggested)
         
