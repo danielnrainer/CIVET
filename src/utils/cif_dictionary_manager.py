@@ -23,6 +23,11 @@ from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
 from .cif_dictionary_parser import CIFDictionaryParser
+from .user_config import (
+    get_bundled_resource_path,
+    get_user_dictionaries_directory as _get_user_dictionaries_directory,
+    ensure_user_dictionaries_directory as _ensure_user_dictionaries_directory,
+)
 
 # HTTP headers to mimic browser requests (required for IUCr server which blocks plain requests)
 HTTP_HEADERS = {
@@ -44,14 +49,7 @@ def get_resource_path(relative_path: str) -> str:
     Returns:
         Absolute path to the resource file
     """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except AttributeError:
-        # Development environment - use the project root
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    
-    return os.path.join(base_path, relative_path)
+    return str(get_bundled_resource_path(relative_path))
 
 
 def get_user_dictionaries_directory() -> str:
@@ -69,17 +67,7 @@ def get_user_dictionaries_directory() -> str:
     Returns:
         Path to the user dictionaries directory
     """
-    if sys.platform == 'win32':
-        base = os.environ.get('APPDATA', os.path.expanduser('~'))
-        config_dir = os.path.join(base, 'CIVET')
-    elif sys.platform == 'darwin':
-        config_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'CIVET')
-    else:
-        # Linux and other Unix-like systems
-        xdg_config = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
-        config_dir = os.path.join(xdg_config, 'CIVET')
-    
-    return os.path.join(config_dir, 'dictionaries')
+    return str(_get_user_dictionaries_directory())
 
 
 def ensure_user_dictionaries_directory() -> str:
@@ -89,9 +77,7 @@ def ensure_user_dictionaries_directory() -> str:
     Returns:
         Path to the user dictionaries directory
     """
-    user_dict_dir = get_user_dictionaries_directory()
-    os.makedirs(user_dict_dir, exist_ok=True)
-    return user_dict_dir
+    return str(_ensure_user_dictionaries_directory())
 
 
 # COMCIFS Dictionary URLs - Development versions from GitHub

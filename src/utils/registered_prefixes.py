@@ -7,57 +7,26 @@ allow organizations to define their own CIF data names without conflicting
 with official dictionary definitions.
 
 The module loads prefixes from:
-1. User config directory (if exists): %APPDATA%/CIVET/registered_prefixes.json (Windows)
-   or ~/.config/CIVET/registered_prefixes.json (Linux/macOS)
-2. Bundled default file (fallback): <app_dir>/registered_prefixes.json
+1. User config directory (if exists): Uses unified user_config module
+2. Bundled default file (fallback): <app_dir>/dictionaries/registered_prefixes.json
 
 Reference: https://www.iucr.org/resources/cif/registries/prefix-registry
 """
 
 import json
-import os
-import sys
 from pathlib import Path
 from typing import Optional, Set, Dict, Tuple
+
+# Import unified config functions
+from .user_config import (
+    get_user_prefixes_path,
+    get_bundled_resource_path,
+)
 
 
 # Module-level cache for loaded prefix data
 _prefix_data: Optional[Dict] = None
 _data_source: Optional[str] = None
-
-
-def get_config_directory() -> Path:
-    """
-    Get the CIVET configuration directory path.
-    
-    On Windows: %APPDATA%/CIVET
-    On macOS: ~/Library/Application Support/CIVET
-    On Linux: ~/.config/CIVET
-    
-    Returns:
-        Path to the configuration directory.
-    """
-    if sys.platform == 'win32':
-        base = os.environ.get('APPDATA', os.path.expanduser('~'))
-        return Path(base) / 'CIVET'
-    elif sys.platform == 'darwin':
-        return Path.home() / 'Library' / 'Application Support' / 'CIVET'
-    else:
-        # Linux and other Unix-like systems
-        xdg_config = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
-        return Path(xdg_config) / 'CIVET'
-
-
-def ensure_config_directory() -> Path:
-    """
-    Ensure the CIVET configuration directory exists.
-    
-    Returns:
-        Path to the configuration directory.
-    """
-    config_dir = get_config_directory()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir
 
 
 def get_bundled_prefixes_path() -> Path:
@@ -69,24 +38,7 @@ def get_bundled_prefixes_path() -> Path:
     Returns:
         Path to the bundled JSON file.
     """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = Path(sys._MEIPASS)
-    except AttributeError:
-        # Running in development - go up from src/utils to project root
-        base_path = Path(__file__).parent.parent.parent
-    
-    return base_path / 'dictionaries' / 'registered_prefixes.json'
-
-
-def get_user_prefixes_path() -> Path:
-    """
-    Get the path to the user's custom registered_prefixes.json file.
-    
-    Returns:
-        Path to the user config JSON file (may not exist).
-    """
-    return get_config_directory() / 'registered_prefixes.json'
+    return get_bundled_resource_path('dictionaries') / 'registered_prefixes.json'
 
 
 def _load_prefix_data() -> Tuple[Dict, str]:

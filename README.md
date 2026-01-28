@@ -17,7 +17,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **Multiline Field Support**: Proper handling of semicolon-delimited multiline values
 - **UTF-8 Support**: Full Unicode support for international characters (Å, °, ±, ₁, ₂, etc.)
 - **Dictionary Management**: Multi-dictionary support with automatic content-based suggestions
-- **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, HP, or custom)
+- **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, or custom)
 - **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
 - **Guided Suggestions**: Dropdown menu to select from several suggested values (if specified in the cif_rules)
 - **Legacy-Aware Rules Validation**: Automatically treats legacy or mixed `.cif_rules` as legacy when validating standalone files; respects checkCIF compatibility fields
@@ -126,8 +126,71 @@ APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  #
 
 Built-in sets: **3DED** (electron diffraction)
 
+### User Custom Field Rules (AppData)
+CIVET supports persistent user-created field rules stored in your system's application data directory:
+
+**Location:**
+- **Windows**: `%APPDATA%\CIVET\field_rules\` (typically `C:\Users\[username]\AppData\Roaming\CIVET\field_rules\`)
+- **macOS**: `~/Library/Application Support/CIVET/field_rules/`
+- **Linux**: `~/.config/CIVET/field_rules/`
+
+**Field Rules Selection UI:**
+The application provides three ways to select field rules:
+1. **Built-in**: Select from field rules that ship with CIVET (3D ED Modern, 3D ED Legacy, High Pressure)
+2. **User**: Select from your custom rules stored in the AppData directory (dropdown shows available files)
+3. **Custom File**: Browse to select any `.cif_rules` file from your filesystem
+
+**Quick Access:**
+- Click the 📁 button next to the User dropdown to open the user rules directory
+- Click the ↻ button to refresh the list after adding new files
+- Use **Settings → Open User Config Directory...** from the menu
+
+## User Data Directory
+
+CIVET stores all user configuration and customizations in a platform-specific application data directory:
+
+| Platform | Location |
+|----------|----------|
+| Windows  | `%APPDATA%\CIVET\` |
+| macOS    | `~/Library/Application Support/CIVET/` |
+| Linux    | `~/.config/CIVET/` |
+
+**Contents:**
+```
+CIVET/
+├── settings.json           # Editor preferences (font, ruler, etc.)
+├── registered_prefixes.json  # Custom CIF prefix registry
+├── dictionaries/           # User-downloaded CIF dictionaries
+└── field_rules/            # Custom validation rules
+```
+
+This allows settings and customizations to persist across sessions and software updates, even when using the standalone executable.
+
+### Editor Settings
+
+CIVET provides customizable editor preferences accessible via **Settings → Editor Settings...**:
+
+- **Font Family**: Choose from system-installed fonts (default: Courier New)
+- **Font Size**: Adjustable size in points (default: 10)
+- **Line Numbers**: Toggle line number display
+- **Syntax Highlighting**: Enable/disable CIF-specific syntax coloring
+- **80-Character Ruler**: Visual guide for line length
+
+All settings are stored in `settings.json` and persist across sessions. User settings always take precedence over built-in defaults. Use **Reset to Defaults** to restore original settings.
+
+## Building
+
+### Executable 
+```bash
+pip install pyinstaller
+pyinstaller CIVET.spec
+```
+
+Output: `dist/CIVET` (or `CIVET.exe` on Windows, `CIVET.app` on macOS)
+
+
 ## System Requirements
-- **Executable**: Windows 10/11 (64-bit)
+- **Executable**: Windows 10/11, macOS 10.14+ (not tested), Linux (not tested)
 - **Source**: Python 3.8+, PyQt6, requests
 
 ## License

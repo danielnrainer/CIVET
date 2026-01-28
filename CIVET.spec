@@ -1,15 +1,36 @@
 # -*- mode: python ; coding: utf-8 -*-
+# CIVET PyInstaller Spec File
+# ============================
+# Cross-platform build configuration for Windows, macOS, and Linux.
+#
+# Build Instructions:
+#   Windows:  pyinstaller CIVET.spec
+#   macOS:    pyinstaller CIVET.spec
+#   Linux:    pyinstaller CIVET.spec
+#
+# User data is stored in platform-specific locations:
+#   Windows: %APPDATA%/CIVET/
+#   macOS:   ~/Library/Application Support/CIVET/
+#   Linux:   ~/.config/CIVET/
+
+import sys
+import os
 
 block_cipher = None
+
+# Platform-specific settings
+if sys.platform == 'darwin':
+    icon_file = 'civet.icns'  # macOS icon format
+elif sys.platform == 'win32':
+    icon_file = 'civet.ico'   # Windows icon format
+else:
+    icon_file = None          # Linux typically doesn't use icons in executable
 
 a = Analysis(
     ['src/main.py'],  # Main script path
     pathex=[],
     binaries=[],
     datas=[
-        # GUI configuration files
-        ('src/gui/editor_settings.json', 'gui'),              # Include editor settings file
-
         # Field definition files for validation
         ('field_rules/3ded.cif_rules', 'field_rules'),        # 3D ED field rules
         ('field_rules/3ded_legacy.cif_rules', 'field_rules'), # 3D ED field rules in legacy format
@@ -22,8 +43,6 @@ a = Analysis(
         # Dictionary filenames include version numbers (e.g., cif_core_3.3.0.dic)
         ('dictionaries/*.dic', 'dictionaries'),               # All CIF dictionaries
         ('dictionaries/registered_prefixes.json', 'dictionaries'),  # Registered CIF prefixes
-        
-        # Configuration files
         
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file
@@ -51,11 +70,12 @@ a = Analysis(
         'gui.dialogs.config_dialog',
         'gui.dialogs.field_conflict_dialog',
         'gui.dialogs.dictionary_info_dialog',
-        'gui.dialogs.dictionary_suggestion_dialog',  # New dictionary suggestion dialog
-        'gui.dialogs.field_rules_validation_dialog', # New field validation dialog
-        'gui.dialogs.format_conversion_dialog',      # New format conversion dialog
-        'gui.dialogs.about_dialog',                  # About dialog
-        'version',                                   # Version information module
+        'gui.dialogs.dictionary_suggestion_dialog',
+        'gui.dialogs.field_rules_validation_dialog',
+        'gui.dialogs.format_conversion_dialog',
+        'gui.dialogs.editor_settings_dialog',
+        'gui.dialogs.about_dialog',
+        'version',
         
         # Utility modules - Core functionality
         'utils',
@@ -65,8 +85,11 @@ a = Analysis(
         'utils.cif_format_converter',
         'utils.cif_dictionary_parser',
         'utils.cif_deprecation_manager',
-        'utils.dictionary_suggestion_manager',  # New dictionary suggestion system
-        'utils.field_rules_validator',  # New field rules validation system
+        'utils.dictionary_suggestion_manager',
+        'utils.field_rules_validator',
+        'utils.user_config',              # Unified configuration management
+        'utils.user_field_rules',         # User field rules management
+        'utils.registered_prefixes',      # CIF prefix registry
         
         # Third-party libraries
         'requests',
@@ -132,5 +155,19 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='civet.ico'                      # CIVET application icon
+    icon=icon_file if icon_file and os.path.exists(icon_file) else None  # Platform-specific icon
 )
+
+# macOS-specific: Create an app bundle
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='CIVET.app',
+        icon='civet.icns' if os.path.exists('civet.icns') else None,
+        bundle_identifier='org.civet.civet',
+        info_plist={
+            'CFBundleShortVersionString': '1.0.0',
+            'CFBundleDisplayName': 'CIVET',
+            'NSHighResolutionCapable': True,
+        },
+    )

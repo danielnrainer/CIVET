@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
-                           QButtonGroup)
+                           QButtonGroup, QComboBox)
 from PyQt6.QtCore import Qt, QRegularExpression, QTimer
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
@@ -16,8 +16,13 @@ from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_r
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from utils.data_name_validator import DataNameValidator, FieldCategory
-from utils.registered_prefixes import get_config_directory, ensure_config_directory, get_prefix_data_source
+from utils.registered_prefixes import get_prefix_data_source
+from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_user_prefixes_path
 from utils.cif2_value_formatting import format_cif2_value, is_multiline, needs_quoting
+from utils.user_field_rules import (
+    get_user_field_rules_files, get_user_field_rules_directory,
+    get_bundled_field_rules_files, ensure_user_field_rules_directory
+)
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
 from utils.format_compatibility_warning import show_modern_format_warning
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog, 
@@ -28,6 +33,7 @@ from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
 from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
 from .dialogs.format_conversion_dialog import suggest_format_conversion
+from .dialogs.editor_settings_dialog import EditorSettingsDialog
 from .dialogs.critical_issues_dialog import CriticalIssuesDialog
 from .dialogs.about_dialog import AboutDialog
 from .dialogs.recognised_prefixes_dialog import RecognisedPrefixesDialog
@@ -55,10 +61,11 @@ class CIFEditor(QMainWindow):
         # Initialize field definition validator
         self.field_rules_validator = FieldRulesValidator(self.dict_manager, self.format_converter)
         
-        # Load field definition set from field_rules directory
-        field_rules_dir = get_resource_path('field_rules')
-        self.field_checker.load_field_set('3DED', os.path.join(field_rules_dir, '3ded.cif_rules'))
-        self.field_checker.load_field_set('HP', os.path.join(field_rules_dir, 'hp.cif_rules'))
+        # Note: Field rules are now loaded dynamically via the UI combo boxes
+        # The default built-in field set is loaded after init_ui() completes
+        
+        # Load user field rules from AppData directory
+        self._load_user_field_rules()
         
         # Field definition selection variables
         self.custom_field_rules_file = None
@@ -68,6 +75,9 @@ class CIFEditor(QMainWindow):
         self.data_name_validator = DataNameValidator(self.dict_manager)
         
         self.init_ui()
+        
+        # Initialize the default built-in field set
+        self._on_builtin_combo_changed(0)
         
         # Set up syntax highlighter field validator callback
         def _field_validator_callback(field_name: str) -> str:
@@ -92,6 +102,124 @@ class CIFEditor(QMainWindow):
         """Apply current settings - delegated to text editor component"""
         # This method is now handled by the CIFTextEditor component
         pass
+
+    def _load_user_field_rules(self):
+        """Load user-created field rules from AppData directory."""
+        try:
+            user_rules = get_user_field_rules_files()
+            for file_path in user_rules:
+                try:
+                    # Extract filename without extension for the set name
+                    filename = os.path.basename(file_path)
+                    set_name = filename.replace('.cif_rules', '')
+                    # Load with "User:" prefix to distinguish from built-in sets
+                    user_set_name = f"User: {set_name}"
+                    self.field_checker.load_field_set(user_set_name, file_path)
+                except Exception as e:
+                    # Silently skip files that fail to load
+                    print(f"Warning: Could not load user field rules {file_path}: {e}")
+        except Exception as e:
+            # Silently handle directory reading errors
+            print(f"Warning: Could not read user field rules directory: {e}")
+
+    def _populate_builtin_combo(self):
+        """Populate the built-in field rules combo box."""
+        self.builtin_combo.clear()
+        bundled_rules = get_bundled_field_rules_files()
+        
+        if not bundled_rules:
+            self.builtin_combo.addItem("(No built-in rules found)", "")
+            return
+        
+        for display_name, file_path in bundled_rules:
+            self.builtin_combo.addItem(display_name, file_path)
+        
+        # Default to first item (usually 3D ED Modern)
+        self.builtin_combo.setCurrentIndex(0)
+    
+    def _populate_user_combo(self):
+        """Populate the user field rules combo box."""
+        self.user_combo.clear()
+        user_rules = get_user_field_rules_files()
+        
+        if not user_rules:
+            self.user_combo.addItem("(No user rules - add files to AppData)", "")
+            return
+        
+        for file_path in user_rules:
+            filename = os.path.basename(file_path)
+            display_name = filename.replace('.cif_rules', '')
+            self.user_combo.addItem(display_name, file_path)
+    
+    def _on_builtin_toggled(self, checked):
+        """Handle built-in radio button toggle."""
+        self.builtin_combo.setEnabled(checked)
+        if checked:
+            self.user_combo.setEnabled(False)
+            self.refresh_user_btn.setEnabled(False)
+            self.custom_file_button.setEnabled(False)
+            self._on_builtin_combo_changed(self.builtin_combo.currentIndex())
+    
+    def _on_user_toggled(self, checked):
+        """Handle user radio button toggle."""
+        self.user_combo.setEnabled(checked)
+        self.refresh_user_btn.setEnabled(checked)
+        if checked:
+            self.builtin_combo.setEnabled(False)
+            self.custom_file_button.setEnabled(False)
+            self._on_user_combo_changed(self.user_combo.currentIndex())
+    
+    def _on_custom_toggled(self, checked):
+        """Handle custom file radio button toggle."""
+        self.custom_file_button.setEnabled(checked)
+        if checked:
+            self.builtin_combo.setEnabled(False)
+            self.user_combo.setEnabled(False)
+            self.refresh_user_btn.setEnabled(False)
+            self.set_field_set('Custom')
+    
+    def _on_builtin_combo_changed(self, index):
+        """Handle built-in combo box selection change."""
+        if not self.radio_builtin.isChecked():
+            return
+        
+        file_path = self.builtin_combo.currentData()
+        if file_path:
+            display_name = self.builtin_combo.currentText()
+            # Create a unique internal name based on display name
+            internal_name = display_name.replace(' ', '_').replace('(', '').replace(')', '')
+            try:
+                self.field_checker.load_field_set(internal_name, file_path)
+                self.current_field_set = internal_name
+                self.custom_field_rules_file = file_path
+            except Exception as e:
+                QMessageBox.warning(self, "Load Error", f"Failed to load field rules:\n{str(e)}")
+    
+    def _on_user_combo_changed(self, index):
+        """Handle user combo box selection change."""
+        if not self.radio_user.isChecked():
+            return
+        
+        file_path = self.user_combo.currentData()
+        if file_path:
+            display_name = self.user_combo.currentText()
+            internal_name = f"User: {display_name}"
+            try:
+                self.field_checker.load_field_set(internal_name, file_path)
+                self.current_field_set = internal_name
+                self.custom_field_rules_file = file_path
+            except Exception as e:
+                QMessageBox.warning(self, "Load Error", f"Failed to load user field rules:\n{str(e)}")
+    
+    def _refresh_user_field_rules(self):
+        """Refresh the user field rules combo box and reload from AppData."""
+        # Reload user field rules into field_checker
+        self._load_user_field_rules()
+        # Repopulate combo box
+        self._populate_user_combo()
+        # If user radio is selected and there are rules, select first one
+        if self.radio_user.isChecked() and self.user_combo.count() > 0:
+            self._on_user_combo_changed(0)
 
     def change_font(self):
         """Open font dialog to change editor font"""
@@ -155,38 +283,72 @@ class CIFEditor(QMainWindow):
         # Create radio button group for field definition selection
         self.field_rules_group = QButtonGroup()
         
-        # Radio buttons for built-in field definitions
-        radio_layout = QHBoxLayout()
+        # Row 1: Built-in field rules
+        builtin_layout = QHBoxLayout()
+        self.radio_builtin = QRadioButton("Built-in:")
+        self.radio_builtin.setChecked(True)  # Default selection
+        self.radio_builtin.setToolTip("Field rules that ship with CIVET")
+        self.radio_builtin.toggled.connect(self._on_builtin_toggled)
+        self.field_rules_group.addButton(self.radio_builtin)
+        builtin_layout.addWidget(self.radio_builtin)
         
-        self.radio_3ded = QRadioButton("3D ED")
-        self.radio_3ded.setChecked(True)  # Default selection
-        self.radio_3ded.toggled.connect(lambda checked: self.set_field_set('3DED') if checked else None)
+        self.builtin_combo = QComboBox()
+        self.builtin_combo.setMinimumWidth(200)
+        self.builtin_combo.currentIndexChanged.connect(self._on_builtin_combo_changed)
+        self._populate_builtin_combo()
+        builtin_layout.addWidget(self.builtin_combo)
+        builtin_layout.addStretch()
+        field_selection_layout.addLayout(builtin_layout)
         
-        self.radio_custom = QRadioButton("Custom File")
-        self.radio_custom.toggled.connect(lambda checked: self.set_field_set('Custom') if checked else None)
+        # Row 2: User field rules (from AppData)
+        user_layout = QHBoxLayout()
+        self.radio_user = QRadioButton("User:")
+        self.radio_user.setToolTip("Custom field rules from your AppData directory")
+        self.radio_user.toggled.connect(self._on_user_toggled)
+        self.field_rules_group.addButton(self.radio_user)
+        user_layout.addWidget(self.radio_user)
         
-        # Add radio buttons to group and layout
-        self.field_rules_group.addButton(self.radio_3ded)
+        self.user_combo = QComboBox()
+        self.user_combo.setMinimumWidth(200)
+        self.user_combo.currentIndexChanged.connect(self._on_user_combo_changed)
+        self._populate_user_combo()
+        self.user_combo.setEnabled(False)  # Initially disabled since Built-in is selected
+        user_layout.addWidget(self.user_combo)
+        
+        self.refresh_user_btn = QPushButton("↻")
+        self.refresh_user_btn.setToolTip("Refresh user field rules list")
+        self.refresh_user_btn.setMaximumWidth(30)
+        self.refresh_user_btn.clicked.connect(self._refresh_user_field_rules)
+        self.refresh_user_btn.setEnabled(False)
+        user_layout.addWidget(self.refresh_user_btn)
+        
+        self.open_user_dir_btn = QPushButton("📁")
+        self.open_user_dir_btn.setToolTip("Open user field rules directory")
+        self.open_user_dir_btn.setMaximumWidth(30)
+        self.open_user_dir_btn.clicked.connect(self.open_user_field_rules_directory)
+        user_layout.addWidget(self.open_user_dir_btn)
+        
+        user_layout.addStretch()
+        field_selection_layout.addLayout(user_layout)
+        
+        # Row 3: Custom file selection
+        custom_layout = QHBoxLayout()
+        self.radio_custom = QRadioButton("Custom File:")
+        self.radio_custom.setToolTip("Browse to select any .cif_rules file")
+        self.radio_custom.toggled.connect(self._on_custom_toggled)
         self.field_rules_group.addButton(self.radio_custom)
+        custom_layout.addWidget(self.radio_custom)
         
-        radio_layout.addWidget(self.radio_3ded)
-        radio_layout.addWidget(self.radio_custom)
-        
-        # Custom file selection layout
-        custom_file_layout = QHBoxLayout()
-        self.custom_file_button = QPushButton("Select Custom File...")
+        self.custom_file_button = QPushButton("Browse...")
         self.custom_file_button.clicked.connect(self.select_custom_field_rules_file)
         self.custom_file_button.setEnabled(False)  # Initially disabled
+        custom_layout.addWidget(self.custom_file_button)
         
-        self.custom_file_label = QLabel("No custom file selected")
+        self.custom_file_label = QLabel("No file selected")
         self.custom_file_label.setStyleSheet("color: gray; font-style: italic;")
-        
-        custom_file_layout.addWidget(self.custom_file_button)
-        custom_file_layout.addWidget(self.custom_file_label)
-        custom_file_layout.addStretch()
-        
-        field_selection_layout.addLayout(radio_layout)
-        field_selection_layout.addLayout(custom_file_layout)
+        custom_layout.addWidget(self.custom_file_label)
+        custom_layout.addStretch()
+        field_selection_layout.addLayout(custom_layout)
         
         main_layout.addWidget(field_selection_group)
         
@@ -338,8 +500,6 @@ class CIFEditor(QMainWindow):
         dict_info_action = settings_menu.addAction("Dictionary Information...")
         dict_info_action.triggered.connect(self.show_dictionary_info)
         
-        settings_menu.addSeparator()
-        
         load_dict_action = settings_menu.addAction("Replace Core CIF Dictionary...")
         load_dict_action.triggered.connect(self.load_custom_dictionary)
         
@@ -351,21 +511,33 @@ class CIFEditor(QMainWindow):
         
         settings_menu.addSeparator()
         
-        # Field definition validation
-        validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
-        validate_field_defs_action.triggered.connect(self.validate_field_rules)
-        
-        settings_menu.addSeparator()
-        
-        # Config directory access
-        open_config_action = settings_menu.addAction("Open Config Directory...")
-        open_config_action.triggered.connect(self.open_config_directory)
+        # Prefix management section
+        show_prefixes_action = settings_menu.addAction("View Recognised Prefixes...")
+        show_prefixes_action.triggered.connect(self.show_recognised_prefixes)
         
         reload_prefixes_action = settings_menu.addAction("Reload Prefix Configuration")
         reload_prefixes_action.triggered.connect(self.reload_prefix_configuration)
         
-        show_prefixes_action = settings_menu.addAction("View Recognised Prefixes...")
-        show_prefixes_action.triggered.connect(self.show_recognised_prefixes)
+        settings_menu.addSeparator()
+        
+        # Field rules section
+        validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
+        validate_field_defs_action.triggered.connect(self.validate_field_rules)
+        
+        open_user_rules_action = settings_menu.addAction("Open Field Rules Directory...")
+        open_user_rules_action.triggered.connect(self.open_user_field_rules_directory)
+        
+        settings_menu.addSeparator()
+        
+        # Editor settings section
+        editor_settings_action = settings_menu.addAction("Editor Settings...")
+        editor_settings_action.triggered.connect(self.show_editor_settings)
+        
+        settings_menu.addSeparator()
+        
+        # Config directory access
+        open_config_action = settings_menu.addAction("Open Config Directory")
+        open_config_action.triggered.connect(self.open_config_directory)
         
         # Help menu
         help_menu = menubar.addMenu("Help")
@@ -1074,15 +1246,18 @@ class CIFEditor(QMainWindow):
         """Set the current field set selection."""
         self.current_field_set = field_set_name
         
-        # Enable/disable custom file button based on selection
+        # Update custom file label based on selection
         if field_set_name == 'Custom':
-            self.custom_file_button.setEnabled(True)
             if not self.custom_field_rules_file:
-                self.custom_file_label.setText("Please select a custom file")
+                self.custom_file_label.setText("Please select a file")
                 self.custom_file_label.setStyleSheet("color: red; font-style: italic;")
+        elif self.custom_field_rules_file:
+            # Show the currently loaded file
+            filename = os.path.basename(self.custom_field_rules_file)
+            self.custom_file_label.setText(filename)
+            self.custom_file_label.setStyleSheet("color: green; font-style: normal;")
         else:
-            self.custom_file_button.setEnabled(False)
-            self.custom_file_label.setText("No custom file selected")
+            self.custom_file_label.setText("No file selected")
             self.custom_file_label.setStyleSheet("color: gray; font-style: italic;")
     
     def select_custom_field_rules_file(self):
@@ -1413,10 +1588,12 @@ class CIFEditor(QMainWindow):
             return True  # Continue despite error
 
     def _process_single_field_set(self, config, initial_state):
-        """Process a single field set (3DED, HP, or Custom)."""
+        """Process a single field set (Built-in, User, or Custom)."""
         try:
             # Special handling for 3DED: Check CIF format compatibility
-            if self.current_field_set == '3DED':
+            # This applies to any built-in 3D ED rules (both Modern and Legacy)
+            is_3ded = '3D_ED' in self.current_field_set or '3DED' in self.current_field_set
+            if is_3ded and 'Legacy' not in self.current_field_set:
                 # Detect CIF format of current file
                 content = self.text_editor.toPlainText()
                 cif_format = self.dict_manager.detect_cif_format(content)
@@ -1427,7 +1604,7 @@ class CIFEditor(QMainWindow):
                     # Load legacy version of 3DED rules for legacy format
                     legacy_rules_path = os.path.join(field_rules_dir, '3ded_legacy.cif_rules')
                     if os.path.exists(legacy_rules_path):
-                        self.field_checker.load_field_set('3DED', legacy_rules_path)
+                        self.field_checker.load_field_set(self.current_field_set, legacy_rules_path)
                         QMessageBox.information(
                             self, 
                             "CIF Format Compatibility", 
@@ -1444,7 +1621,7 @@ class CIFEditor(QMainWindow):
                     # Load default modern version of 3DED rules for modern format
                     default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
                     if os.path.exists(default_rules_path):
-                        self.field_checker.load_field_set('3DED', default_rules_path)
+                        self.field_checker.load_field_set(self.current_field_set, default_rules_path)
             
             # Get the selected field set
             fields = self.field_checker.get_field_set(self.current_field_set)
@@ -1453,21 +1630,25 @@ class CIFEditor(QMainWindow):
                 return False
             
             # Update window title to show which field set is being used
-            field_set_display = {
-                '3DED': '3D ED',
-                'Custom': f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
-            }
+            if self.current_field_set.startswith('User:'):
+                field_set_display_name = self.current_field_set
+            elif self.current_field_set == 'Custom':
+                field_set_display_name = f'Custom ({os.path.basename(self.custom_field_rules_file) if self.custom_field_rules_file else "Unknown"})'
+            else:
+                # Built-in rules - use the internal name or make it human-readable
+                field_set_display_name = self.current_field_set.replace('_', ' ')
             
             # Include filename in title during checking
             filename_part = f" {os.path.basename(self.current_file)}" if self.current_file else ""
-            self.setWindowTitle(f"CIVET{filename_part} - Checking with {field_set_display.get(self.current_field_set, self.current_field_set)} fields")
+            self.setWindowTitle(f"CIVET{filename_part} - Checking with {field_set_display_name} fields")
             
             # Parse the current CIF content
             content = self.text_editor.toPlainText()
             self.cif_parser.parse_file(content)
             
-            # For custom sets, handle DELETE/EDIT/APPEND operations first
-            if self.current_field_set == 'Custom':
+            # For custom or user sets, handle DELETE/EDIT/APPEND operations first
+            is_custom_or_user = self.current_field_set == 'Custom' or self.current_field_set.startswith('User:')
+            if is_custom_or_user:
                 current_content = content
                 operations_applied = []
                 
@@ -1523,7 +1704,8 @@ class CIFEditor(QMainWindow):
                     break
             
             # Apply special 3DED handling if needed
-            if self.current_field_set == '3DED':
+            is_3ded = '3D_ED' in self.current_field_set or '3DED' in self.current_field_set
+            if is_3ded:
                 self._apply_3ded_special_checks(config, initial_state)
             
             return True
@@ -2964,6 +3146,25 @@ class CIFEditor(QMainWindow):
                     "The following changes were applied:\n• " + "\n• ".join(changes_summary)
                 )
     
+    def show_editor_settings(self):
+        """Open editor settings dialog."""
+        dialog = EditorSettingsDialog(
+            self,
+            on_settings_changed=self._apply_editor_settings
+        )
+        result = dialog.exec()
+        
+        # If user clicked OK, settings were already applied by the callback
+        # If user clicked Cancel, no changes were made
+    
+    def _apply_editor_settings(self, settings):
+        """Apply editor settings after user confirms in dialog."""
+        try:
+            # Update text editor with new settings (use cif_text_editor wrapper, not internal text_editor)
+            self.cif_text_editor.apply_settings_dict(settings)
+        except Exception as e:
+            print(f"Error applying editor settings: {e}")
+    
     def suggest_dictionaries(self):
         """Analyze current CIF content and suggest relevant dictionaries."""
         try:
@@ -3097,7 +3298,8 @@ class CIFEditor(QMainWindow):
     
     def validate_field_rules(self):
         """Manual field definition validation (Settings menu)."""
-        if self.current_field_set == 'Custom' and self.custom_field_rules_file:
+        # If we have a custom field rules file loaded (from Custom or User selection), validate it
+        if self.custom_field_rules_file:
             # Validate the current custom field definition file
             self._validate_field_rules_file(self.custom_field_rules_file)
         else:
@@ -3121,7 +3323,7 @@ class CIFEditor(QMainWindow):
         
         try:
             # Ensure config directory exists
-            config_dir = ensure_config_directory()
+            config_dir = ensure_user_config_directory()
             
             # Open in file explorer
             if sys.platform == 'win32':
@@ -3133,30 +3335,26 @@ class CIFEditor(QMainWindow):
             
             # Show info about the config directory
             prefix_source = get_prefix_data_source()
-            user_prefixes_file = config_dir / 'registered_prefixes.json'
+            user_prefixes_file = get_user_prefixes_path()
             
             info_text = (
                 f"<b>Configuration Directory:</b><br>"
                 f"<code>{config_dir}</code><br><br>"
-                f"<b>Available Configuration Files:</b><br>"
-                f"• <b>registered_prefixes.json</b> - Custom CIF data name prefixes<br><br>"
+                f"<b>Contents:</b><br>"
+                f"• <b>settings.json</b> - Editor preferences<br>"
+                f"• <b>registered_prefixes.json</b> - Custom CIF prefixes<br>"
+                f"• <b>dictionaries/</b> - User-downloaded dictionaries<br>"
+                f"• <b>field_rules/</b> - Custom validation rules<br><br>"
                 f"<b>Current Prefix Source:</b><br>"
-                f"<code>{prefix_source}</code><br><br>"
-                f"Can also be found on the CIVET GitHub page:"
-                f"https://github.com/danielnrainer/CIVET/tree/main/dictionaries"
+                f"<code>{prefix_source}</code>"
             )
             
             if not user_prefixes_file.exists():
                 info_text += (
-                    "<b>Tip:</b> To customize registered prefixes, copy "
-                    "<code>registered_prefixes.json</code> from the application "
-                    "directory or GitHub to this config folder and edit as needed. "
+                    "<br><br><b>Tip:</b> To customize registered prefixes, copy "
+                    "<code>registered_prefixes.json</code> from the GitHub repository "
+                    "to this config folder and edit as needed. "
                     "Restart CIVET to apply changes."
-                )
-            else:
-                info_text += (
-                    "<b>Note:</b> Custom prefixes file detected. "
-                    "Use <i>Settings → Dictionary Information</i> to reload after editing."
                 )
             
             QMessageBox.information(self, "CIVET Config Directory", info_text)
@@ -3165,6 +3363,51 @@ class CIFEditor(QMainWindow):
             QMessageBox.warning(
                 self, "Error",
                 f"Could not open config directory:\n{str(e)}"
+            )
+    
+    def open_user_field_rules_directory(self):
+        """
+        Open the user field rules directory in the system file explorer.
+        
+        Creates the directory if it doesn't exist and shows information about
+        what field rules files can be placed there.
+        """
+        import subprocess
+        from utils.user_field_rules import ensure_user_field_rules_directory
+        
+        try:
+            # Ensure user field rules directory exists
+            rules_dir = ensure_user_field_rules_directory()
+            
+            # Open in file explorer
+            if sys.platform == 'win32':
+                os.startfile(str(rules_dir))
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', str(rules_dir)], check=True)
+            else:
+                subprocess.run(['xdg-open', str(rules_dir)], check=True)
+            
+            # Show info about the field rules directory
+            info_text = (
+                f"<b>User Field Rules Directory:</b><br>"
+                f"<code>{rules_dir}</code><br><br>"
+                f"<b>File Format:</b> .cif_rules files (text format)<br><br>"
+                f"<b>How to Use:</b><br>"
+                f"1. Create .cif_rules files with your field definitions<br>"
+                f"2. Place them in this directory<br>"
+                f"3. They will appear as 'User: [filename]' in the field set selector<br>"
+                f"4. Restart CIVET if files don't appear<br><br>"
+                f"<b>File Format Example:</b><br>"
+                f"<code>_diffrn.ambient_temperature 293  # Default value<br>"
+                f"_diffrn.ambient_temperature 100      # Additional suggestion</code>"
+            )
+            
+            QMessageBox.information(self, "User Field Rules Directory", info_text)
+            
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Error",
+                f"Could not open user field rules directory:\n{str(e)}"
             )
     
     def reload_prefix_configuration(self):

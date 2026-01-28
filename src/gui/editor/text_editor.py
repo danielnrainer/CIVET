@@ -4,6 +4,16 @@ CIF Text Editor Component
 This module provides a comprehensive text editor widget specifically designed 
 for CIF files, featuring line numbers, syntax highlighting, find/replace functionality,
 and customizable settings.
+
+Settings Persistence:
+- Settings are stored in the user's application data directory for cross-session persistence
+- User-stored settings always override built-in defaults (see user_config.load_settings())
+- Settings can be edited via Settings → Editor Settings... in the main menu
+- A "Reset to Defaults" button allows users to restore default settings at any time
+
+Settings Priority (highest to lowest):
+1. User-saved settings in CIVET/settings.json
+2. Built-in defaults in DEFAULT_SETTINGS
 """
 
 from PyQt6.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayout,
@@ -11,8 +21,13 @@ from PyQt6.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayo
                            QFontDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import (QFont, QFontMetrics, QTextCursor, QTextDocument)
-import json
+import sys
 import os
+
+# Add parent directories to path for imports when running as module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from utils.user_config import load_settings, set_setting, DEFAULT_SETTINGS
+
 from .syntax_highlighter import CIFSyntaxHighlighter
 
 
@@ -20,6 +35,13 @@ class CIFTextEditor(QWidget):
     """
     A comprehensive CIF text editor widget with line numbers, syntax highlighting,
     and advanced editing features.
+    
+    Settings Behavior:
+    - On initialization: Loads settings using load_settings(), which prefers user-saved
+      settings over defaults
+    - User can modify settings via Settings → Editor Settings... menu
+    - Settings are automatically saved to user's config directory
+    - User-saved settings always take precedence over defaults
     """
     
     # Signals
@@ -30,7 +52,7 @@ class CIFTextEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # Editor settings
+        # Editor settings (will be populated from user_config)
         self.settings = {
             'font_family': 'Courier New',
             'font_size': 10,
@@ -85,22 +107,34 @@ class CIFTextEditor(QWidget):
         self.update_line_numbers()
     
     def load_settings(self):
-        """Load editor settings from JSON file."""
-        settings_path = os.path.join(os.path.dirname(__file__), '..', 'editor_settings.json')
+        """Load editor settings from unified user config."""
         try:
-            if os.path.exists(settings_path):
-                with open(settings_path, 'r', encoding='utf-8') as f:
-                    saved_settings = json.load(f)
-                    self.settings.update(saved_settings)
+            all_settings = load_settings()
+            editor_settings = all_settings.get('editor', {})
+            
+            # Map unified settings to local settings structure
+            self.settings['font_family'] = editor_settings.get(
+                'font_family', DEFAULT_SETTINGS['editor']['font_family'])
+            self.settings['font_size'] = editor_settings.get(
+                'font_size', DEFAULT_SETTINGS['editor']['font_size'])
+            self.settings['line_numbers_enabled'] = editor_settings.get(
+                'line_numbers_enabled', DEFAULT_SETTINGS['editor']['line_numbers_enabled'])
+            self.settings['syntax_highlighting_enabled'] = editor_settings.get(
+                'syntax_highlighting_enabled', DEFAULT_SETTINGS['editor']['syntax_highlighting_enabled'])
+            self.settings['show_ruler'] = editor_settings.get(
+                'show_ruler', DEFAULT_SETTINGS['editor']['show_ruler'])
         except Exception as e:
             print(f"Error loading settings: {e}")
     
     def save_settings(self):
-        """Save editor settings to JSON file."""
-        settings_path = os.path.join(os.path.dirname(__file__), '..', 'editor_settings.json')
+        """Save editor settings to unified user config."""
         try:
-            with open(settings_path, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=4)
+            # Save each setting using the unified config system
+            set_setting('editor.font_family', self.settings['font_family'])
+            set_setting('editor.font_size', self.settings['font_size'])
+            set_setting('editor.line_numbers_enabled', self.settings['line_numbers_enabled'])
+            set_setting('editor.syntax_highlighting_enabled', self.settings['syntax_highlighting_enabled'])
+            set_setting('editor.show_ruler', self.settings['show_ruler'])
         except Exception as e:
             print(f"Error saving settings: {e}")
     
@@ -127,6 +161,16 @@ class CIFTextEditor(QWidget):
                 self.text_editor.document() if self.settings['syntax_highlighting_enabled'] 
                 else None
             )
+    
+    def apply_settings_dict(self, settings_dict):
+        """
+        Apply settings from a dictionary (used for live preview).
+        
+        Args:
+            settings_dict: Dictionary with editor settings
+        """
+        self.settings.update(settings_dict)
+        self.apply_settings()
     
     def change_font(self):
         """Open font dialog to change editor font."""
