@@ -28,4 +28,4 @@ dist/
 *.txt
 .gitignore
 
-.github/copilot-instructions.md
+.github/

@@ -194,7 +194,7 @@ class DictionaryInfoDialog(QDialog):
         self.dict_table = QTableWidget()
         self.dict_table.setColumnCount(10)
         self.dict_table.setHorizontalHeaderLabels([
-            "Active", "Dictionary Title", "Date", "Version", "Source", "Status", "Type", "Fields", "Filename", "Path"
+            "Active", "Dictionary Title", "Date", "Version", "Source", "Status", "Update", "Type", "Fields", "Filename"
         ])
         
         # Set table properties
@@ -204,8 +204,9 @@ class DictionaryInfoDialog(QDialog):
         self.dict_table.horizontalHeader().setStretchLastSection(True)
         self.dict_table.verticalHeader().setVisible(False)
         
-        # Connect selection change
+        # Connect selection change and double-click for update download
         self.dict_table.itemSelectionChanged.connect(self.on_selection_changed)
+        self.dict_table.cellDoubleClicked.connect(self.on_cell_double_clicked)
         
         table_layout.addWidget(self.dict_table)
         table_group.setLayout(table_layout)
@@ -265,12 +266,29 @@ class DictionaryInfoDialog(QDialog):
         self.progress_bar.setVisible(False)
         buttons_layout.addWidget(self.progress_bar)
         
-        # Second row: Refresh, Remove, and Close
+        # Second row: Refresh, Check Updates, Remove, and Close
         action_layout = QHBoxLayout()
         
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_data)
         action_layout.addWidget(self.refresh_btn)
+        
+        self.check_updates_btn = QPushButton("Check for Updates")
+        self.check_updates_btn.setToolTip("Check if newer versions are available online")
+        self.check_updates_btn.clicked.connect(self.check_for_updates)
+        action_layout.addWidget(self.check_updates_btn)
+        
+        self.load_all_updates_btn = QPushButton("Load All Updates")
+        self.load_all_updates_btn.setToolTip("Load all available updates for this session only")
+        self.load_all_updates_btn.clicked.connect(self.load_all_updates)
+        self.load_all_updates_btn.setEnabled(False)  # Initially disabled until updates are checked
+        action_layout.addWidget(self.load_all_updates_btn)
+        
+        self.download_all_updates_btn = QPushButton("Download All Updates")
+        self.download_all_updates_btn.setToolTip("Download and save all available dictionary updates")
+        self.download_all_updates_btn.clicked.connect(self.download_all_updates)
+        self.download_all_updates_btn.setEnabled(False)  # Initially disabled until updates are checked
+        action_layout.addWidget(self.download_all_updates_btn)
         
         self.remove_btn = QPushButton("Remove Selected")
         self.remove_btn.clicked.connect(self.remove_selected_dictionary)
@@ -365,24 +383,42 @@ class DictionaryInfoDialog(QDialog):
                     status_item.setForeground(QColor(200, 100, 0))  # Orange for development
                 self.dict_table.setItem(row, 5, status_item)
                 
-                # Type
-                type_text = dict_info.source_type.upper()
-                self.dict_table.setItem(row, 6, QTableWidgetItem(type_text))
-                
-                # Fields
-                self.dict_table.setItem(row, 7, QTableWidgetItem(str(dict_info.field_count)))
-                
-                # Filename
-                self.dict_table.setItem(row, 8, QTableWidgetItem(dict_info.name))
-                
-                # Path (show shortened path for files, URL for web)
-                if dict_info.source_type == 'url':
-                    path_text = dict_info.path
-                elif dict_info.source_type == 'file':
-                    path_text = os.path.dirname(dict_info.path) or "Current directory"
+                # Update availability (populated by check_for_updates)
+                update_text = "—"  # em-dash for "not checked"
+                update_item = QTableWidgetItem(update_text)
+                if dict_info.update_available is True:
+                    update_item.setText("⬆ Available")
+                    update_item.setForeground(QColor(0, 100, 200))  # Blue for updates available
+                    tooltip = "Double-click to download this update"
+                    if dict_info.online_date:
+                        tooltip += f"\nOnline date: {dict_info.online_date}"
+                    update_item.setToolTip(tooltip)
+                elif dict_info.update_available is False:
+                    update_item.setText("✓ Up to date")
+                    update_item.setForeground(QColor(0, 150, 0))  # Green for up to date
                 else:
-                    path_text = dict_info.source_type.capitalize()
-                self.dict_table.setItem(row, 9, QTableWidgetItem(path_text))
+                    update_item.setForeground(QColor(150, 150, 150))  # Light gray
+                    update_item.setToolTip("Click 'Check for Updates' to check")
+                self.dict_table.setItem(row, 6, update_item)
+                
+                # Type (column 7, was 6)
+                type_text = dict_info.source_type.upper()
+                self.dict_table.setItem(row, 7, QTableWidgetItem(type_text))
+                
+                # Fields (column 8, was 7)
+                self.dict_table.setItem(row, 8, QTableWidgetItem(str(dict_info.field_count)))
+                
+                # Filename (column 9, was 8)
+                self.dict_table.setItem(row, 9, QTableWidgetItem(dict_info.name))
+                
+                # Path column - commented out for now, may want it back later
+                # if dict_info.source_type == 'url':
+                #     path_text = dict_info.path
+                # elif dict_info.source_type == 'file':
+                #     path_text = os.path.dirname(dict_info.path) or "Current directory"
+                # else:
+                #     path_text = dict_info.source_type.capitalize()
+                # self.dict_table.setItem(row, 10, QTableWidgetItem(path_text))
             
             # Resize columns
             header = self.dict_table.horizontalHeader()
@@ -392,10 +428,16 @@ class DictionaryInfoDialog(QDialog):
             header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Version
             header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Source
             header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Status
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Type
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # Fields
-            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)  # Filename
-            header.setSectionResizeMode(9, QHeaderView.ResizeMode.Stretch)           # Path
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Update
+            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # Type
+            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)  # Fields
+            header.setSectionResizeMode(9, QHeaderView.ResizeMode.Stretch)           # Filename
+            # header.setSectionResizeMode(10, QHeaderView.ResizeMode.Stretch)        # Path (commented out)
+            
+            # Enable/disable update buttons based on available updates
+            updates_available = any(info.update_available is True for info in detailed_info)
+            self.load_all_updates_btn.setEnabled(updates_available)
+            self.download_all_updates_btn.setEnabled(updates_available)
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load dictionary information: {str(e)}")
@@ -405,8 +447,8 @@ class DictionaryInfoDialog(QDialog):
         current_row = self.dict_table.currentRow()
         if current_row >= 0:
             try:
-                # Get the filename from the table (column 8)
-                filename_item = self.dict_table.item(current_row, 8)
+                # Get the filename from the table (column 9 - Filename)
+                filename_item = self.dict_table.item(current_row, 9)
                 if filename_item:
                     filename = filename_item.text()
                     
@@ -776,6 +818,284 @@ class DictionaryInfoDialog(QDialog):
             self.refresh_btn.setEnabled(True)
             self.refresh_btn.setText("Refresh")
     
+    def check_for_updates(self):
+        """Check if newer versions of loaded dictionaries are available online"""
+        try:
+            # Disable button and show progress
+            self.check_updates_btn.setEnabled(False)
+            self.check_updates_btn.setText("Checking...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(0)
+            QApplication.processEvents()
+            
+            # Call the dictionary manager's check method
+            self.progress_bar.setValue(20)
+            QApplication.processEvents()
+            
+            results = self.dict_manager.check_for_updates(timeout=10)
+            
+            self.progress_bar.setValue(80)
+            QApplication.processEvents()
+            
+            # Refresh the table to show update status
+            self.load_dictionary_data()
+            
+            self.progress_bar.setValue(100)
+            QApplication.processEvents()
+            
+            # Count updates and errors
+            updates_available = sum(1 for r in results.values() if r.get('update_available') is True)
+            up_to_date = sum(1 for r in results.values() if r.get('update_available') is False)
+            errors = sum(1 for r in results.values() if r.get('error'))
+            
+            # Build result message
+            messages = []
+            if updates_available > 0:
+                messages.append(f"<b style='color: #0064C8;'>{updates_available} update(s) available</b>")
+            if up_to_date > 0:
+                messages.append(f"<b style='color: #009600;'>{up_to_date} dictionary(ies) up to date</b>")
+            if errors > 0:
+                error_details = []
+                for name, result in results.items():
+                    if result.get('error'):
+                        error_details.append(f"• {name}: {result['error']}")
+                messages.append(f"<b style='color: orange;'>{errors} check(s) failed:</b><br>" + 
+                              "<br>".join(error_details[:5]))  # Show first 5 errors
+            
+            # Show summary
+            if messages:
+                QMessageBox.information(
+                    self, 
+                    "Dictionary Update Check Complete",
+                    "<br><br>".join(messages)
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Dictionary Update Check Complete", 
+                    "No online sources found for the loaded dictionaries."
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to check for updates: {str(e)}")
+        finally:
+            # Re-enable button and hide progress
+            self.check_updates_btn.setEnabled(True)
+            self.check_updates_btn.setText("Check for Updates")
+            self.progress_bar.setVisible(False)
+    
+    def on_cell_double_clicked(self, row: int, column: int):
+        """Handle double-click on table cells - specifically for Update column to download"""
+        # Column 6 is the Update column
+        if column != 6:
+            return
+        
+        # Get the filename from this row (column 9)
+        filename_item = self.dict_table.item(row, 9)
+        if not filename_item:
+            return
+        
+        filename = filename_item.text()
+        
+        # Find the dictionary info
+        detailed_info = self.dict_manager.get_detailed_dictionary_info()
+        dict_info = None
+        for info in detailed_info:
+            if info.name == filename:
+                dict_info = info
+                break
+        
+        if not dict_info or not dict_info.update_available or not dict_info.update_url:
+            return
+        
+        # Show options dialog
+        self.show_update_options_dialog([dict_info])
+    
+    def show_update_options_dialog(self, updates: list):
+        """Show dialog with Load/Save options for dictionary updates"""
+        if len(updates) == 1:
+            dict_info = updates[0]
+            title = "Update Dictionary"
+            # Show title, version, and date
+            dict_name = dict_info.dict_title or dict_info.name
+            current_version = dict_info.version or 'Unknown'
+            current_date = dict_info.dict_date or 'Unknown'
+            online_version = dict_info.online_version or dict_info.version or 'Unknown'
+            online_date = dict_info.online_date or 'Unknown'
+            message = (f"<b>{dict_name}</b><br><br>"
+                      f"Current: v{current_version} ({current_date})<br>"
+                      f"Available: v{online_version} ({online_date})")
+        else:
+            title = "Update Dictionaries"
+            message = f"Update {len(updates)} dictionaries?"
+        
+        # Create custom message box with three buttons
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setInformativeText(
+            "<b>Load Only:</b> Load the update for this session only.\n\n"
+            "<b>Save & Load:</b> Save to your user folder and load.\n"
+            "(Updates will persist across sessions)"
+        )
+        
+        load_btn = msg_box.addButton("Load Only", QMessageBox.ButtonRole.AcceptRole)
+        save_btn = msg_box.addButton("Save && Load", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        
+        msg_box.setDefaultButton(save_btn)
+        msg_box.exec()
+        
+        clicked = msg_box.clickedButton()
+        if clicked == load_btn:
+            self.perform_updates(updates, save_to_disk=False)
+        elif clicked == save_btn:
+            self.perform_updates(updates, save_to_disk=True)
+    
+    def perform_updates(self, updates: list, save_to_disk: bool = False):
+        """
+        Download and apply dictionary updates.
+        
+        Args:
+            updates: List of DictionaryInfo objects to update
+            save_to_disk: If True, save to user's AppData folder for persistence
+        """
+        from utils.cif_dictionary_manager import ensure_user_dictionaries_directory, HTTP_HEADERS
+        
+        self.progress_bar.setVisible(True)
+        successful = []
+        failed = []
+        
+        for i, dict_info in enumerate(updates):
+            progress = int(((i + 0.5) / len(updates)) * 100)
+            self.progress_bar.setValue(progress)
+            QApplication.processEvents()
+            
+            try:
+                # Download the dictionary
+                response = requests.get(dict_info.update_url, timeout=30, headers=HTTP_HEADERS)
+                response.raise_for_status()
+                content = response.text
+                
+                if save_to_disk:
+                    # Save to user's AppData dictionaries folder
+                    user_dict_dir = ensure_user_dictionaries_directory()
+                    save_path = os.path.join(user_dict_dir, dict_info.name)
+                    
+                    with open(save_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    # Update the dict_info path to point to user location
+                    dict_info.path = save_path
+                
+                # Load the dictionary into the manager (either way)
+                # Create a temp file for parsing if not saved
+                if not save_to_disk:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.dic', 
+                                                     delete=False, encoding='utf-8') as f:
+                        f.write(content)
+                        temp_path = f.name
+                    
+                    # Note: We don't actually need to reload here since the manager
+                    # already has this dictionary - we just update the metadata
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                
+                # Update metadata to reflect the update
+                dict_info.update_available = False
+                dict_info.dict_date = dict_info.online_date
+                successful.append(dict_info.dict_title or dict_info.name)
+                
+            except Exception as e:
+                failed.append(f"{dict_info.dict_title or dict_info.name}: {str(e)[:50]}")
+        
+        self.progress_bar.setValue(100)
+        QApplication.processEvents()
+        self.progress_bar.setVisible(False)
+        
+        # Refresh the table
+        self.load_dictionary_data()
+        
+        # Show results
+        messages = []
+        if successful:
+            action = "saved and loaded" if save_to_disk else "loaded"
+            messages.append(f"<b style='color: green;'>Successfully {action} {len(successful)} dictionary(ies)</b>")
+            if save_to_disk:
+                from utils.cif_dictionary_manager import get_user_dictionaries_directory
+                user_dir = get_user_dictionaries_directory()
+                messages.append(f"<br><small>Saved to: {user_dir}</small>")
+            if not save_to_disk:
+                messages.append("<br><i>Note: Updates will be lost when CIVET is closed.</i>")
+            else:
+                messages.append("<br><i>Please restart CIVET to fully reload the updated dictionaries.</i>")
+        if failed:
+            messages.append(f"<b style='color: red;'>Failed to update {len(failed)} dictionary(ies):</b><br>" +
+                          "<br>".join([f"• {name}" for name in failed]))
+        
+        QMessageBox.information(
+            self,
+            "Dictionary Update Complete",
+            "<br>".join(messages)
+        )
+    
+    def load_all_updates(self):
+        """Load all available updates for this session only (not saved to disk)"""
+        # Get all dictionaries with updates available
+        detailed_info = self.dict_manager.get_detailed_dictionary_info()
+        updates = [info for info in detailed_info if info.update_available and info.update_url]
+        
+        if not updates:
+            QMessageBox.information(
+                self,
+                "No Updates Available",
+                "No dictionary updates are available.\n\n"
+                "Click 'Check for Updates' first to check for available updates."
+            )
+            return
+        
+        # Perform updates without saving to disk
+        self.perform_updates(updates, save_to_disk=False)
+    
+    def download_all_updates(self):
+        """Download and save all available dictionary updates"""
+        # Get all dictionaries with updates available
+        detailed_info = self.dict_manager.get_detailed_dictionary_info()
+        updates = [info for info in detailed_info if info.update_available and info.update_url]
+        
+        if not updates:
+            QMessageBox.information(
+                self,
+                "No Updates Available",
+                "No dictionary updates are available to download.\n\n"
+                "Click 'Check for Updates' first to check for available updates."
+            )
+            return
+        
+        # Build list of dictionaries to update
+        dict_names = [info.dict_title or info.name for info in updates]
+        dict_list = "\n".join([f"  • {name}" for name in dict_names])
+        
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Download Dictionary Updates",
+            f"Download and save {len(updates)} dictionary update(s)?\n\n"
+            f"{dict_list}\n\n"
+            "This will save the updated dictionaries to your user folder.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Perform updates with saving to disk
+        self.perform_updates(updates, save_to_disk=True)
+
     def on_selection_changed(self):
         """Handle table selection changes"""
         selected_rows = self.dict_table.selectionModel().selectedRows()

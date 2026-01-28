@@ -23,6 +23,13 @@ from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
 from .cif_dictionary_parser import CIFDictionaryParser
+
+# HTTP headers to mimic browser requests (required for IUCr server which blocks plain requests)
+HTTP_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/plain, text/html, application/xhtml+xml, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
 
 
@@ -47,6 +54,46 @@ def get_resource_path(relative_path: str) -> str:
     return os.path.join(base_path, relative_path)
 
 
+def get_user_dictionaries_directory() -> str:
+    """
+    Get the path to the user's dictionaries directory.
+    
+    This is where user-downloaded/updated dictionaries are stored.
+    On Windows: %APPDATA%/CIVET/dictionaries
+    On macOS: ~/Library/Application Support/CIVET/dictionaries  
+    On Linux: ~/.config/CIVET/dictionaries
+    
+    This directory takes precedence over bundled dictionaries, allowing
+    users to update dictionaries even when running from a standalone executable.
+    
+    Returns:
+        Path to the user dictionaries directory
+    """
+    if sys.platform == 'win32':
+        base = os.environ.get('APPDATA', os.path.expanduser('~'))
+        config_dir = os.path.join(base, 'CIVET')
+    elif sys.platform == 'darwin':
+        config_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'CIVET')
+    else:
+        # Linux and other Unix-like systems
+        xdg_config = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~/.config'))
+        config_dir = os.path.join(xdg_config, 'CIVET')
+    
+    return os.path.join(config_dir, 'dictionaries')
+
+
+def ensure_user_dictionaries_directory() -> str:
+    """
+    Ensure the user dictionaries directory exists.
+    
+    Returns:
+        Path to the user dictionaries directory
+    """
+    user_dict_dir = get_user_dictionaries_directory()
+    os.makedirs(user_dict_dir, exist_ok=True)
+    return user_dict_dir
+
+
 # COMCIFS Dictionary URLs - Development versions from GitHub
 COMCIFS_DICTIONARIES = {
     'cif_core': {
@@ -67,7 +114,8 @@ COMCIFS_DICTIONARIES = {
     },
     'cif_topo': {
         # 'url': 'https://github.com/COMCIFS/TopoCif/blob/main/cif_topo.dic',
-        'url': 'https://raw.githubusercontent.com/COMCIFS/TopoCif/refs/heads/main/cif_topo.dic',
+        # 'url': 'https://raw.githubusercontent.com/COMCIFS/TopoCif/refs/heads/main/cif_topo.dic',
+        'url': 'https://raw.githubusercontent.com/COMCIFS/TopoCif/main/cif_topo.dic',
         'name': 'Topology Dictionary (cif_topo.dic)',
         'description': 'Topology descriptions',
         'source': 'COMCIF',
@@ -129,11 +177,11 @@ COMCIFS_DICTIONARIES = {
         'source': 'COMCIF',
         'status': 'development'
     },
-    'cif_rstr': {
-        # 'url': 'https://github.com/COMCIFS/Restraints_Dictionary/blob/main/cif_rstr.dic',
-        'url': 'https://raw.githubusercontent.com/COMCIFS/Restraints_Dictionary/refs/heads/main/cif_rstr.dic',
-        'name': 'Restraints Dictionary (cif_rstr.dic)',
-        'description': 'Restraints data',
+    'cif_restr': {
+        # Repository renamed from Restraints_Dictionary/cif_rstr to cif_restr/cif_restr
+        'url': 'https://raw.githubusercontent.com/COMCIFS/cif_restr/main/cif_restr.dic',
+        'name': 'Restraints Dictionary (cif_restr.dic)',
+        'description': 'Restraints and constraints data',
         'source': 'COMCIF',
         'status': 'development'
     }
@@ -249,18 +297,68 @@ class DictionaryInfo:
     is_active: bool = True             # Whether this dictionary is active for its type
     dict_title: Optional[str] = None   # Official dictionary title from _dictionary.title
     dict_date: Optional[str] = None    # Dictionary date from _dictionary.date
+    # Update availability fields (populated by check_for_updates)
+    update_available: Optional[bool] = None   # True if newer version available online
+    online_date: Optional[str] = None         # Date of online version (_dictionary.date)
+    online_version: Optional[str] = None      # Version of online version
+    update_url: Optional[str] = None          # URL to download the update
+    
+    # Known aliases for dictionary titles that should be treated as the same type
+    # Maps various _dictionary.title values (lowercase) to a normalized type
+    DICT_TITLE_ALIASES = {
+        # Core CIF dictionary has different titles in different versions
+        'cif_core': 'core',
+        'core_dic': 'core',
+        # Restraints dictionary (name changed from rstr to restr in 2026)
+        'cif_rstr': 'restr',    # Legacy name (pre-2026)
+        'cif_restr': 'restr',   # Current official name
+        # Other dictionaries
+        'cif_twin': 'twin',
+        'cif_shelxl': 'shelxl',
+        'cif_ed': 'ed',
+        'cif_pow': 'pow',
+        'cif_img': 'img',
+        'cif_mag': 'mag',
+        'cif_sym': 'sym',
+        'cif_mod': 'mod',
+        'cif_topo': 'topo',
+    }
     
     def __post_init__(self):
         if self.loaded_time is None:
             self.loaded_time = datetime.now().isoformat()
         if self.dict_type is None:
-            # Try to extract type from name (e.g., "cif_core.dic" -> "core")
+            # Extract type, preferring dict_title over filename
             self.dict_type = self._extract_dict_type()
     
     def _extract_dict_type(self) -> str:
-        """Extract dictionary type from filename"""
+        """
+        Extract dictionary type, using _dictionary.title if available.
+        
+        This normalizes dictionary types so that different versions of the same
+        dictionary (e.g., CIF_CORE vs CORE_DIC) are recognized as the same type.
+        """
+        # First, try to derive type from dict_title (most reliable)
+        if self.dict_title:
+            normalized = self.dict_title.lower().strip()
+            # Check alias mapping
+            if normalized in self.DICT_TITLE_ALIASES:
+                return self.DICT_TITLE_ALIASES[normalized]
+            # Try to extract type from title (e.g., "CIF_CORE" -> "core")
+            if normalized.startswith('cif_'):
+                return normalized[4:]  # Remove 'cif_' prefix
+            if normalized.endswith('_dic'):
+                return normalized[:-4]  # Remove '_dic' suffix
+            return normalized
+        
+        # Fallback: extract from filename, but strip version numbers
         name_lower = self.name.lower()
-        # Match patterns like cif_core, cif_pow, cif_img, etc.
+        # Match patterns like cif_core_3.2.0.dic -> extract just 'core'
+        # First try with version number pattern
+        match = re.match(r'cif[_-]([a-z]+)(?:[_-]\d+\.?\d*\.?\d*)?\.dic', name_lower)
+        if match:
+            return match.group(1)
+        # Try simpler pattern
         match = re.match(r'cif[_-](\w+)\.dic', name_lower)
         if match:
             return match.group(1)
@@ -307,7 +405,8 @@ class CIFDictionaryManager:
         """
         if cif_core_path is None:
             # Use resource path function to find bundled dictionary
-            cif_core_path = get_resource_path('dictionaries/cif_core.dic')
+            # Use the development version (3.3.0) as primary - it has 3D ED fields
+            cif_core_path = get_resource_path('dictionaries/cif_core_3.3.0.dic')
             
         self.parser = CIFDictionaryParser(cif_core_path)
         self._loaded = False
@@ -325,13 +424,14 @@ class CIFDictionaryManager:
         self._suggestion_manager = DictionarySuggestionManager()
         
         # Initialize primary dictionary info
-        primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core.dic')
-        source_type = DictionarySource.BUNDLED if 'dictionaries/cif_core.dic' in str(primary_path) else DictionarySource.FILE
+        primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core_3.3.0.dic')
+        source_type = DictionarySource.BUNDLED if 'dictionaries/' in str(primary_path) else DictionarySource.FILE
         
         # Read the primary dictionary file to extract metadata
         version = None
         dict_title = None
         dict_date = None
+        content = None
         if os.path.exists(primary_path):
             try:
                 with open(primary_path, 'r', encoding='utf-8') as f:
@@ -342,14 +442,12 @@ class CIFDictionaryManager:
             except Exception as e:
                 print(f"Warning: Could not read primary dictionary metadata: {e}")
         
-        # Create a descriptive name for the bundled dictionary
+        # Use the filename as the display name (includes version number)
         base_name = os.path.basename(primary_path)
-        if source_type == DictionarySource.BUNDLED:
-            # Add identifier for bundled version
-            base_without_ext = os.path.splitext(base_name)[0]
-            display_name = f"{base_without_ext} (Built-in).dic"
-        else:
-            display_name = base_name
+        display_name = base_name
+        
+        # Determine source and status from content (consistent with other dictionaries)
+        source, status = self._determine_dict_source_and_status(primary_path, content)
         
         primary_info = DictionaryInfo(
             name=display_name,
@@ -358,7 +456,9 @@ class CIFDictionaryManager:
             description="CIF Core Dictionary - Primary dictionary for standard crystallographic data",
             version=version,
             dict_title=dict_title,
-            dict_date=dict_date
+            dict_date=dict_date,
+            source=source,
+            status=status
         )
         
         if source_type == DictionarySource.FILE and os.path.exists(primary_path):
@@ -380,33 +480,74 @@ class CIFDictionaryManager:
         ]
         
     def _load_default_dictionaries(self):
-        """Load essential dictionaries by default"""
-        # Use resource path function to find bundled dictionaries
+        """Load all dictionary files from both user and bundled dictionaries folders.
+        
+        Loading order (user dictionaries take precedence):
+        1. User dictionaries folder (%APPDATA%/CIVET/dictionaries on Windows)
+        2. Bundled dictionaries folder
+        
+        This allows users to update dictionaries even when running from a standalone
+        executable. User-saved dictionaries override bundled ones with the same name.
+        
+        Dictionary files that cannot be parsed (e.g., DDL1/DDL2 format) are
+        silently skipped. Only DDLm format dictionaries are currently supported.
+        
+        Note: The primary dictionary (set during __init__) is skipped to avoid
+        loading it twice.
+        """
+        # Get the primary dictionary filename to skip it
+        primary_filename = os.path.basename(str(self.parser.cif_core_path))
+        
+        # Track which dictionaries have been loaded (by filename)
+        loaded_filenames = {primary_filename}
+        
+        # 1. First, load from user's dictionaries folder (takes precedence)
+        user_dict_dir = get_user_dictionaries_directory()
+        if os.path.exists(user_dict_dir):
+            try:
+                user_dic_files = [f for f in os.listdir(user_dict_dir) 
+                                 if f.endswith('.dic') and f not in loaded_filenames]
+                user_dic_files.sort()
+                
+                for dict_file in user_dic_files:
+                    dict_path = os.path.join(user_dict_dir, dict_file)
+                    try:
+                        self.add_dictionary(dict_path)
+                        loaded_filenames.add(dict_file)
+                    except Exception as e:
+                        # Silently skip dictionaries that fail to load
+                        pass
+            except OSError as e:
+                print(f"Warning: Could not read user dictionaries directory: {e}")
+        
+        # 2. Then, load from bundled dictionaries folder
         dictionaries_dir = get_resource_path("dictionaries")
         
-        # Load restraints dictionary by default
-        restraints_dict = os.path.join(dictionaries_dir, "cif_rstr.dic")
-        if os.path.exists(restraints_dict):
-            try:
-                self.add_dictionary(restraints_dict)
-            except Exception as e:
-                print(f"Warning: Could not load restraints dictionary: {e}")
+        if not os.path.exists(dictionaries_dir):
+            print(f"Warning: Dictionaries directory not found: {dictionaries_dir}")
+            return
         
-        # Load SHELXL restraints dictionary by default  
-        shelxl_dict = os.path.join(dictionaries_dir, "cif_shelxl.dic")
-        if os.path.exists(shelxl_dict):
-            try:
-                self.add_dictionary(shelxl_dict)
-            except Exception as e:
-                print(f"Warning: Could not load SHELXL dictionary: {e}")
+        # Find all .dic files in the dictionaries folder (skip already loaded)
+        try:
+            dic_files = [f for f in os.listdir(dictionaries_dir) 
+                        if f.endswith('.dic') and f not in loaded_filenames]
+        except OSError as e:
+            print(f"Warning: Could not read dictionaries directory: {e}")
+            return
         
-        # Load twinning dictionary by default
-        twinning_dict = os.path.join(dictionaries_dir, "cif_twin.dic")
-        if os.path.exists(twinning_dict):
+        # Sort files for consistent loading order (alphabetical)
+        dic_files.sort()
+        
+        # Load each dictionary file
+        for dict_file in dic_files:
+            dict_path = os.path.join(dictionaries_dir, dict_file)
             try:
-                self.add_dictionary(twinning_dict)
+                self.add_dictionary(dict_path)
+                loaded_filenames.add(dict_file)
             except Exception as e:
-                print(f"Warning: Could not load twinning dictionary: {e}")
+                # Silently skip dictionaries that fail to load
+                # (e.g., DDL1/DDL2 format not yet supported)
+                pass
         
     def _ensure_loaded(self):
         """Ensure all active dictionaries are loaded and merged (lazy loading)"""
@@ -1208,24 +1349,18 @@ class CIFDictionaryManager:
         """
         try:
             # Look for _dictionary.title in the content
-            # Title can be single or multi-line, possibly with quotes or semicolons
-            title_pattern = r'_dictionary\.title\s+[;\n]?\s*([^\n]+(?:\n(?!_)[^\n]+)*)'
+            # The title is typically a single word/identifier like CIF_CORE or CORE_DIC
+            # Format: _dictionary.title   VALUE
+            title_pattern = r'_dictionary\.title\s+([A-Za-z][A-Za-z0-9_-]*)'
             match = re.search(title_pattern, content)
             if match:
-                title = match.group(1).strip()
-                # Clean up semicolon delimiters and quotes
-                title = title.strip(';').strip("'\"").strip()
-                # Remove extra whitespace
-                title = ' '.join(title.split())
-                return title
+                return match.group(1).strip()
             
-            # Alternative: look for single-line title
-            simple_pattern = r'_dictionary\.title\s+(.+?)(?=\n_|\n\n|\Z)'
-            match = re.search(simple_pattern, content, re.DOTALL)
+            # Try quoted value
+            quoted_pattern = r'_dictionary\.title\s+[\'"]([^\'"]+)[\'"]'
+            match = re.search(quoted_pattern, content)
             if match:
-                title = match.group(1).strip().strip(';').strip("'\"").strip()
-                title = ' '.join(title.split())
-                return title
+                return match.group(1).strip()
                 
         except Exception as e:
             print(f"Warning: Could not extract dictionary title: {e}")
@@ -1267,28 +1402,92 @@ class CIFDictionaryManager:
     @staticmethod
     def _determine_dict_source_and_status(url_or_path: str, content: str = None) -> Tuple[Optional[str], Optional[str]]:
         """
-        Determine the source and status of a dictionary based on URL/path.
+        Determine the source and status of a dictionary based on URL/path and content.
+        
+        For local files, we analyze the dictionary content to determine:
+        - Source: Based on _dictionary.namespace (comcifs.github.io → COMCIF) or version pattern
+        - Status: Based on version string (-dev suffix → development) or comparison with IUCr releases
         
         Args:
             url_or_path: URL or file path of the dictionary
-            content: Optional dictionary content for version extraction
+            content: Optional dictionary content for analysis
             
         Returns:
             Tuple of (source, status) where:
                 source: 'COMCIF', 'IUCr', 'Local', or 'Custom'
                 status: 'release', 'development', or 'unknown'
         """
+        # Convert to string if it's a Path object
+        url_or_path = str(url_or_path)
         url_lower = url_or_path.lower()
         
-        # Check for IUCr official source
+        # Check for IUCr official source (URL-based)
         if 'iucr.org' in url_lower:
             return 'IUCr', 'release'
         
-        # Check for COMCIF GitHub (development versions)
+        # Check for COMCIF GitHub (development versions, URL-based)
         if 'github.com/comcifs' in url_lower or 'raw.githubusercontent.com/comcifs' in url_lower:
             return 'COMCIF', 'development'
         
-        # Local file
+        # For local files, analyze the content to determine source and status
+        if content:
+            source = None
+            status = None
+            
+            # Check for COMCIF namespace indicator
+            # Pattern: _dictionary.namespace   https://github.com/COMCIFS/...
+            if re.search(r'_dictionary\.namespace\s+.*(?:comcifs|github\.com/COMCIFS)', content, re.IGNORECASE):
+                source = 'COMCIF'
+            
+            # Check version for development indicators
+            version_match = re.search(r'_dictionary\.version\s+([^\s\n]+)', content)
+            if version_match:
+                version = version_match.group(1).strip("'\"")
+                # Development versions have -dev suffix
+                if '-dev' in version.lower() or 'dev' in version.lower():
+                    status = 'development'
+                    source = source or 'COMCIF'  # Dev versions typically from COMCIF
+                else:
+                    # Compare version with known IUCr release versions
+                    # IUCr releases: cif_core 3.2.0, cif_mag 0.9.8, etc.
+                    # If version is higher than known release, likely development
+                    iucr_releases = {
+                        'cif_core': '3.2.0',
+                        'cif_mag': '0.9.8',
+                        'cif_topo': '0.9.6',
+                        'cif_multiblock': '1.0.0',
+                        'cif_restr': '3.1.0',  # Restraints (name changed from cif_rstr)
+                        'cif_rstr': '3.1.0',   # Legacy name, same dictionary
+                        'cif_twin': '3.0.0',   # Twinning
+                    }
+                    # Check if this is a newer version than IUCr release
+                    for dict_key, release_version in iucr_releases.items():
+                        if dict_key.replace('_', '') in url_lower.replace('_', ''):
+                            try:
+                                # Simple version comparison (major.minor.patch)
+                                current_parts = [int(p) for p in version.split('-')[0].split('.')]
+                                release_parts = [int(p) for p in release_version.split('.')]
+                                # Pad to same length
+                                while len(current_parts) < len(release_parts):
+                                    current_parts.append(0)
+                                while len(release_parts) < len(current_parts):
+                                    release_parts.append(0)
+                                # Compare
+                                if current_parts > release_parts:
+                                    source = source or 'COMCIF'
+                                    status = 'development'
+                                elif current_parts == release_parts:
+                                    source = source or 'IUCr'
+                                    status = 'release'
+                            except (ValueError, AttributeError):
+                                pass
+                            break
+            
+            # If we found indicators in content, return them
+            if source or status:
+                return source or 'Local', status or 'unknown'
+        
+        # Local file without content analysis
         if os.path.isfile(url_or_path):
             return 'Local', 'unknown'
         
@@ -1321,11 +1520,17 @@ class CIFDictionaryManager:
             # Create parser for the additional dictionary
             additional_parser = CIFDictionaryParser(dictionary_path)
             
-            # Test that it can be parsed and contains valid mappings
+            # Test that it can be parsed and contains valid field definitions
+            # Note: Some dictionaries (like cif_topo) define only modern fields without
+            # legacy aliases, so we check for any known fields, not just mappings
             cif1_to_cif2, cif2_to_cif1 = additional_parser.parse_dictionary()
             
-            if not cif1_to_cif2 and not cif2_to_cif1:
-                raise ValueError(f"Dictionary file contains no valid CIF field mappings: {dictionary_path}")
+            # Check if dictionary has any valid field definitions (including those without aliases)
+            has_field_definitions = len(additional_parser._all_known_fields) > 0
+            has_mappings = bool(cif1_to_cif2) or bool(cif2_to_cif1)
+            
+            if not has_field_definitions and not has_mappings:
+                raise ValueError(f"Dictionary file contains no valid CIF field definitions: {dictionary_path}")
             
             # Add parser to list
             self._additional_parsers.append(additional_parser)
@@ -1341,12 +1546,15 @@ class CIFDictionaryManager:
             source, status = self._determine_dict_source_and_status(dictionary_path, content)
             
             # Create dictionary info
+            # Use field metadata count for accurate field count (includes fields without aliases)
+            field_count = len(additional_parser._field_metadata) or len(cif1_to_cif2)
+            
             dict_info = DictionaryInfo(
                 name=os.path.basename(dictionary_path),
                 path=dictionary_path,
                 source_type=DictionarySource.FILE,
                 size_bytes=os.path.getsize(dictionary_path),
-                field_count=len(cif1_to_cif2),
+                field_count=field_count,
                 description=self._extract_dictionary_description(dictionary_path),
                 version=version,
                 dict_title=dict_title,
@@ -1391,9 +1599,23 @@ class CIFDictionaryManager:
             ValueError: If dictionary format is invalid
         """
         try:
-            # Download the dictionary
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
+            # Download the dictionary (use headers to avoid being blocked by servers like IUCr)
+            response = requests.get(url, timeout=timeout, headers=HTTP_HEADERS)
+            
+            # Check for Cloudflare or similar bot protection (common with IUCr)
+            # These return 403 with JavaScript challenge pages
+            if response.status_code == 403:
+                if 'iucr.org' in url:
+                    raise requests.RequestException(
+                        f"IUCr server blocked automated access (Cloudflare protection). "
+                        f"Please download the dictionary manually from "
+                        f"https://www.iucr.org/resources/cif/dictionaries "
+                        f"and load it from a local file, or use the COMCIFS development versions instead."
+                    )
+                else:
+                    response.raise_for_status()
+            else:
+                response.raise_for_status()
             
             # Create a temporary file to store the dictionary
             with tempfile.NamedTemporaryFile(mode='w', suffix='.dic', delete=False, encoding='utf-8') as temp_file:
@@ -1404,11 +1626,17 @@ class CIFDictionaryManager:
                 # Create parser for the downloaded dictionary
                 additional_parser = CIFDictionaryParser(temp_path)
                 
-                # Test that it can be parsed and contains valid mappings
+                # Test that it can be parsed and contains valid field definitions
+                # Note: Some dictionaries (like cif_topo) define only modern fields without
+                # legacy aliases, so we check for any known fields, not just mappings
                 cif1_to_cif2, cif2_to_cif1 = additional_parser.parse_dictionary()
                 
-                if not cif1_to_cif2 and not cif2_to_cif1:
-                    raise ValueError(f"Downloaded dictionary contains no valid CIF field mappings: {url}")
+                # Check if dictionary has any valid field definitions (including those without aliases)
+                has_field_definitions = len(additional_parser._all_known_fields) > 0
+                has_mappings = bool(cif1_to_cif2) or bool(cif2_to_cif1)
+                
+                if not has_field_definitions and not has_mappings:
+                    raise ValueError(f"Downloaded dictionary contains no valid CIF field definitions: {url}")
                 
                 # Add parser to list
                 self._additional_parsers.append(additional_parser)
@@ -1439,12 +1667,15 @@ class CIFDictionaryManager:
                     dict_name = base_name
                 
                 # Create dictionary info
+                # Use field metadata count for accurate field count (includes fields without aliases)
+                field_count = len(additional_parser._field_metadata) or len(cif1_to_cif2)
+                
                 dict_info = DictionaryInfo(
                     name=dict_name,
                     path=url,  # Store original URL
                     source_type=DictionarySource.URL,
                     size_bytes=len(response.text.encode('utf-8')),
-                    field_count=len(cif1_to_cif2),
+                    field_count=field_count,
                     description=self._extract_dictionary_description(temp_path, response.text),
                     version=version,
                     dict_title=dict_title,
@@ -1722,6 +1953,153 @@ class CIFDictionaryManager:
             # Return at least basic info about the primary dictionary
             return [self._dictionary_infos[0]] if self._dictionary_infos else []
     
+    def check_for_updates(self, timeout: int = 10) -> Dict[str, Dict[str, Any]]:
+        """
+        Check if newer versions of loaded dictionaries are available online.
+        
+        Compares _dictionary.date of loaded dictionaries with online versions from:
+        - COMCIF GitHub (for development versions)
+        - IUCr (for release versions) - Note: May fail due to Cloudflare protection
+        
+        Args:
+            timeout: Request timeout in seconds (default 10)
+            
+        Returns:
+            Dictionary mapping dict_name to update info:
+            {
+                'dict_name': {
+                    'update_available': bool,
+                    'loaded_date': str or None,
+                    'online_date': str or None,
+                    'loaded_version': str or None,
+                    'online_version': str or None,
+                    'update_url': str or None,
+                    'error': str or None  # If check failed
+                }
+            }
+        """
+        results = {}
+        
+        # Map dict_type to online sources
+        # We match by dict_type (e.g., 'core', 'ed', 'mag') to find corresponding online URLs
+        for info in self._dictionary_infos:
+            dict_type = info.dict_type or ''
+            dict_name = info.name
+            
+            result = {
+                'update_available': None,
+                'loaded_date': info.dict_date,
+                'online_date': None,
+                'loaded_version': info.version,
+                'online_version': None,
+                'update_url': None,
+                'error': None
+            }
+            
+            # Find matching online source based on dict_type and preferred source
+            # For development dictionaries, check COMCIF; for release, check IUCr
+            online_url = None
+            
+            # Match dict_type to known dictionaries
+            # Handle version numbers in dict_type (e.g., 'core_3' -> 'core')
+            base_type = dict_type.split('_')[0] if dict_type else ''
+            
+            # Map base_type to dictionary keys
+            type_mapping = {
+                'core': 'cif_core',
+                'ed': 'cif_ed',
+                'mag': 'cif_mag',
+                'topo': 'cif_topo',
+                'twin': 'cif_twin',
+                'restr': 'cif_restr',  # Current name (changed from rstr in 2026)
+                'rstr': 'cif_restr',   # Legacy name redirects to current
+                'pow': 'cif_pow',
+                'img': 'cif_img',
+                'multiblock': 'cif_multiblock',
+                'ms': 'cif_ms',
+                'rho': 'cif_rho',
+                'shelxl': None,  # Not available online
+            }
+            
+            dict_key = type_mapping.get(base_type)
+            
+            if dict_key:
+                # Prefer COMCIF for development, IUCr for release
+                if info.status == 'development' and dict_key in COMCIFS_DICTIONARIES:
+                    online_url = COMCIFS_DICTIONARIES[dict_key]['url']
+                elif info.status == 'release' and dict_key in IUCR_DICTIONARIES:
+                    online_url = IUCR_DICTIONARIES[dict_key]['url']
+                elif dict_key in COMCIFS_DICTIONARIES:
+                    # Fallback to COMCIF if available
+                    online_url = COMCIFS_DICTIONARIES[dict_key]['url']
+            
+            if online_url:
+                result['update_url'] = online_url
+                try:
+                    # Fetch just enough of the file to get the metadata
+                    # Most dictionaries have _dictionary.date in the first ~5KB
+                    response = requests.get(online_url, timeout=timeout, headers=HTTP_HEADERS, stream=True)
+                    
+                    if response.status_code == 403:
+                        if 'iucr.org' in online_url:
+                            result['error'] = 'IUCr blocked (Cloudflare)'
+                        else:
+                            result['error'] = 'Access denied'
+                    elif response.status_code == 200:
+                        # Read first 10KB to find metadata
+                        content = ''
+                        for chunk in response.iter_content(chunk_size=10240, decode_unicode=True):
+                            if chunk:
+                                content += chunk
+                            if len(content) > 10240:
+                                break
+                        response.close()
+                        
+                        # Extract date and version from online content
+                        online_date = self._extract_dictionary_date(content)
+                        online_version = self._extract_dictionary_version(content)
+                        
+                        result['online_date'] = online_date
+                        result['online_version'] = online_version
+                        
+                        # Compare dates to determine if update is available
+                        if online_date and info.dict_date:
+                            try:
+                                # Parse dates (format: YYYY-MM-DD)
+                                loaded_date = datetime.strptime(info.dict_date, '%Y-%m-%d')
+                                remote_date = datetime.strptime(online_date, '%Y-%m-%d')
+                                result['update_available'] = remote_date > loaded_date
+                            except ValueError:
+                                # If date parsing fails, compare as strings
+                                result['update_available'] = online_date > info.dict_date
+                        elif online_date and not info.dict_date:
+                            # We have online date but not loaded date - assume update available
+                            result['update_available'] = True
+                        elif online_version and info.version:
+                            # Fallback to version comparison
+                            result['update_available'] = online_version != info.version
+                    else:
+                        result['error'] = f'HTTP {response.status_code}'
+                        
+                except requests.Timeout:
+                    result['error'] = 'Timeout'
+                except requests.RequestException as e:
+                    result['error'] = str(e)[:50]
+                except Exception as e:
+                    result['error'] = f'Error: {str(e)[:40]}'
+            else:
+                result['error'] = 'No online source'
+            
+            # Update the DictionaryInfo object with update status
+            info.update_available = result['update_available']
+            info.online_date = result['online_date']
+            info.online_version = result['online_version']
+            info.update_url = result['update_url']
+            
+            results[dict_name] = result
+        
+        return results
+
     def set_dictionary_active(self, dict_name: str, active: bool = True) -> bool:
         """
         Set a dictionary as active or inactive for its type.

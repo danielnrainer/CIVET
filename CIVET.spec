@@ -17,12 +17,11 @@ a = Analysis(
         ('field_rules/cleanups.cif_rules', 'field_rules'),    # Cleanup operations
         ('field_rules/checkcif_compatibility.cif_rules', 'field_rules'),  # checkCIF compatibility fields
         
-        # CIF Dictionary files - Essential for field validation and conversion
-        ('dictionaries/cif_core.dic', 'dictionaries'),        # Core CIF dictionary
-        ('dictionaries/cif_rstr.dic', 'dictionaries'),        # SHELXL restraints dictionary
-        ('dictionaries/cif_shelxl.dic', 'dictionaries'),      # SHELXL dictionary
-        ('dictionaries/cif_twin.dic', 'dictionaries'),        # Twinning dictionary
-        ('dictionaries/registered_prefixes.json', 'dictionaries'),  # Registered CIF prefixes (can be customized)
+        # CIF Dictionary files - All .dic files in dictionaries folder are bundled
+        # The application will automatically load all dictionaries at startup
+        # Dictionary filenames include version numbers (e.g., cif_core_3.3.0.dic)
+        ('dictionaries/*.dic', 'dictionaries'),               # All CIF dictionaries
+        ('dictionaries/registered_prefixes.json', 'dictionaries'),  # Registered CIF prefixes
         
         # Configuration files
         

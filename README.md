@@ -92,6 +92,12 @@ python CIVET/src/main.py
   - Orange: Unknown (not recognized)
   - Dark yellow with strikethrough: Deprecated
 
+### Dictionary Management
+- **Title-based dictionary type detection**: Uses internal `_dictionary.title` field with alias mapping for accurate type identification
+- **Interactive update system**: Check for updates, load for session only, or download and save to user folder
+- **Dictionary metadata display**: Shows title, version, date, and source (COMCIF development vs IUCr release)
+- **Bulk dictionary loading**: Load all dictionaries from COMCIF or IUCr with one click
+
 ### CIF2 Value Formatting
 - **Smart bracket quoting**: Automatically quotes values containing CIF2 special characters (`[`, `]`, `{`, `}`)
 - **Triple-quoted string support**: Supports `'''...'\'\'` and `"""..."""` for multiline values (CIF2 feature)
