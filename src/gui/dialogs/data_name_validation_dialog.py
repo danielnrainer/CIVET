@@ -48,7 +48,7 @@ class ManagePrefixesDialog(QDialog):
         """Build the dialog UI."""
         self.setWindowTitle("Manage Allowed Prefixes & Fields")
         self.setModal(True)
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(1000, 400)
         
         layout = QVBoxLayout(self)
         
@@ -258,7 +258,7 @@ class DataNameValidationDialog(QDialog):
         FieldCategory.DEPRECATED: {
             'icon': '⚡',
             'color': '#9b59b6',  # Purple
-            'label': 'Deprecated Fields',
+            'label': 'Deprecated Fields (⚠️checkCIF⇿dict contradications possible⚠️)',
             'expanded': True,
         },
         FieldCategory.REGISTERED_LOCAL: {
@@ -343,21 +343,25 @@ class DataNameValidationDialog(QDialog):
         self._create_button_section(layout)
     
     def _create_summary_section(self, layout: QVBoxLayout) -> None:
-        """Create the summary bar with counts."""
+        """Create the summary bar with counts and action instructions."""
         summary_frame = QFrame()
         summary_frame.setFrameShape(QFrame.Shape.StyledPanel)
         summary_frame.setStyleSheet("QFrame { background-color: palette(base); padding: 8px; }")
         
-        summary_layout = QHBoxLayout(summary_frame)
+        summary_layout = QVBoxLayout(summary_frame)
         summary_layout.setContentsMargins(12, 8, 12, 8)
+        summary_layout.setSpacing(8)
+        
+        # Top row: Total count and category counts
+        counts_layout = QHBoxLayout()
         
         # Total count - store reference for updates
         self.summary_total_label = QLabel(
             f"<b>Summary:</b> {self.validation_report.total_fields} fields checked"
         )
-        summary_layout.addWidget(self.summary_total_label)
+        counts_layout.addWidget(self.summary_total_label)
         
-        summary_layout.addStretch()
+        counts_layout.addStretch()
         
         # Category counts with icons - store references for updates
         self.count_labels: Dict[FieldCategory, QLabel] = {}
@@ -377,8 +381,23 @@ class DataNameValidationDialog(QDialog):
             count_label.setToolTip(f"{count} {config['label'].lower()}")
             if count == 0:
                 count_label.hide()
-            summary_layout.addWidget(count_label)
+            counts_layout.addWidget(count_label)
             self.count_labels[category] = count_label
+        
+        summary_layout.addLayout(counts_layout)
+        
+        # Bottom row: Action instructions
+        instructions_label = QLabel(
+            "<b>Actions:</b><br>"
+            "<span style='color: #27ae60;'>✓ Fix</span> = replace with correct name<br>"
+            "+ Prefix = add local prefix (this session)<br>"
+            "+ Field = allow field as is (this session)<br>"
+            "<span style='color: #c0392b;'>✕ Delete</span> = remove entry from CIF<br>"
+            "⊘ Skip = ignore or skip updating (this session)<br>"
+            "→ Update = replace deprecated field with modern equivalent"
+        )
+        instructions_label.setWordWrap(True)
+        summary_layout.addWidget(instructions_label)
         
         layout.addWidget(summary_frame)
     
@@ -430,11 +449,19 @@ class DataNameValidationDialog(QDialog):
     def _create_tree_section(self, layout: QVBoxLayout) -> None:
         """Create the tree widget for displaying categorized fields."""
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Field", "Details"])
+        self.tree.setHeaderLabels(["Field", "Details", "Actions"])
         self.tree.setRootIsDecorated(True)
         self.tree.setAlternatingRowColors(True)
-        self.tree.setColumnWidth(0, 250)
+        self.tree.setColumnWidth(0, 200)  # Field name column
+        self.tree.setColumnWidth(1, 200)  # Details column - restricted width
+        # Actions column (index 2) will auto-size and be right-aligned
         self.tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Right-align the Actions column header
+        header = self.tree.header()
+        header.setStretchLastSection(True)
+        # Set alignment for Actions column to right
+        # Note: We'll handle item alignment when creating buttons
         
         layout.addWidget(self.tree, stretch=1)
     
@@ -536,7 +563,7 @@ class DataNameValidationDialog(QDialog):
             field_result: Validation result for this field
             category: The field's category
         """
-        # Create field item
+        # Create field item with three columns: field name, details, actions (empty for now)
         details = field_result.description
         if field_result.line_number > 0:
             details = f"(line {field_result.line_number}) {details}"
@@ -545,14 +572,14 @@ class DataNameValidationDialog(QDialog):
         if field_result.suggested_dictionary:
             details += f" (try loading: {field_result.suggested_dictionary})"
         
-        field_item = QTreeWidgetItem([field_result.field_name, details])
+        field_item = QTreeWidgetItem([field_result.field_name, details, ""])
         parent_item.addChild(field_item)
         
         self._field_items[field_result.field_name.lower()] = field_item
         
-        # Create widget with action buttons
+        # Create widget with action buttons in column 2 (Actions)
         button_widget = self._create_action_buttons(field_result, category)
-        self.tree.setItemWidget(field_item, 1, button_widget)
+        self.tree.setItemWidget(field_item, 2, button_widget)
     
     def _create_action_buttons(
         self,
@@ -561,6 +588,8 @@ class DataNameValidationDialog(QDialog):
     ) -> QWidget:
         """
         Create action buttons for a field based on its category.
+        Uses icons and short labels with full text in tooltips to ensure consistency
+        and prevent text cutoff issues. All buttons use uniform width for consistency.
         
         Args:
             field_result: Validation result for this field
@@ -572,22 +601,13 @@ class DataNameValidationDialog(QDialog):
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
         
-        # Add description label
-        details = field_result.description
-        if field_result.line_number > 0:
-            details = f"(line {field_result.line_number}) {details}"
-        if field_result.modern_equivalent:
-            details += f" → {field_result.modern_equivalent}"
-        if field_result.suggested_dictionary:
-            details += f" (try: {field_result.suggested_dictionary})"
-        
-        label = QLabel(details)
-        label.setStyleSheet("color: gray;")
-        layout.addWidget(label)
-        
+        # Add stretch first to right-align all buttons
         layout.addStretch()
+        
+        # Consistent button width for all buttons
+        BUTTON_WIDTH = 70
         
         field_name = field_result.field_name
         prefix = field_result.prefix
@@ -597,8 +617,13 @@ class DataNameValidationDialog(QDialog):
         if category == FieldCategory.UNKNOWN:
             # Correct format button (if format suggestion is available for embedded prefixes)
             if field_result.suggested_format:
-                correct_btn = QPushButton(f"Correct to {field_result.suggested_format}")
-                correct_btn.setToolTip(f"Apply correct dot notation: {field_result.suggested_format}")
+                correct_btn = QPushButton("✓ Fix")
+                correct_btn.setMaximumWidth(BUTTON_WIDTH)
+                correct_btn.setToolTip(
+                    f"Correct field name from '{field_name}'\n"
+                    f"to '{field_result.suggested_format}'\n"
+                    f"(proper dot notation)"
+                )
                 correct_btn.setStyleSheet("color: #27ae60;")  # Green
                 correct_btn.clicked.connect(
                     lambda checked, fn=field_name, sf=field_result.suggested_format: 
@@ -608,24 +633,36 @@ class DataNameValidationDialog(QDialog):
             
             # Allow prefix button (if prefix exists - use embedded_prefix if available)
             if effective_prefix:
-                allow_prefix_btn = QPushButton(f"Allow _{effective_prefix}_")
-                allow_prefix_btn.setToolTip(f"Add '{effective_prefix}' to allowed prefixes list")
+                allow_prefix_btn = QPushButton("+ Prefix")
+                allow_prefix_btn.setMaximumWidth(BUTTON_WIDTH)
+                allow_prefix_btn.setToolTip(
+                    f"Add prefix '_{effective_prefix}_' to\n"
+                    f"your allowed prefixes list"
+                )
                 allow_prefix_btn.clicked.connect(
                     lambda checked, fn=field_name, p=effective_prefix: self._on_allow_prefix(fn, p)
                 )
                 layout.addWidget(allow_prefix_btn)
             
             # Allow field button
-            allow_field_btn = QPushButton("Allow field")
-            allow_field_btn.setToolTip("Add this specific field to allowed list")
+            allow_field_btn = QPushButton("+ Field")
+            allow_field_btn.setMaximumWidth(BUTTON_WIDTH)
+            allow_field_btn.setToolTip(
+                f"Add '{field_name}' to your\n"
+                f"allowed fields list"
+            )
             allow_field_btn.clicked.connect(
                 lambda checked, fn=field_name: self._on_allow_field(fn)
             )
             layout.addWidget(allow_field_btn)
             
             # Delete button
-            delete_btn = QPushButton("Delete")
-            delete_btn.setToolTip("Mark this field for deletion from CIF")
+            delete_btn = QPushButton("✕ Delete")
+            delete_btn.setMaximumWidth(BUTTON_WIDTH)
+            delete_btn.setToolTip(
+                f"Mark '{field_name}' for deletion\n"
+                f"from the CIF file"
+            )
             delete_btn.setStyleSheet("color: #c0392b;")
             delete_btn.clicked.connect(
                 lambda checked, fn=field_name: self._on_delete_field(fn)
@@ -633,8 +670,12 @@ class DataNameValidationDialog(QDialog):
             layout.addWidget(delete_btn)
             
             # Ignore button
-            ignore_btn = QPushButton("Ignore")
-            ignore_btn.setToolTip("Ignore this field for this session only")
+            ignore_btn = QPushButton("⊘ Skip")
+            ignore_btn.setMaximumWidth(BUTTON_WIDTH)
+            ignore_btn.setToolTip(
+                f"Ignore '{field_name}' for\n"
+                f"this session only"
+            )
             ignore_btn.clicked.connect(
                 lambda checked, fn=field_name: self._on_ignore_field(fn)
             )
@@ -645,26 +686,38 @@ class DataNameValidationDialog(QDialog):
             
             # Update button (if modern equivalent exists)
             if modern_name:
-                update_btn = QPushButton(f"Update to {modern_name}")
-                update_btn.setToolTip(f"Replace with modern equivalent: {modern_name}")
+                update_btn = QPushButton("→ Update")
+                update_btn.setMaximumWidth(BUTTON_WIDTH)
+                update_btn.setToolTip(
+                    f"Replace deprecated field '{field_name}'\n"
+                    f"with modern equivalent '{modern_name}'"
+                )
                 update_btn.clicked.connect(
                     lambda checked, fn=field_name, mn=modern_name: self._on_update_deprecated(fn, mn)
                 )
                 layout.addWidget(update_btn)
             
-            # Keep button
-            keep_btn = QPushButton("Keep as-is")
-            keep_btn.setToolTip("Keep the deprecated field name")
-            keep_btn.clicked.connect(
-                lambda checked, fn=field_name: self._on_keep_deprecated(fn)
+            # Skip button
+            skip_btn = QPushButton("⊘ Skip")
+            skip_btn.setMaximumWidth(BUTTON_WIDTH)
+            skip_btn.setToolTip(
+                f"Skip updating '{field_name}'\n"
+                f"and keep as-is (this session)"
             )
-            layout.addWidget(keep_btn)
+            skip_btn.clicked.connect(
+                lambda checked, fn=field_name: self._on_skip_deprecated(fn)
+            )
+            layout.addWidget(skip_btn)
         
         elif category == FieldCategory.REGISTERED_LOCAL:
             # Info only - no actions needed but could allow adding to user allowed
             if prefix:
-                allow_prefix_btn = QPushButton(f"Add _{prefix}_ to allowed")
-                allow_prefix_btn.setToolTip("Add this registered prefix to your personal allowed list")
+                allow_prefix_btn = QPushButton("+ Prefix")
+                allow_prefix_btn.setMaximumWidth(BUTTON_WIDTH)
+                allow_prefix_btn.setToolTip(
+                    f"Add prefix '_{prefix}_' to your\n"
+                    f"personal allowed prefixes list"
+                )
                 allow_prefix_btn.clicked.connect(
                     lambda checked, fn=field_name, p=prefix: self._on_allow_prefix(fn, p)
                 )
@@ -757,23 +810,23 @@ class DataNameValidationDialog(QDialog):
             modern_name: The modern replacement name
         """
         self._deprecated_updates[field_name.lower()] = modern_name
-        self._pending_actions[field_name.lower()] = FieldAction.KEEP  # Using KEEP as placeholder
+        self._pending_actions[field_name.lower()] = FieldAction.DEPRECATION_UPDATE
         
         # Update UI to show pending action
         self._mark_field_as_handled(field_name, f"Will update to {modern_name}", color="#27ae60")
         self._update_apply_button()
     
-    def _on_keep_deprecated(self, field_name: str) -> None:
+    def _on_skip_deprecated(self, field_name: str) -> None:
         """
-        Mark deprecated field to keep as-is.
+        Mark deprecated field to skip updating (keep as-is).
         
         Args:
-            field_name: The field to keep
+            field_name: The field to skip updating
         """
-        self._pending_actions[field_name.lower()] = FieldAction.KEEP
+        self._pending_actions[field_name.lower()] = FieldAction.IGNORE_SESSION
         
         # Update UI to show pending action
-        self._mark_field_as_handled(field_name, "Will keep as-is")
+        self._mark_field_as_handled(field_name, "Will skip updating")
         self._update_apply_button()
     
     def _mark_field_as_handled(
@@ -792,7 +845,7 @@ class DataNameValidationDialog(QDialog):
         """
         field_item = self._field_items.get(field_name.lower())
         if field_item:
-            # Replace the button widget with a status label
+            # Replace the button widget with a status label in Actions column (column 2)
             status_widget = QWidget()
             status_layout = QHBoxLayout(status_widget)
             status_layout.setContentsMargins(4, 2, 4, 2)
@@ -810,7 +863,7 @@ class DataNameValidationDialog(QDialog):
             
             status_layout.addStretch()
             
-            self.tree.setItemWidget(field_item, 1, status_widget)
+            self.tree.setItemWidget(field_item, 2, status_widget)
     
     def _on_undo_action(self, field_name: str) -> None:
         """
@@ -842,11 +895,11 @@ class DataNameValidationDialog(QDialog):
                 if not other_fields_with_prefix:
                     self._prefixes_to_allow.discard(field_result.prefix.lower())
             
-            # Restore the action buttons
+            # Restore the action buttons in Actions column (column 2)
             field_item = self._field_items.get(field_name_lower)
             if field_item:
                 button_widget = self._create_action_buttons(field_result, field_result.category)
-                self.tree.setItemWidget(field_item, 1, button_widget)
+                self.tree.setItemWidget(field_item, 2, button_widget)
         
         self._update_apply_button()
         self._update_prefixes_label()
