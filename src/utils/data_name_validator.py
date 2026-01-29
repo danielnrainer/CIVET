@@ -49,6 +49,7 @@ class FieldAction(Enum):
     ALLOW_FIELD = "allow_field"        # Add specific field to allowed list
     IGNORE_SESSION = "ignore_session"  # Ignore for this session only
     CORRECT_FORMAT = "correct_format"  # Apply suggested format correction
+    DEPRECATION_UPDATE = "deprecation_update"  # Add modern equivalent alongside deprecated field
 
 
 @dataclass

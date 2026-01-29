@@ -393,8 +393,8 @@ class DataNameValidationDialog(QDialog):
             "+ Prefix = add local prefix (this session)<br>"
             "+ Field = allow field as is (this session)<br>"
             "<span style='color: #c0392b;'>✕ Delete</span> = remove entry from CIF<br>"
-            "⊘ Skip = ignore or skip updating (this session)<br>"
-            "→ Update = replace deprecated field with modern equivalent"
+            "⊘ Skip = ignore field (this session)<br>"
+            "<span style='color: #27ae60;'>+ Modern</span> = add modern equivalent (keep both)"
         )
         instructions_label.setWordWrap(True)
         summary_layout.addWidget(instructions_label)
@@ -684,25 +684,27 @@ class DataNameValidationDialog(QDialog):
         elif category == FieldCategory.DEPRECATED:
             modern_name = field_result.modern_equivalent
             
-            # Update button (if modern equivalent exists)
+            # Add Modern button (if modern equivalent exists)
             if modern_name:
-                update_btn = QPushButton("→ Update")
-                update_btn.setMaximumWidth(BUTTON_WIDTH)
-                update_btn.setToolTip(
-                    f"Replace deprecated field '{field_name}'\n"
-                    f"with modern equivalent '{modern_name}'"
+                add_modern_btn = QPushButton("+ Modern")
+                add_modern_btn.setMaximumWidth(BUTTON_WIDTH)
+                add_modern_btn.setStyleSheet("color: #27ae60;")  # Green
+                add_modern_btn.setToolTip(
+                    f"Add modern equivalent '{modern_name}'\n"
+                    f"alongside deprecated '{field_name}'\n"
+                    f"(both fields will have the same value)"
                 )
-                update_btn.clicked.connect(
+                add_modern_btn.clicked.connect(
                     lambda checked, fn=field_name, mn=modern_name: self._on_update_deprecated(fn, mn)
                 )
-                layout.addWidget(update_btn)
+                layout.addWidget(add_modern_btn)
             
             # Skip button
             skip_btn = QPushButton("⊘ Skip")
             skip_btn.setMaximumWidth(BUTTON_WIDTH)
             skip_btn.setToolTip(
-                f"Skip updating '{field_name}'\n"
-                f"and keep as-is (this session)"
+                f"Skip adding modern equivalent\n"
+                f"(keep only '{field_name}')"
             )
             skip_btn.clicked.connect(
                 lambda checked, fn=field_name: self._on_skip_deprecated(fn)
@@ -803,17 +805,20 @@ class DataNameValidationDialog(QDialog):
     
     def _on_update_deprecated(self, field_name: str, modern_name: str) -> None:
         """
-        Mark deprecated field for update to modern equivalent.
+        Mark deprecated field to have its modern equivalent added alongside.
+        
+        Per expert advice, both the deprecated field AND its modern equivalent
+        should exist in the CIF with the same value for maximum compatibility.
         
         Args:
-            field_name: The deprecated field name
-            modern_name: The modern replacement name
+            field_name: The deprecated field name (will be kept)
+            modern_name: The modern equivalent to add
         """
         self._deprecated_updates[field_name.lower()] = modern_name
         self._pending_actions[field_name.lower()] = FieldAction.DEPRECATION_UPDATE
         
         # Update UI to show pending action
-        self._mark_field_as_handled(field_name, f"Will update to {modern_name}", color="#27ae60")
+        self._mark_field_as_handled(field_name, f"Will add {modern_name}", color="#27ae60")
         self._update_apply_button()
     
     def _on_skip_deprecated(self, field_name: str) -> None:

@@ -1011,9 +1011,9 @@ class CIFEditor(QMainWindow):
         if self.dict_manager.is_field_deprecated(prefix):
             modern_equivalent = self.dict_manager.get_modern_equivalent(prefix, prefer_format="legacy")
             if modern_equivalent:
-                # Automatically replace deprecated field with modern equivalent and create deprecated section
-                # No user confirmation needed as requested
-                return self._replace_deprecated_field(prefix, modern_equivalent)
+                # Add modern equivalent alongside deprecated field (keep both with same value)
+                # Per expert advice: both deprecated and modern fields should coexist
+                return self._add_modern_equivalent_field(prefix, modern_equivalent)
             else:
                 # No modern equivalent available
                 # For legacy CIF files, deprecated fields are expected and valid - skip warning
@@ -1109,8 +1109,22 @@ class CIFEditor(QMainWindow):
         # Otherwise, use the normal missing line dialog
         return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
     
-    def _replace_deprecated_field(self, deprecated_field, modern_field):
-        """Replace a deprecated field with its modern equivalent in the CIF content and create deprecated section"""
+    def _add_modern_equivalent_field(self, deprecated_field: str, modern_field: str):
+        """
+        Add the modern equivalent field alongside a deprecated field.
+        
+        Per expert advice, both the deprecated field AND its modern equivalent should
+        exist in the CIF with the same value. This ensures compatibility with both
+        legacy tools (that expect deprecated names) and modern tools (that expect
+        new names).
+        
+        Args:
+            deprecated_field: The deprecated field name (kept in place)
+            modern_field: The modern equivalent field name (added if not present)
+            
+        Returns:
+            QDialog.DialogCode.Accepted if successful, Rejected otherwise
+        """
         content = self.text_editor.toPlainText()
         
         # Parse the CIF content using the CIF parser
@@ -1121,43 +1135,45 @@ class CIFEditor(QMainWindow):
             QMessageBox.warning(
                 self, 
                 "Field Not Found", 
-                f"Could not find deprecated field '{deprecated_field}' to replace"
+                f"Could not find deprecated field '{deprecated_field}'"
             )
             return QDialog.DialogCode.Rejected
+        
+        # Check if modern field already exists
+        if modern_field in self.cif_parser.fields:
+            QMessageBox.information(
+                self, 
+                "Already Present", 
+                f"The modern equivalent '{modern_field}' is already present in the CIF.\n\n"
+                f"Both the deprecated field '{deprecated_field}' and its modern equivalent exist."
+            )
+            return QDialog.DialogCode.Accepted
         
         # Get the current value of the deprecated field
         deprecated_field_obj = self.cif_parser.fields[deprecated_field]
         field_value = deprecated_field_obj.value
         
-        # Remove the deprecated field from the main content
-        del self.cif_parser.fields[deprecated_field]
-        
-        # Add the modern field with the same value
+        # Create the modern field with the same value
         modern_field_obj = CIFField(
             name=modern_field,
             value=field_value,
             is_multiline=deprecated_field_obj.is_multiline,
-            line_number=deprecated_field_obj.line_number,
-            raw_lines=deprecated_field_obj.raw_lines
-        )
-        self.cif_parser.fields[modern_field] = modern_field_obj
-        
-        # Create a deprecated field object for the deprecated section
-        deprecated_for_section = CIFField(
-            name=deprecated_field,
-            value=field_value,
-            is_multiline=deprecated_field_obj.is_multiline,
-            line_number=None,  # Will be placed in deprecated section
+            line_number=None,  # Will be placed after the deprecated field
             raw_lines=[]
         )
         
-        # Add deprecated section with the field by default
-        self.cif_parser._add_deprecated_section_to_blocks([deprecated_for_section], self.dict_manager)
+        # Add the modern field to the parser's fields
+        self.cif_parser.fields[modern_field] = modern_field_obj
         
-        # Update the content blocks to replace the deprecated field with modern field in the main content
-        for block in self.cif_parser.content_blocks:
+        # Find the deprecated field in content_blocks and insert modern field after it
+        for i, block in enumerate(self.cif_parser.content_blocks):
             if block['type'] == 'field' and hasattr(block['content'], 'name') and block['content'].name == deprecated_field:
-                block['content'] = modern_field_obj
+                # Insert the modern field block right after the deprecated field
+                new_block = {
+                    'type': 'field',
+                    'content': modern_field_obj
+                }
+                self.cif_parser.content_blocks.insert(i + 1, new_block)
                 break
         
         # Generate updated CIF content and update the text editor
@@ -1166,9 +1182,9 @@ class CIFEditor(QMainWindow):
         
         QMessageBox.information(
             self, 
-            "Field Updated", 
-            f"Successfully replaced deprecated field '{deprecated_field}' with '{modern_field}'\n\n"
-            f"The deprecated field has been moved to a deprecated section at the end of the file for legacy compatibility."
+            "Modern Field Added", 
+            f"Added modern equivalent '{modern_field}' with the same value as '{deprecated_field}'.\n\n"
+            f"Both fields now exist in the CIF for maximum compatibility."
         )
         return QDialog.DialogCode.Accepted
     
@@ -2586,7 +2602,7 @@ class CIFEditor(QMainWindow):
             return False
     
     def _resolve_deprecated_fields(self, deprecated_fields: List[Dict], initial_state: str) -> bool:
-        """Resolve deprecated fields by replacing them with modern equivalents."""
+        """Resolve deprecated fields by adding modern equivalents alongside them."""
         try:
             resolved_count = 0
             changes_made = []
@@ -2596,21 +2612,22 @@ class CIFEditor(QMainWindow):
                 modern_equiv = dep_field['modern']
                 
                 if modern_equiv:
-                    # Automatically replace the deprecated field
-                    result = self._replace_deprecated_field(field_name, modern_equiv)
+                    # Add the modern field alongside the deprecated one (keep both)
+                    result = self._add_modern_equivalent_field(field_name, modern_equiv)
                     if result == QDialog.DialogCode.Accepted:
                         resolved_count += 1
-                        changes_made.append(f"Replaced {field_name} → {modern_equiv}")
+                        changes_made.append(f"Added {modern_equiv} (kept {field_name})")
             
             if resolved_count > 0:
-                change_summary = f"✅ Successfully modernized {resolved_count} deprecated field(s):\n\n"
+                change_summary = f"✅ Added modern equivalents for {resolved_count} deprecated field(s):\n\n"
                 for change in changes_made:
                     change_summary += f"• {change}\n"
+                change_summary += "\nBoth deprecated and modern field names now exist in the CIF."
                 
-                QMessageBox.information(self, "Deprecated Fields Modernized", change_summary)
+                QMessageBox.information(self, "Modern Equivalents Added", change_summary)
             else:
                 QMessageBox.information(self, "No Changes Made", 
-                                      "No deprecated fields could be automatically modernized.")
+                                      "No modern equivalents could be added (they may already exist).")
             
             return True
             
@@ -3036,7 +3053,7 @@ class CIFEditor(QMainWindow):
         
         This handles:
         - Deleting fields marked for deletion
-        - Updating deprecated fields to their modern equivalents
+        - Adding modern equivalents alongside deprecated fields (keeping both)
         - Correcting embedded local prefix format (e.g., _chemical_oxdiff_formula → _chemical_oxdiff.formula)
         - The dialog already updates the validator's allowed lists
         """
@@ -3046,13 +3063,28 @@ class CIFEditor(QMainWindow):
         # Get fields to delete
         fields_to_delete = dialog.get_fields_to_delete()
         
-        # Get deprecated updates (old_name -> new_name)
+        # Get deprecated updates (old_name -> new_name) - now we ADD modern alongside deprecated
         deprecated_updates = dialog.get_deprecated_updates()
         
         # Get format corrections (old_name -> corrected_name)
         format_corrections = dialog.get_format_corrections()
         
-        if fields_to_delete or deprecated_updates or format_corrections:
+        # First, check which modern fields already exist (to avoid duplicates)
+        existing_fields = set()
+        for line in content.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('_'):
+                parts = stripped.split(None, 1)
+                if parts:
+                    existing_fields.add(parts[0].lower())
+        
+        # Filter deprecated_updates to only add modern fields that don't already exist
+        deprecated_to_add = {}
+        for old_name, new_name in deprecated_updates.items():
+            if new_name.lower() not in existing_fields:
+                deprecated_to_add[old_name] = new_name
+        
+        if fields_to_delete or deprecated_to_add or format_corrections:
             lines = content.split('\n')
             new_lines = []
             in_multiline = False
@@ -3099,14 +3131,17 @@ class CIFEditor(QMainWindow):
                             # Single line value, skip this line
                             continue
                     
-                    # Check if field should be updated (deprecated -> modern)
-                    if field_name in deprecated_updates:
-                        new_name = deprecated_updates[field_name]
+                    # Check if we should add modern equivalent after deprecated field
+                    if field_name in deprecated_to_add:
+                        new_name = deprecated_to_add[field_name]
+                        # Keep the original deprecated line
+                        new_lines.append(line)
+                        # Add the modern equivalent with the same value after it
                         if len(parts) > 1:
                             # Field has value on same line
                             new_lines.append(f"{new_name} {parts[1]}")
                         else:
-                            # Field name only
+                            # Field name only (value on next line) - just add the name
                             new_lines.append(new_name)
                         modified = True
                         continue
@@ -3135,8 +3170,8 @@ class CIFEditor(QMainWindow):
                 changes_summary = []
                 if fields_to_delete:
                     changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
-                if deprecated_updates:
-                    changes_summary.append(f"Updated {len(deprecated_updates)} deprecated field(s)")
+                if deprecated_to_add:
+                    changes_summary.append(f"Added modern equivalents for {len(deprecated_to_add)} deprecated field(s)")
                 if format_corrections:
                     changes_summary.append(f"Corrected format of {len(format_corrections)} field(s)")
                 
