@@ -2,11 +2,13 @@
 # CIVET PyInstaller Spec File
 # ============================
 # Cross-platform build configuration for Windows, macOS, and Linux.
+# Generates standalone executables with bundled Python runtime and dependencies.
 #
 # Build Instructions:
 #   Windows:  pyinstaller CIVET.spec
 #   macOS:    pyinstaller CIVET.spec
 #   Linux:    pyinstaller CIVET.spec
+#
 #
 # User data is stored in platform-specific locations:
 #   Windows: %APPDATA%/CIVET/
@@ -34,7 +36,6 @@ a = Analysis(
         # Field definition files for validation
         ('field_rules/3ded.cif_rules', 'field_rules'),        # 3D ED field rules
         ('field_rules/3ded_legacy.cif_rules', 'field_rules'), # 3D ED field rules in legacy format
-        ('field_rules/hp.cif_rules', 'field_rules'),          # High-pressure field rules
         ('field_rules/cleanups.cif_rules', 'field_rules'),    # Cleanup operations
         ('field_rules/checkcif_compatibility.cif_rules', 'field_rules'),  # checkCIF compatibility fields
         
@@ -75,6 +76,9 @@ a = Analysis(
         'gui.dialogs.format_conversion_dialog',
         'gui.dialogs.editor_settings_dialog',
         'gui.dialogs.about_dialog',
+        'gui.dialogs.data_name_validation_dialog',
+        'gui.dialogs.critical_issues_dialog',
+        'gui.dialogs.recognised_prefixes_dialog',
         'version',
         
         # Utility modules - Core functionality
@@ -90,6 +94,9 @@ a = Analysis(
         'utils.user_config',              # Unified configuration management
         'utils.user_field_rules',         # User field rules management
         'utils.registered_prefixes',      # CIF prefix registry
+        'utils.data_name_validator',      # CIF data name validation
+        'utils.cif2_value_formatting',    # CIF2 value formatting
+        'utils.format_compatibility_warning',  # Modern format warning system
         
         # Third-party libraries
         'requests',
@@ -146,7 +153,7 @@ exe = EXE(
     debug=False,                          # Set to True for debugging builds
     bootloader_ignore_signals=False,
     strip=False,                          # Don't strip symbols for better error messages
-    upx=True,                            # Compress executable (set to False if issues)
+    upx=False,                           # UPX compression disabled - some antivirus flags UPX compressed binaries
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,                        # No console window for GUI app
