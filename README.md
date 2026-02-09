@@ -120,8 +120,14 @@ _diffrn_ambient_temperature   293      # Temperature in K
 # Special actions:
 DELETE: _field_to_remove           # Removes field from CIF
 EDIT: _field_name new_value        # Replaces field value
+RENAME: _old_name _new_name        # Renames field (for correcting erroneous field names)
+CALCULATE: _field = expression     # Calculates value from other fields
 APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  # Appends to multiline field
-    Multiple APPEND entries (in the same .cif_rules file) for the same CIF field (data name) will be concatenated 
+    Multiple APPEND entries (in the same .cif_rules file) for the same CIF field (data name) will be concatenated
+
+# CALCULATE example - convert fluence to flux density:
+# CrysAlisPRO reports fluence (e/Å²) as _diffrn.flux_density, but flux density is e/Å²/s
+CALCULATE: _diffrn.flux_density = _diffrn.flux_density / (_diffrn.total_exposure_time * 60) 
 ```
 
 Built-in sets: **3DED** (electron diffraction)

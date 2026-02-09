@@ -286,3 +286,151 @@ def contains_cif2_special_chars(value: str) -> bool:
     if not value:
         return False
     return any(c in CIF2_SPECIAL_CHARS for c in value)
+
+
+def validate_cif2_content(content: str) -> list:
+    """
+    Validate CIF content for CIF2 compliance issues.
+    
+    Checks for:
+    - Unquoted values containing CIF2 special characters ([ ] { })
+    - Values that should be quoted but aren't
+    
+    Args:
+        content: The full CIF file content
+        
+    Returns:
+        List of tuples: (line_number, field_name, value, issue_description)
+        Empty list if no issues found.
+    """
+    issues = []
+    lines = content.split('\n')
+    
+    in_semicolon_block = False
+    current_field = None
+    
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        
+        # Track semicolon-delimited multiline values
+        if stripped.startswith(';'):
+            in_semicolon_block = not in_semicolon_block
+            continue
+        
+        if in_semicolon_block:
+            continue
+        
+        # Skip empty lines, comments, and CIF keywords
+        if not stripped or stripped.startswith('#') or stripped.startswith('data_') or stripped.startswith('loop_'):
+            continue
+        
+        # Check for field definitions
+        if stripped.startswith('_'):
+            parts = stripped.split(None, 1)
+            field_name = parts[0]
+            
+            if len(parts) > 1:
+                value = parts[1]
+                current_field = field_name
+                
+                # Check if value is quoted
+                if not _is_value_quoted(value):
+                    # Check for CIF2 special characters
+                    if contains_cif2_special_chars(value):
+                        issues.append((
+                            i, field_name, value,
+                            f"Unquoted value contains CIF2 special characters ([ ] {{ }})"
+                        ))
+            else:
+                # Value might be on next line
+                current_field = field_name
+    
+    return issues
+
+
+def fix_cif2_compliance_issues(content: str) -> tuple:
+    """
+    Automatically fix CIF2 compliance issues in content.
+    
+    Fixes:
+    - Unquoted values containing CIF2 special characters by adding quotes
+    
+    Args:
+        content: The CIF file content
+        
+    Returns:
+        Tuple of (fixed_content, list_of_fixes_applied)
+        Each fix is (line_number, field_name, old_value, new_value)
+    """
+    fixes = []
+    lines = content.split('\n')
+    
+    in_semicolon_block = False
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Track semicolon-delimited multiline values
+        if stripped.startswith(';'):
+            in_semicolon_block = not in_semicolon_block
+            continue
+        
+        if in_semicolon_block:
+            continue
+        
+        # Check for field definitions
+        if stripped.startswith('_'):
+            parts = stripped.split(None, 1)
+            field_name = parts[0]
+            
+            if len(parts) > 1:
+                value = parts[1]
+                
+                # Check if value is unquoted and contains CIF2 special characters
+                if not _is_value_quoted(value) and contains_cif2_special_chars(value):
+                    # Quote the value
+                    quoted_value = format_cif2_value(value)
+                    
+                    # Reconstruct the line with proper indentation
+                    leading_whitespace = line[:len(line) - len(line.lstrip())]
+                    lines[i] = f"{leading_whitespace}{field_name} {quoted_value}"
+                    
+                    fixes.append((i + 1, field_name, value, quoted_value))
+    
+    return '\n'.join(lines), fixes
+
+
+def _is_value_quoted(value: str) -> bool:
+    """
+    Check if a value is already quoted.
+    
+    Handles:
+    - Single quotes: 'value'
+    - Double quotes: "value"
+    - Triple single quotes: '''value'''
+    - Triple double quotes: \"""value\"""
+    
+    Args:
+        value: The value string to check
+        
+    Returns:
+        True if the value is quoted, False otherwise
+    """
+    if not value:
+        return False
+    
+    value = value.strip()
+    
+    # Check for triple quotes first
+    if (value.startswith("'''") and value.endswith("'''")):
+        return True
+    if (value.startswith('"""') and value.endswith('"""')):
+        return True
+    
+    # Check for single/double quotes
+    if (value.startswith("'") and value.endswith("'")):
+        return True
+    if (value.startswith('"') and value.endswith('"')):
+        return True
+    
+    return False

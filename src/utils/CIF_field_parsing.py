@@ -1,15 +1,87 @@
 """Module containing CIF checking functionality and field definition loading."""
 
-# import os
+import ast
+import operator
+import re
+
+# Safe operators for expression evaluation
+SAFE_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+def safe_eval_expr(expr_str, field_values):
+    """
+    Safely evaluate a mathematical expression with field value substitution.
+    
+    Args:
+        expr_str: Expression string like "_field1 / (_field2 * 60)"
+        field_values: Dict mapping field names to their numeric values
+        
+    Returns:
+        Evaluated result as float, or None if evaluation fails
+    """
+    try:
+        # Substitute field names with their values
+        substituted = expr_str
+        for field_name, value in field_values.items():
+            # Use word boundaries to avoid partial matches
+            pattern = re.escape(field_name) + r'(?![a-zA-Z0-9_\.])'
+            substituted = re.sub(pattern, str(value), substituted)
+        
+        # Check if any field references remain (unresolved)
+        remaining_fields = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', substituted)
+        if remaining_fields:
+            return None  # Some fields couldn't be resolved
+        
+        # Parse and evaluate safely
+        tree = ast.parse(substituted, mode='eval')
+        return _eval_node(tree.body)
+    except Exception:
+        return None
+
+def _eval_node(node):
+    """Recursively evaluate an AST node for safe math expressions."""
+    if isinstance(node, ast.Constant):  # Python 3.8+
+        if isinstance(node.value, (int, float)):
+            return float(node.value)
+        raise ValueError(f"Unsupported constant type: {type(node.value)}")
+    elif isinstance(node, ast.Num):  # Python 3.7 compatibility
+        return float(node.n)
+    elif isinstance(node, ast.BinOp):
+        left = _eval_node(node.left)
+        right = _eval_node(node.right)
+        op_type = type(node.op)
+        if op_type in SAFE_OPERATORS:
+            return SAFE_OPERATORS[op_type](left, right)
+        raise ValueError(f"Unsupported operator: {op_type}")
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_node(node.operand)
+        op_type = type(node.op)
+        if op_type in SAFE_OPERATORS:
+            return SAFE_OPERATORS[op_type](operand)
+        raise ValueError(f"Unsupported unary operator: {op_type}")
+    elif isinstance(node, ast.Expression):
+        return _eval_node(node.body)
+    else:
+        raise ValueError(f"Unsupported node type: {type(node)}")
+
 
 class CIFField:
     """Class representing a CIF field definition."""
-    def __init__(self, name, default_value, description="", action="CHECK", suggestions=None):
+    def __init__(self, name, default_value, description="", action="CHECK", suggestions=None, rename_to=None, expression=None):
         self.name = name
         self.default_value = default_value
         self.description = description
-        self.action = action  # "CHECK", "DELETE", "EDIT", or "APPEND"
+        self.action = action  # "CHECK", "DELETE", "EDIT", "APPEND", "RENAME", or "CALCULATE"
         self.suggestions = suggestions or []
+        self.rename_to = rename_to  # Target field name for RENAME action
+        self.expression = expression  # Mathematical expression for CALCULATE action
 
 def load_cif_field_rules(filepath):
     """Load CIF field rules from a CIF-style file.
@@ -24,6 +96,8 @@ def load_cif_field_rules(filepath):
     DELETE: _field_name  # This will remove the field entirely
     EDIT: _field_name new_value  # This will replace the field's value
     APPEND: _field_name append_text  # This will append text to existing multiline value
+    RENAME: _old_name _new_name  # This will rename a field to a new name
+    CALCULATE: _field = expression  # Calculate field value from expression using other fields
     _field_name value  # Normal check (default behavior)
     
     Values can be quoted or unquoted. The function preserves the quotation style.
@@ -67,8 +141,10 @@ def load_cif_field_rules(filepath):
                     line = line.strip()
                     comment_desc = comment_desc.strip()
                 
-                # Detect action type (DELETE:, EDIT:, APPEND:, or default CHECK)
+                # Detect action type (DELETE:, EDIT:, APPEND:, RENAME:, CALCULATE:, or default CHECK)
                 action = "CHECK"
+                rename_to = None
+                expression = None
                 if line.upper().startswith('DELETE:'):
                     action = "DELETE"
                     line = line[7:].strip()  # Remove "DELETE:" prefix
@@ -78,6 +154,35 @@ def load_cif_field_rules(filepath):
                 elif line.upper().startswith('APPEND:'):
                     action = "APPEND"
                     line = line[7:].strip()  # Remove "APPEND:" prefix
+                elif line.upper().startswith('RENAME:'):
+                    action = "RENAME"
+                    line = line[7:].strip()  # Remove "RENAME:" prefix
+                    # RENAME expects: _old_name _new_name
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0].startswith('_') and parts[1].startswith('_'):
+                        field = parts[0]
+                        rename_to = parts[1]
+                        description = descriptions.get(field, comment_desc) or comment_desc
+                        if field not in field_map:
+                            field_obj = CIFField(field, "", description, action, [], rename_to)
+                            field_map[field] = field_obj
+                            field_order.append(field)
+                    continue
+                elif line.upper().startswith('CALCULATE:'):
+                    action = "CALCULATE"
+                    line = line[10:].strip()  # Remove "CALCULATE:" prefix
+                    # CALCULATE expects: _target_field = expression
+                    if '=' in line:
+                        field_part, expr_part = line.split('=', 1)
+                        field = field_part.strip()
+                        expression = expr_part.strip()
+                        if field.startswith('_') and expression:
+                            description = descriptions.get(field, comment_desc) or comment_desc
+                            if field not in field_map:
+                                field_obj = CIFField(field, "", description, action, [], None, expression)
+                                field_map[field] = field_obj
+                                field_order.append(field)
+                    continue
                 
                 # For DELETE action, we only need the field name
                 if action == "DELETE":
@@ -163,7 +268,7 @@ class CIFFieldChecker:
         return self.field_sets.get(name, [])
 
     def apply_field_operations(self, text_content, field_set_name):
-        """Apply DELETE and EDIT operations to CIF content.
+        """Apply DELETE, EDIT, and RENAME operations to CIF content.
         
         Args:
             text_content (str): The CIF file content
@@ -188,6 +293,10 @@ class CIFFieldChecker:
                 lines, edited = self._edit_field(lines, field_def.name, field_def.default_value)
                 if edited:
                     operations_applied.append(f"EDITED: {field_def.name} -> {field_def.default_value}")
+            elif field_def.action == "RENAME":
+                lines, renamed = self._rename_field(lines, field_def.name, field_def.rename_to)
+                if renamed:
+                    operations_applied.append(f"RENAMED: {field_def.name} -> {field_def.rename_to}")
         
         return '\n'.join(lines), operations_applied
     
@@ -295,3 +404,48 @@ class CIFFieldChecker:
             i += 1
         
         return modified_lines, appended
+
+    def _rename_field(self, lines, old_name, new_name):
+        """Rename a field in the CIF content.
+        
+        This is used to correct erroneously named fields output by some programs.
+        For example, Olex2 outputs _refine_diff_density_max for 3D ED data,
+        but the correct name should be _refine_diff.potential_max.
+        
+        Args:
+            lines (list): List of lines in the CIF file
+            old_name (str): Current (incorrect) field name
+            new_name (str): Correct field name to rename to
+            
+        Returns:
+            tuple: (modified_lines, was_renamed)
+        """
+        import re
+        modified_lines = []
+        renamed = False
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Check for exact field name match (including loop columns)
+            # Match the old field name at the start of the line
+            if stripped.startswith(old_name):
+                # Get the rest after the field name
+                rest = stripped[len(old_name):]
+                # Check it's a complete field name (followed by whitespace, value, or end of line)
+                if rest == '' or rest[0] in ' \t':
+                    # Preserve leading whitespace
+                    leading_ws = line[:len(line) - len(line.lstrip())]
+                    # Replace old name with new name
+                    new_line = leading_ws + new_name + rest
+                    modified_lines.append(new_line)
+                    renamed = True
+                    i += 1
+                    continue
+            
+            modified_lines.append(line)
+            i += 1
+        
+        return modified_lines, renamed

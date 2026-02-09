@@ -5,7 +5,7 @@
 # =============================================================================
 # DELETE: _diffrn_radiation_monochromator    # Don't want the field in the CIF
 # EDIT: _diffrn_ambient_environment   vacuum    # Directly change this field
-# APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  # Append to multiline field
+# APPEND: _publ_section_references   Allen, F.H. & Bruno, I.J. (2010), Acta Cryst B66, 380-386.  # Append to multiline field
 #   Multiple APPEND entries for the same field will be concatenated automatically
 # _chemical_oxdiff_usercomment ?  # might want to edit this field manually
 

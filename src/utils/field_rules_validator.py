@@ -101,7 +101,7 @@ class CIFFormatAnalyzer:
                 continue  # Skip empty lines and comments
                 
             # Look for fields at the start of the line or after action prefixes
-            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
+            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
             match = re.match(field_pattern, line)
             if match:
                 matches.append(match.group(1))
@@ -250,7 +250,7 @@ class FieldRulesValidator:
                 continue  # Skip empty lines and comments
                 
             # Look for fields at the start of the line or after action prefixes
-            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
+            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
             match = re.match(field_pattern, line)
             if match:
                 field = match.group(1)

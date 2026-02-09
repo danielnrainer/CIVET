@@ -9,8 +9,9 @@ from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont,
 import os
 import json
 import sys
+import re
 from typing import Dict, List, Tuple
-from utils.CIF_field_parsing import CIFFieldChecker
+from utils.CIF_field_parsing import CIFFieldChecker, safe_eval_expr
 from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, update_audit_creation_date
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, get_resource_path
 from utils.cif_format_converter import CIFFormatConverter
@@ -18,7 +19,10 @@ from utils.field_rules_validator import FieldRulesValidator
 from utils.data_name_validator import DataNameValidator, FieldCategory
 from utils.registered_prefixes import get_prefix_data_source
 from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_user_prefixes_path
-from utils.cif2_value_formatting import format_cif2_value, is_multiline, needs_quoting
+from utils.cif2_value_formatting import (
+    format_cif2_value, is_multiline, needs_quoting,
+    validate_cif2_content, fix_cif2_compliance_issues
+)
 from utils.user_field_rules import (
     get_user_field_rules_files, get_user_field_rules_directory,
     get_bundled_field_rules_files, ensure_user_field_rules_directory
@@ -143,7 +147,7 @@ class CIFEditor(QMainWindow):
         user_rules = get_user_field_rules_files()
         
         if not user_rules:
-            self.user_combo.addItem("(No user rules - add files to AppData)", "")
+            self.user_combo.addItem("(No user rules - add files to Config Directory)", "")
             return
         
         for file_path in user_rules:
@@ -309,7 +313,7 @@ class CIFEditor(QMainWindow):
         user_layout.addWidget(self.radio_user)
         
         self.user_combo = QComboBox()
-        self.user_combo.setMinimumWidth(200)
+        self.user_combo.setMinimumWidth(250)
         self.user_combo.currentIndexChanged.connect(self._on_user_combo_changed)
         self._populate_user_combo()
         self.user_combo.setEnabled(False)  # Initially disabled since Built-in is selected
@@ -911,16 +915,41 @@ class CIFEditor(QMainWindow):
 
     def save_to_file(self, filepath):
         try:
+            content = self.text_editor.toPlainText().strip()
+            
+            # Check for CIF2 compliance issues (e.g., unquoted brackets)
+            issues = validate_cif2_content(content)
+            if issues:
+                # Auto-fix the issues
+                content, fixes = fix_cif2_compliance_issues(content)
+                
+                # Build message about fixes
+                fix_details = []
+                for line_num, field, old_val, new_val in fixes:
+                    fix_details.append(f"  Line {line_num}: {field}\n    {old_val} → {new_val}")
+                
+                if fixes:
+                    QMessageBox.information(
+                        self,
+                        "CIF2 Compliance Fixes Applied",
+                        f"The following values were auto-quoted for CIF2 compliance:\n\n" +
+                        "\n".join(fix_details[:5]) +
+                        (f"\n... and {len(fixes) - 5} more" if len(fixes) > 5 else "") +
+                        "\n\nValues containing [ ] { } must be quoted in CIF2."
+                    )
+                    # Update the editor with fixed content
+                    self.text_editor.setText(content)
+            
+            # Ensure CIF2 header is present (per IUCr CIF2 specification)
+            content = self._ensure_cif2_header(content)
+            # Detect CIF format using existing dict_manager
+            cif_format = self.dict_manager.detect_cif_format(content)
+            # Update _audit_creation_date to current date (only on save)
+            content = update_audit_creation_date(content, cif_format)
+            # Update _audit_creation_method to include CIVET info
+            content = update_audit_creation_method(content, cif_format)
+            
             with open(filepath, "w", encoding="utf-8") as file:
-                content = self.text_editor.toPlainText().strip()
-                # Ensure CIF2 header is present (per IUCr CIF2 specification)
-                content = self._ensure_cif2_header(content)
-                # Detect CIF format using existing dict_manager
-                cif_format = self.dict_manager.detect_cif_format(content)
-                # Update _audit_creation_date to current date (only on save)
-                content = update_audit_creation_date(content, cif_format)
-                # Update _audit_creation_method to include CIVET info
-                content = update_audit_creation_method(content, cif_format)
                 file.write(content)
             self.current_file = filepath
             self.modified = False
@@ -1688,27 +1717,98 @@ class CIFEditor(QMainWindow):
                             if appended:
                                 operations_applied.append(f"APPENDED to {field_def.name}")
                                 current_content = '\n'.join(lines)
+                        elif field_def.action == 'RENAME':
+                            lines = current_content.splitlines()
+                            lines, renamed = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
+                            if renamed:
+                                operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
+                                current_content = '\n'.join(lines)
                 
-                # Update content after DELETE/EDIT/APPEND operations
+                # Update content after DELETE/EDIT/APPEND/RENAME operations
                 if operations_applied:
                     self.text_editor.setText(current_content)
                     ops_summary = '\n'.join(operations_applied)
                     QMessageBox.information(self, "Operations Applied", 
                                           f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
             
-            # Process CHECK actions (standard field checking)
+            # Process CHECK and CALCULATE actions (standard field checking)
             for field_def in fields:
-                # Skip DELETE/EDIT/APPEND actions as they're already processed
-                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT', 'APPEND']:
+                # Skip DELETE/EDIT/APPEND/RENAME actions as they're already processed
+                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT', 'APPEND', 'RENAME']:
                     continue
+                
+                # For CALCULATE action, compute the suggested value from expression
+                suggested_value = field_def.default_value
+                description = field_def.description
+                suggestions = getattr(field_def, 'suggestions', None)
+                
+                if hasattr(field_def, 'action') and field_def.action == 'CALCULATE' and hasattr(field_def, 'expression'):
+                    # Re-parse CIF to get current values (content may have changed)
+                    current_content = self.text_editor.toPlainText()
+                    self.cif_parser.parse_file(current_content)
+                    
+                    # Extract field references from expression
+                    field_refs = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', field_def.expression)
+                    field_values = {}
+                    missing_fields = []
+                    
+                    for ref in field_refs:
+                        value = self.cif_parser.get_field_value(ref)
+                        if value is not None:
+                            # Try to convert to number
+                            try:
+                                # Handle values with uncertainties like "1.234(5)"
+                                clean_value = re.sub(r'\([^)]*\)', '', str(value))
+                                field_values[ref] = float(clean_value)
+                            except (ValueError, TypeError):
+                                missing_fields.append(f"{ref} (non-numeric: {value})")
+                        else:
+                            missing_fields.append(ref)
+                    
+                    if missing_fields:
+                        # Can't calculate - skip this field with warning
+                        if config.get('show_warnings', True):
+                            QMessageBox.warning(self, "CALCULATE Warning",
+                                f"Cannot calculate {field_def.name}:\n"
+                                f"Missing or non-numeric fields: {', '.join(missing_fields)}\n\n"
+                                f"Expression: {field_def.expression}")
+                        continue
+                    
+                    # Evaluate the expression
+                    calculated = safe_eval_expr(field_def.expression, field_values)
+                    if calculated is not None:
+                        # Format to reasonable precision
+                        if abs(calculated) < 0.01 or abs(calculated) >= 10000:
+                            suggested_value = f"{calculated:.4e}"
+                        else:
+                            suggested_value = f"{calculated:.4f}".rstrip('0').rstrip('.')
+                        
+                        # Add calculation info to description
+                        current_val = self.cif_parser.get_field_value(field_def.name)
+                        description = (f"{field_def.description}\n" if field_def.description else "") + \
+                                     f"Calculated: {field_def.expression}"
+                        if current_val:
+                            description += f"\nCurrent value: {current_val}"
+                        
+                        # Add current value as an option in suggestions
+                        if current_val:
+                            suggestions = [suggested_value]
+                            if str(current_val) != suggested_value:
+                                suggestions.append(str(current_val))
+                    else:
+                        if config.get('show_warnings', True):
+                            QMessageBox.warning(self, "CALCULATE Warning",
+                                f"Failed to evaluate expression for {field_def.name}:\n"
+                                f"{field_def.expression}")
+                        continue
                     
                 result = self.check_line_with_config(
                     field_def.name,
-                    field_def.default_value,
+                    suggested_value,
                     False,
-                    field_def.description,
+                    description,
                     config,
-                    getattr(field_def, 'suggestions', None)
+                    suggestions
                 )
                 
                 if result == RESULT_ABORT:
