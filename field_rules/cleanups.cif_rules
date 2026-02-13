@@ -1,14 +1,23 @@
 # Custom Field Definitions for cleanup
-# This file demonstrates DELETE and EDIT operations to clean up problematic CIF fields
+# This file demonstrates keyword operations to clean up problematic CIF fields
 # Without a keyword, a standard check is performed
+# Available keywords: DELETE/EDIT/APPEND/RENAME/CALCULATE
 # Examples below:
 # =============================================================================
 # DELETE: _diffrn_radiation_monochromator    # Don't want the field in the CIF
+
 # EDIT: _diffrn_ambient_environment   vacuum    # Directly change this field
+
 # APPEND: _publ_section_references   Allen, F.H. & Bruno, I.J. (2010), Acta Cryst B66, 380-386.  # Append to multiline field
 #   Multiple APPEND entries for the same field will be concatenated automatically
-# _chemical_oxdiff_usercomment ?  # might want to edit this field manually
 
+# RENAME: _refine_diff_density_max _refine_diff.potential_max   # change incorrect CIF data names for correct ones
+
+# CALCULATE: _diffrn.flux_density = _diffrn.flux_density / (_diffrn.total_exposure_time * 60)
+#   Use mathematical expressions to calculate values including referencing other CIF fields.
+#   Supported operators: + - * / ** (power) and parentheses for grouping
+
+# _chemical_oxdiff_usercomment ?  # edit this field manually
 
 # =============================================================================
 # DELETE Operations - Remove unwanted or misleading fields entirely
@@ -25,4 +34,17 @@
 # =============================================================================
 # APPEND Operations - Append content to multiline fields (e.g., references)
 # =============================================================================
+
+
+
+# =============================================================================
+# RENAME Operations - Correct erroneously named fields from software output
+# =============================================================================
+
+
+
+# =============================================================================
+# CALCULATE Operations - Compute values from other fields using expressions
+# =============================================================================
+
 
