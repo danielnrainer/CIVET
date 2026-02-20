@@ -143,39 +143,57 @@ def delete_user_field_rules_file(file_path: str) -> Tuple[bool, str]:
         return False, f"Error deleting file: {str(e)}"
 
 
-def get_bundled_field_rules_files() -> List[Tuple[str, str]]:
+def get_bundled_field_rules_files() -> List[Tuple[str, str, Optional[str]]]:
     """
     Get list of bundled field rules files that ship with CIVET.
-    
+
     Returns:
-        List of tuples (display_name, file_path) for bundled .cif_rules files.
+        List of tuples (display_name, file_path, legacy_path) for bundled
+        .cif_rules files.  ``legacy_path`` is the path to the corresponding
+        legacy-format variant of that rules file, or ``None`` if no such
+        variant exists.
+
+        Convention: ``foo.cif_rules`` automatically gains a ``legacy_path``
+        when ``foo_legacy.cif_rules`` is present in the same directory.
+        Files whose own stem ends in ``_legacy`` are never given a
+        ``legacy_path`` (they *are* the legacy variant).
+
         Excludes internal files (cleanups, checkcif_compatibility).
     """
     try:
         field_rules_dir = get_bundled_resource_path('field_rules')
-        
+
         if not field_rules_dir.exists():
             return []
-        
+
         # Internal files that shouldn't be shown to users
         internal_files = {'cleanups.cif_rules', 'checkcif_compatibility.cif_rules'}
-        
+
         # Display name mapping for user-friendly names
         display_names = {
             '3ded.cif_rules': '3D ED (Modern)',
             '3ded_legacy.cif_rules': '3D ED (Legacy)',
         }
-        
+
         files = []
         for filepath in sorted(field_rules_dir.iterdir()):
             if filepath.suffix == '.cif_rules' and filepath.name not in internal_files:
                 if filepath.is_file():
                     display_name = display_names.get(
-                        filepath.name, 
+                        filepath.name,
                         filepath.stem.replace('_', ' ').title()
                     )
-                    files.append((display_name, str(filepath)))
-        
+                    # Look for a paired legacy variant by convention:
+                    # foo.cif_rules  →  foo_legacy.cif_rules
+                    # Files that already end in _legacy don't get their own pair.
+                    if filepath.stem.endswith('_legacy'):
+                        legacy_path = None
+                    else:
+                        candidate = field_rules_dir / f"{filepath.stem}_legacy.cif_rules"
+                        legacy_path = str(candidate) if candidate.is_file() else None
+
+                    files.append((display_name, str(filepath), legacy_path))
+
         return files
     except Exception:
         return []

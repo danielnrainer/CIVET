@@ -132,11 +132,11 @@ class CIFEditor(QMainWindow):
         bundled_rules = get_bundled_field_rules_files()
         
         if not bundled_rules:
-            self.builtin_combo.addItem("(No built-in rules found)", "")
+            self.builtin_combo.addItem("(No built-in rules found)", {'path': '', 'legacy_path': None})
             return
         
-        for display_name, file_path in bundled_rules:
-            self.builtin_combo.addItem(display_name, file_path)
+        for display_name, file_path, legacy_path in bundled_rules:
+            self.builtin_combo.addItem(display_name, {'path': file_path, 'legacy_path': legacy_path})
         
         # Default to first item (usually 3D ED Modern)
         self.builtin_combo.setCurrentIndex(0)
@@ -187,7 +187,10 @@ class CIFEditor(QMainWindow):
         if not self.radio_builtin.isChecked():
             return
         
-        file_path = self.builtin_combo.currentData()
+        item_data = self.builtin_combo.currentData()
+        if not item_data:
+            return
+        file_path = item_data.get('path', '')
         if file_path:
             display_name = self.builtin_combo.currentText()
             # Create a unique internal name based on display name
@@ -204,6 +207,11 @@ class CIFEditor(QMainWindow):
         if not self.radio_user.isChecked():
             return
         
+        # index=-1 means the combo is being cleared (e.g. during repopulation)
+        # — ignore these transient signals to avoid losing the current_field_set
+        if index == -1:
+            return
+        
         file_path = self.user_combo.currentData()
         if file_path:
             display_name = self.user_combo.currentText()
@@ -214,6 +222,11 @@ class CIFEditor(QMainWindow):
                 self.custom_field_rules_file = file_path
             except Exception as e:
                 QMessageBox.warning(self, "Load Error", f"Failed to load user field rules:\n{str(e)}")
+        else:
+            # No valid user rules in combo — clear current_field_set so the old
+            # built-in name cannot accidentally be used when User radio is active.
+            self.current_field_set = None
+            self.custom_field_rules_file = None
     
     def _refresh_user_field_rules(self):
         """Refresh the user field rules combo box and reload from AppData."""
@@ -261,10 +274,12 @@ class CIFEditor(QMainWindow):
         self.status_bar = self.statusBar()
         self.path_label = QLabel()
         self.cursor_label = QLabel()
-        self.cif_version_label = QLabel("CIF Version: Unknown")
+        # self.cif_version_label = QLabel("CIF Version: Unknown")  # FUTURE: re-enable when needed
+        self.modified_label = QLabel()
         self.dictionary_label = QLabel("Dictionary: Default")
         self.status_bar.addPermanentWidget(self.path_label)
-        self.status_bar.addPermanentWidget(self.cif_version_label)
+        # self.status_bar.addPermanentWidget(self.cif_version_label)  # FUTURE: re-enable when needed
+        self.status_bar.addPermanentWidget(self.modified_label)
         self.status_bar.addPermanentWidget(self.dictionary_label)
         self.status_bar.addPermanentWidget(self.cursor_label)
         
@@ -816,9 +831,9 @@ class CIFEditor(QMainWindow):
             if not self.modified:  # Only set to False if we didn't convert
                 self.modified = False
             
-            # Update CIF version display with the content we're actually showing
-            self.detect_and_update_cif_version(content)
-            
+            # FUTURE: Re-enable when CIF version display is re-enabled
+            # self.detect_and_update_cif_version(content)
+
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.update_window_title(filepath)
@@ -932,10 +947,10 @@ class CIFEditor(QMainWindow):
                     QMessageBox.information(
                         self,
                         "CIF2 Compliance Fixes Applied",
-                        f"The following values were auto-quoted for CIF2 compliance:\n\n" +
+                        f"Quotes were applied to the following values for compliance:\n\n" +
                         "\n".join(fix_details[:5]) +
                         (f"\n... and {len(fixes) - 5} more" if len(fixes) > 5 else "") +
-                        "\n\nValues containing [ ] { } must be quoted in CIF2."
+                        "\n\nStrings containing [ ] { } should be quoted in CIFs."
                     )
                     # Update the editor with fixed content
                     self.text_editor.setText(content)
@@ -1423,7 +1438,17 @@ class CIFEditor(QMainWindow):
     def start_checks(self):
         """Start checking CIF fields using the selected field definition set."""
         # Validate field set selection
-        if self.current_field_set == 'Custom':
+        if self.radio_user.isChecked():
+            if not self.current_field_set or not self.current_field_set.startswith('User:'):
+                QMessageBox.warning(
+                    self,
+                    "No User Rules Selected",
+                    "No user-defined field rules are loaded.\n\n"
+                    "Please add .cif_rules files to your CIVET config directory "
+                    "(Settings \u2192 Open Config Directory) and click the \u21bb refresh button."
+                )
+                return
+        elif self.current_field_set == 'Custom':
             if not self.custom_field_rules_file:
                 QMessageBox.warning(
                     self,
@@ -1635,38 +1660,31 @@ class CIFEditor(QMainWindow):
     def _process_single_field_set(self, config, initial_state):
         """Process a single field set (Built-in, User, or Custom)."""
         try:
-            # Special handling for 3DED: Check CIF format compatibility
-            # This applies to any built-in 3D ED rules (both Modern and Legacy)
-            is_3ded = '3D_ED' in self.current_field_set or '3DED' in self.current_field_set
-            if is_3ded and 'Legacy' not in self.current_field_set:
-                # Detect CIF format of current file
+            # Auto-switch to the paired legacy variant when the loaded CIF uses
+            # legacy format and the selected built-in rule set has a paired
+            # legacy variant registered (stored in the combo item data).
+            # This is data-driven: any rules file whose stem has a sibling
+            # ``{stem}_legacy.cif_rules`` qualifies — no name matching needed.
+            item_data = self.builtin_combo.currentData() if self.radio_builtin.isChecked() else None
+            legacy_path = item_data.get('legacy_path') if item_data else None
+
+            if legacy_path and self.radio_builtin.isChecked():
                 content = self.text_editor.toPlainText()
                 cif_format = self.dict_manager.detect_cif_format(content)
-                
-                # Load appropriate 3DED rules based on CIF format
-                field_rules_dir = get_resource_path('field_rules')
                 if cif_format.upper() == 'LEGACY':
-                    # Load legacy version of 3DED rules for legacy format
-                    legacy_rules_path = os.path.join(field_rules_dir, '3ded_legacy.cif_rules')
-                    if os.path.exists(legacy_rules_path):
-                        self.field_checker.load_field_set(self.current_field_set, legacy_rules_path)
-                        QMessageBox.information(
-                            self, 
-                            "CIF Format Compatibility", 
-                            f"Detected legacy format. Automatically switched to legacy-compatible 3D ED field rules."
-                        )
-                    else:
-                        QMessageBox.warning(
-                            self, 
-                            "Compatibility Issue", 
-                            f"Legacy format detected, but legacy-compatible 3D ED rules not found.\n"
-                            f"Using default modern rules which may cause validation issues."
-                        )
+                    self.field_checker.load_field_set(self.current_field_set, legacy_path)
+                    QMessageBox.information(
+                        self,
+                        "CIF Format Compatibility",
+                        "Detected legacy format. Automatically switched to the "
+                        "legacy-compatible variant of the selected field rules."
+                    )
                 else:
-                    # Load default modern version of 3DED rules for modern format
-                    default_rules_path = os.path.join(field_rules_dir, '3ded.cif_rules')
-                    if os.path.exists(default_rules_path):
-                        self.field_checker.load_field_set(self.current_field_set, default_rules_path)
+                    # Reload the primary (modern) variant in case a previous run
+                    # had switched to legacy.
+                    primary_path = item_data.get('path', '')
+                    if primary_path:
+                        self.field_checker.load_field_set(self.current_field_set, primary_path)
             
             # Get the selected field set
             fields = self.field_checker.get_field_set(self.current_field_set)
@@ -2004,16 +2022,17 @@ class CIFEditor(QMainWindow):
     def handle_text_changed(self):
         self.modified = True
         self.update_status_bar()
-        
+
+        # FUTURE: Re-enable when CIF version display is re-enabled
         # Schedule CIF version detection (delayed to avoid constant updates)
-        if hasattr(self, 'version_detect_timer'):
-            self.version_detect_timer.stop()
-        else:
-            self.version_detect_timer = QTimer()
-            self.version_detect_timer.setSingleShot(True)
-            self.version_detect_timer.timeout.connect(lambda: self.detect_and_update_cif_version())
-        
-        self.version_detect_timer.start(1000)  # 1 second delay
+        # if hasattr(self, 'version_detect_timer'):
+        #     self.version_detect_timer.stop()
+        # else:
+        #     self.version_detect_timer = QTimer()
+        #     self.version_detect_timer.setSingleShot(True)
+        #     self.version_detect_timer.timeout.connect(lambda: self.detect_and_update_cif_version())
+        #
+        # self.version_detect_timer.start(1000)  # 1 second delay
     
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
@@ -2037,6 +2056,14 @@ class CIFEditor(QMainWindow):
         path = self.current_file if self.current_file else "Untitled"
         modified = "*" if self.modified else ""
         self.path_label.setText(f"{path}{modified} | ")
+        if self.modified:
+            self.modified_label.setText("\u25cf Unsaved changes")
+            self.modified_label.setStyleSheet("color: orange; font-weight: bold;")
+        elif self.current_file:
+            self.modified_label.setText("\u2713 Saved")
+            self.modified_label.setStyleSheet("color: green;")
+        else:
+            self.modified_label.setText("")
 
     def update_dictionary_status(self):
         """Update the dictionary status label in the status bar"""
@@ -2101,23 +2128,23 @@ class CIFEditor(QMainWindow):
     
     def update_cif_version_display(self):
         """Update the CIF version display in the status bar"""
-        version_text = {
-            CIFVersion.CIF1: "CIF Version: Legacy (1.x)",
-            CIFVersion.CIF2: "CIF Version: Modern (2.0)",
-            CIFVersion.MIXED: "CIF Version: Mixed (legacy/modern)",
-            CIFVersion.UNKNOWN: "CIF Version: Unknown"
-        }
-        
-        color = {
-            CIFVersion.CIF1: "green",
-            CIFVersion.CIF2: "blue", 
-            CIFVersion.MIXED: "orange",
-            CIFVersion.UNKNOWN: "red"
-        }
-        
-        text = version_text.get(self.current_cif_version, "CIF Version: Unknown")
-        self.cif_version_label.setText(text)
-        self.cif_version_label.setStyleSheet(f"color: {color.get(self.current_cif_version, 'black')}")
+        # FUTURE: Re-enable when CIF version display is re-enabled (restore cif_version_label widget too)
+        # version_text = {
+        #     CIFVersion.CIF1: "CIF Version: Legacy (1.x)",
+        #     CIFVersion.CIF2: "CIF Version: Modern (2.0)",
+        #     CIFVersion.MIXED: "CIF Version: Mixed (legacy/modern)",
+        #     CIFVersion.UNKNOWN: "CIF Version: Unknown"
+        # }
+        # color = {
+        #     CIFVersion.CIF1: "green",
+        #     CIFVersion.CIF2: "blue",
+        #     CIFVersion.MIXED: "orange",
+        #     CIFVersion.UNKNOWN: "red"
+        # }
+        # text = version_text.get(self.current_cif_version, "CIF Version: Unknown")
+        # self.cif_version_label.setText(text)
+        # self.cif_version_label.setStyleSheet(f"color: {color.get(self.current_cif_version, 'black')}")
+        pass
     
     def detect_cif_version(self):
         """Menu action to detect and display CIF version information"""
