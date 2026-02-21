@@ -97,6 +97,8 @@ a = Analysis(
         'utils.data_name_validator',      # CIF data name validation
         'utils.cif2_value_formatting',    # CIF2 value formatting
         'utils.format_compatibility_warning',  # Modern format warning system
+        'utils.cif_ddl1_parser',          # DDL1 dictionary format parser
+        'utils.cif_dictionary_format',    # Dictionary format detection and factory
         
         # Third-party libraries
         'requests',

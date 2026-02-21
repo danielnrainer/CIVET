@@ -97,6 +97,8 @@ python CIVET/src/main.py
 - **Interactive update system**: Check for updates, load for session only, or download and save to user folder
 - **Dictionary metadata display**: Shows title, version, date, and source (COMCIF development vs IUCr release)
 - **Bulk dictionary loading**: Load all dictionaries from COMCIF or IUCr with one click
+- **Multi-format dictionary support**: Automatic format detection for DDLm and DDL1 dictionaries with unified parser factory
+- **Enhanced field metadata**: Tracks units, DDL format, and source dictionary per field
 
 ### CIF2 Value Formatting
 - **Smart bracket quoting**: Automatically quotes values containing CIF2 special characters (`[`, `]`, `{`, `}`)

@@ -23,6 +23,7 @@ from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
 from .cif_dictionary_parser import CIFDictionaryParser
+from .cif_dictionary_format import detect_dictionary_format, create_dictionary_parser, DictionaryFormat
 from .user_config import (
     get_bundled_resource_path,
     get_user_dictionaries_directory as _get_user_dictionaries_directory,
@@ -475,8 +476,8 @@ class CIFDictionaryManager:
         This allows users to update dictionaries even when running from a standalone
         executable. User-saved dictionaries override bundled ones with the same name.
         
-        Dictionary files that cannot be parsed (e.g., DDL1/DDL2 format) are
-        silently skipped. Only DDLm format dictionaries are currently supported.
+        Dictionary format is auto-detected: DDLm and DDL1 formats are supported.
+        DDL2 format dictionaries and unrecognized files are silently skipped.
         
         Note: The primary dictionary (set during __init__) is skipped to avoid
         loading it twice.
@@ -532,7 +533,7 @@ class CIFDictionaryManager:
                 loaded_filenames.add(dict_file)
             except Exception as e:
                 # Silently skip dictionaries that fail to load
-                # (e.g., DDL1/DDL2 format not yet supported)
+                # (e.g., DDL2 format not yet supported, or invalid files)
                 pass
         
     def _ensure_loaded(self):
@@ -541,12 +542,17 @@ class CIFDictionaryManager:
             # Initialize caches
             self._field_cache = {}
             self._alias_map = {}
+            # Merged set of all known fields across all active dictionaries (lowercase)
+            self._merged_known_fields_lower: Set[str] = set()
             
             # Start with the primary dictionary if it's active
             if self._dictionary_infos and self._dictionary_infos[0].is_active:
                 self._cif1_to_cif2, self._cif2_to_cif1 = self.parser.parse_dictionary()
                 # Update primary dictionary field count
                 self._dictionary_infos[0].field_count = len(self._cif1_to_cif2)
+                # Add primary parser's known fields to merged set
+                if hasattr(self.parser, '_all_known_fields_lower'):
+                    self._merged_known_fields_lower.update(self.parser._all_known_fields_lower)
             else:
                 # If primary is inactive, start with empty mappings
                 self._cif1_to_cif2 = {}
@@ -566,7 +572,12 @@ class CIFDictionaryManager:
                     add_cif1_to_cif2, add_cif2_to_cif1 = additional_parser.parse_dictionary()
                     
                     # Update field count for this dictionary
-                    dict_info.field_count = len(add_cif1_to_cif2)
+                    # For DDL1 parsers, cif1_to_cif2 may be empty (no aliases),
+                    # so use _field_metadata count as the primary source
+                    if hasattr(additional_parser, '_field_metadata') and additional_parser._field_metadata:
+                        dict_info.field_count = len(additional_parser._field_metadata)
+                    else:
+                        dict_info.field_count = len(add_cif1_to_cif2)
                     
                     # Merge CIF1 -> CIF2 mappings
                     for cif1_field, cif2_field in add_cif1_to_cif2.items():
@@ -585,6 +596,11 @@ class CIFDictionaryManager:
                                 if alias not in existing_aliases:
                                     self._cif2_to_cif1[cif2_field].append(alias)
                                     existing_aliases.add(alias)
+                    
+                    # Merge all known fields from this parser (critical for DDL1 dictionaries
+                    # where fields may not have aliases and thus won't appear in mapping dicts)
+                    if hasattr(additional_parser, '_all_known_fields_lower'):
+                        self._merged_known_fields_lower.update(additional_parser._all_known_fields_lower)
             
             # Manual fixes for missing mappings
             self._add_missing_field_mappings()
@@ -712,6 +728,10 @@ class CIFDictionaryManager:
             
         # Check alias mappings
         if hasattr(self, '_alias_map') and field_name_lower in self._alias_map:
+            return True
+        
+        # Check merged known fields from all active dictionaries (includes DDL1 fields)
+        if hasattr(self, '_merged_known_fields_lower') and field_name_lower in self._merged_known_fields_lower:
             return True
             
         # Check CIF format conversion mappings (case-insensitive)
@@ -851,7 +871,20 @@ class CIFDictionaryManager:
         if field_name in non_deprecated_whitelist:
             return False
         
-        return self.parser.is_field_deprecated(field_name)
+        # Check primary parser first
+        if self.parser.is_field_deprecated(field_name):
+            return True
+        
+        # Check additional parsers (including DDL1 parsers)
+        for i, additional_parser in enumerate(self._additional_parsers):
+            dict_info_index = i + 1
+            if dict_info_index < len(self._dictionary_infos):
+                if not self._dictionary_infos[dict_info_index].is_active:
+                    continue
+            if hasattr(additional_parser, 'is_field_deprecated') and additional_parser.is_field_deprecated(field_name):
+                return True
+        
+        return False
     
     def get_modern_replacement(self, deprecated_field: str) -> Optional[str]:
         """
@@ -865,8 +898,7 @@ class CIFDictionaryManager:
         """
         self._ensure_loaded()
         
-        # First, check if this field has a direct replacement_by value
-        # Note: _alias_to_definition uses lowercase keys
+        # First, check primary parser
         definition_id = self.parser._alias_to_definition.get(deprecated_field.lower())
         if definition_id:
             metadata = self.parser._field_metadata.get(definition_id)
@@ -877,6 +909,21 @@ class CIFDictionaryManager:
             # return the canonical (definition_id) if it's not deprecated
             if metadata and not self.is_field_deprecated(metadata.definition_id):
                 return metadata.definition_id
+        
+        # Check additional parsers (including DDL1 parsers)
+        for i, additional_parser in enumerate(self._additional_parsers):
+            dict_info_index = i + 1
+            if dict_info_index < len(self._dictionary_infos):
+                if not self._dictionary_infos[dict_info_index].is_active:
+                    continue
+            if hasattr(additional_parser, '_alias_to_definition'):
+                def_id = additional_parser._alias_to_definition.get(deprecated_field.lower())
+                if def_id and hasattr(additional_parser, '_field_metadata'):
+                    meta = additional_parser._field_metadata.get(def_id)
+                    if meta and meta.replacement_by:
+                        return meta.replacement_by
+                    if meta and not self.is_field_deprecated(meta.definition_id):
+                        return meta.definition_id
         
         # Try getting CIF2 equivalent if this is a CIF1 field
         cif2_equiv = self.get_cif2_equivalent(deprecated_field)
@@ -1293,7 +1340,7 @@ class CIFDictionaryManager:
     def _extract_dictionary_version(content: str) -> Optional[str]:
         """
         Extract version information from dictionary content.
-        Looks for _dictionary.version field.
+        Looks for _dictionary.version (DDLm) or _dictionary_version (DDL1) field.
         
         Args:
             content: Dictionary file content
@@ -1302,9 +1349,16 @@ class CIFDictionaryManager:
             Version string or None if not found
         """
         try:
-            # Look for _dictionary.version in the content
+            # DDLm format: _dictionary.version
             version_pattern = r'_dictionary\.version\s+([^\s\n]+)'
             match = re.search(version_pattern, content)
+            if match:
+                version = match.group(1).strip("'\"")
+                return version
+            
+            # DDL1 format: _dictionary_version
+            ddl1_pattern = r'_dictionary_version\s+([^\s\n]+)'
+            match = re.search(ddl1_pattern, content)
             if match:
                 version = match.group(1).strip("'\"")
                 return version
@@ -1325,7 +1379,7 @@ class CIFDictionaryManager:
     def _extract_dictionary_title(content: str) -> Optional[str]:
         """
         Extract title information from dictionary content.
-        Looks for _dictionary.title field.
+        Looks for _dictionary.title (DDLm) or _dictionary_name (DDL1) field.
         
         Args:
             content: Dictionary file content
@@ -1334,19 +1388,23 @@ class CIFDictionaryManager:
             Title string or None if not found
         """
         try:
-            # Look for _dictionary.title in the content
-            # The title is typically a single word/identifier like CIF_CORE or CORE_DIC
-            # Format: _dictionary.title   VALUE
+            # DDLm format: _dictionary.title
             title_pattern = r'_dictionary\.title\s+([A-Za-z][A-Za-z0-9_-]*)'
             match = re.search(title_pattern, content)
             if match:
                 return match.group(1).strip()
             
-            # Try quoted value
+            # Try quoted DDLm value
             quoted_pattern = r'_dictionary\.title\s+[\'"]([^\'"]+)[\'"]'
             match = re.search(quoted_pattern, content)
             if match:
                 return match.group(1).strip()
+            
+            # DDL1 format: _dictionary_name
+            ddl1_pattern = r'_dictionary_name\s+([^\s\n]+)'
+            match = re.search(ddl1_pattern, content)
+            if match:
+                return match.group(1).strip("'\"")
                 
         except Exception as e:
             print(f"Warning: Could not extract dictionary title: {e}")
@@ -1357,7 +1415,7 @@ class CIFDictionaryManager:
     def _extract_dictionary_date(content: str) -> Optional[str]:
         """
         Extract date information from dictionary content.
-        Looks for _dictionary.date field.
+        Looks for _dictionary.date (DDLm) or _dictionary_update (DDL1) field.
         
         Args:
             content: Dictionary file content
@@ -1366,9 +1424,16 @@ class CIFDictionaryManager:
             Date string or None if not found
         """
         try:
-            # Look for _dictionary.date in the content
+            # DDLm format: _dictionary.date
             date_pattern = r'_dictionary\.date\s+([^\s\n]+)'
             match = re.search(date_pattern, content)
+            if match:
+                date = match.group(1).strip("'\"")
+                return date
+            
+            # DDL1 format: _dictionary_update
+            ddl1_pattern = r'_dictionary_update\s+([^\s\n]+)'
+            match = re.search(ddl1_pattern, content)
             if match:
                 date = match.group(1).strip("'\"")
                 return date
@@ -1484,6 +1549,8 @@ class CIFDictionaryManager:
         """
         Add an additional dictionary to enhance field coverage.
         
+        Supports DDLm, DDL1, and DDL2 dictionary formats with automatic format detection.
+        
         Args:
             dictionary_path: Path to additional dictionary file or URL
             
@@ -1492,7 +1559,7 @@ class CIFDictionaryManager:
             
         Raises:
             FileNotFoundError: If dictionary file doesn't exist
-            ValueError: If dictionary format is invalid
+            ValueError: If dictionary format is invalid or unsupported
         """
         try:
             # Check if it's a URL
@@ -1503,8 +1570,23 @@ class CIFDictionaryManager:
             if not os.path.exists(dictionary_path):
                 raise FileNotFoundError(f"Dictionary file not found: {dictionary_path}")
             
-            # Create parser for the additional dictionary
-            additional_parser = CIFDictionaryParser(dictionary_path)
+            # Auto-detect dictionary format and create appropriate parser
+            dict_format = detect_dictionary_format(dictionary_path)
+            
+            if dict_format == DictionaryFormat.DDL2:
+                raise ValueError(
+                    f"DDL2 dictionary format detected for '{os.path.basename(dictionary_path)}'. "
+                    f"DDL2 parsing is not yet supported. "
+                    f"Consider using a DDLm version from COMCIFS GitHub."
+                )
+            
+            if dict_format == DictionaryFormat.UNKNOWN:
+                raise ValueError(
+                    f"Cannot determine dictionary format for '{os.path.basename(dictionary_path)}'. "
+                    f"Only DDLm and DDL1 formats are currently supported."
+                )
+            
+            additional_parser = create_dictionary_parser(dictionary_path, format_hint=dict_format)
             
             # Test that it can be parsed and contains valid field definitions
             # Note: Some dictionaries (like cif_topo) define only modern fields without
@@ -1530,6 +1612,17 @@ class CIFDictionaryManager:
             dict_title = self._extract_dictionary_title(content)
             dict_date = self._extract_dictionary_date(content)
             source, status = self._determine_dict_source_and_status(dictionary_path, content)
+            
+            # For DDL1 dictionaries, also check parser-extracted metadata
+            if dict_format == DictionaryFormat.DDL1:
+                from .cif_ddl1_parser import DDL1DictionaryParser
+                if isinstance(additional_parser, DDL1DictionaryParser):
+                    if not version and additional_parser._dictionary_version:
+                        version = additional_parser._dictionary_version
+                    if not dict_title and additional_parser._dictionary_name:
+                        dict_title = additional_parser._dictionary_name
+                    if not dict_date and additional_parser._dictionary_update:
+                        dict_date = additional_parser._dictionary_update
             
             # Create dictionary info
             # Use field metadata count for accurate field count (includes fields without aliases)
@@ -1609,8 +1702,23 @@ class CIFDictionaryManager:
                 temp_path = temp_file.name
             
             try:
-                # Create parser for the downloaded dictionary
-                additional_parser = CIFDictionaryParser(temp_path)
+                # Auto-detect dictionary format and create appropriate parser
+                dict_format = detect_dictionary_format(temp_path)
+                
+                if dict_format == DictionaryFormat.DDL2:
+                    raise ValueError(
+                        f"DDL2 dictionary format detected for '{url}'. "
+                        f"DDL2 parsing is not yet supported. "
+                        f"Consider using a DDLm version from COMCIFS GitHub."
+                    )
+                
+                if dict_format == DictionaryFormat.UNKNOWN:
+                    raise ValueError(
+                        f"Cannot determine dictionary format for '{url}'. "
+                        f"Only DDLm and DDL1 formats are currently supported."
+                    )
+                
+                additional_parser = create_dictionary_parser(temp_path, format_hint=dict_format)
                 
                 # Test that it can be parsed and contains valid field definitions
                 # Note: Some dictionaries (like cif_topo) define only modern fields without

@@ -60,6 +60,9 @@ class FieldMetadata:
     is_replaced: bool = False  # Whether field is replaced/obsolete
     replacement_by: Optional[str] = None  # _definition_replaced.by
     enumeration_values: Optional[List[str]] = None  # Allowed enumeration values if any
+    units: Optional[str] = None  # Units code (DDLm: _units.code, DDL1: _units)
+    ddl_format: Optional[str] = None  # Source DDL format ('DDLm', 'DDL1', 'DDL2')
+    source_dictionary: Optional[str] = None  # Name of the source dictionary
     
     def get_all_aliases_names(self) -> List[str]:
         """Get list of all alias names (including deprecated)"""
@@ -95,6 +98,9 @@ class CIFDictionaryParser:
         self._field_metadata: Dict[str, FieldMetadata] = {}  # Complete metadata per definition_id
         self._alias_to_definition: Dict[str, str] = {}  # Maps any alias (incl deprecated) -> definition_id
         
+        # Dictionary-level metadata
+        self._dictionary_title: Optional[str] = None  # _dictionary.title
+        
         self._parsed = False
         
     def parse_dictionary(self) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
@@ -120,6 +126,11 @@ class CIFDictionaryParser:
         
         with open(self.cif_core_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        
+        # Extract dictionary-level metadata before parsing blocks
+        title_match = re.search(r'_dictionary\.title\s+(\S+)', content[:5000])
+        if title_match:
+            self._dictionary_title = title_match.group(1).strip("'\"")
             
         self._parse_save_blocks(content)
         
@@ -195,6 +206,9 @@ class CIFDictionaryParser:
         # Extract enumeration values if present
         enumeration_values = self._extract_enumeration_values(block_content)
         
+        # Extract units if present
+        units = self._extract_field_value(block_content, '_units.code')
+        
         # Create comprehensive metadata object
         metadata = FieldMetadata(
             definition_id=cif2_field,
@@ -207,7 +221,10 @@ class CIFDictionaryParser:
             category_id=category_id,
             is_replaced=is_replaced,
             replacement_by=replacement_field,
-            enumeration_values=enumeration_values
+            enumeration_values=enumeration_values,
+            units=units,
+            ddl_format='DDLm',
+            source_dictionary=self._dictionary_title
         )
         
         # Store metadata
