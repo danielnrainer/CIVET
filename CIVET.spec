@@ -175,7 +175,7 @@ if sys.platform == 'darwin':
         icon='civet.icns' if os.path.exists('civet.icns') else None,
         bundle_identifier='org.civet.civet',
         info_plist={
-            'CFBundleShortVersionString': '1.0.0',
+            'CFBundleShortVersionString': '1.2.0',
             'CFBundleDisplayName': 'CIVET',
             'NSHighResolutionCapable': True,
         },

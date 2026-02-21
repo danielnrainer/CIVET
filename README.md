@@ -10,18 +10,16 @@ The code in this project has been written in large parts by Anthropic LLM models
 *Be advised that this software is in constant development and might therefore contain bugs or other unintended behaviour.
 Always check your CIF files carefully and if you encounter an issue and would like to report it, please do so via the [Issues](https://github.com/danielnrainer/CIVET/issues) section.*
 
-## Key Features
+## Key Features (v1.2)
 
-- **Smart Field Validation**: Visual indicators for adding (🆕), editing (✏️), and correcting (⚠️) fields
-- **CIF1 ↔ CIF2 Format Conversion**: Bidirectional conversion with intelligent field mapping
-- **Multiline Field Support**: Proper handling of semicolon-delimited multiline values
-- **UTF-8 Support**: Full Unicode support for international characters (Å, °, ±, ₁, ₂, etc.)
-- **Dictionary Management**: Multi-dictionary support with automatic content-based suggestions
-- **Custom Validation**: Flexible field rules using `.cif_rules` files (3DED, or custom)
-- **User-Friendly Interface**: Syntax highlighting, confirmations, and intuitive dialogs
-- **Guided Suggestions**: Dropdown menu to select from several suggested values (if specified in the cif_rules)
-- **Legacy-Aware Rules Validation**: Automatically treats legacy or mixed `.cif_rules` as legacy when validating standalone files; respects checkCIF compatibility fields
-- **CIF2 Compliance**: Auto-adds `#\#CIF_2.0` header on save; both underscore and dot notations are valid CIF2
+- **CIF Editing and Validation**: Syntax highlighting, guided dialogs, smart field checks, and duplicate/alias-aware workflows.
+- **Flexible Field Rules Engine**: Supports `CHECK`, `DELETE`, `EDIT`, `RENAME`, `CALCULATE`, and `APPEND` actions in `.cif_rules` files.
+- **Legacy/Modern CIF Handling**: Detects legacy, modern, and mixed notation; includes conversion and malformed-field correction workflows.
+- **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
+- **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
+- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, with validation-aware highlighting.
+- **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
+- **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, and focused editor settings.
 
 ## Quick Start
 
@@ -60,50 +58,6 @@ To execute after the initial installation:
 source CIVET/civet_virtual/bin/activate
 python CIVET/src/main.py
 ```
-
-## Recent Enhancements (v1.1)
-
-### CIF2 Compliance
-- **CIF2 header auto-add**: Automatically inserts `#\#CIF_2.0` header when saving files that don't have one
-- **Verified CIF2 specification**: Both underscore (`_cell_length_a`) and dot (`_cell.length_a`) notations are valid CIF2 data names per IUCr specification
-
-### Data Quality Improvements
-- **Malformed field detection**: Automatically identifies and fixes incorrectly formatted field names (e.g., `_diffrn_total_exposure_time` → `_diffrn.total_exposure_time`)
-- **Pre-check cleanup**: Optional automated correction before field validation to prevent duplicates
-- **Dropdown suggestions**: Multiple recommended values in `.cif_rules` now surface as selectable options with markers (`[default value]`, `[current CIF value]`)
-
-### User Experience
-- **Color-coded dialogs**: Green (matches default), blue (new field), orange (differs from default)
-- **Enhanced button labels**: Clearer action descriptions in dialogs
-- **Improved workflow**: Integrated malformed field fixing in validation checks
-- **Legacy-aware validation**: Validation dialog initializes format based on the rules file's detected target (legacy for legacy/mixed)
-- **CheckCIF compatibility**: Fields in `checkcif_compatibility.cif_rules` excluded from deprecation warnings
-
-### Format Conversion Warnings
-- **Modern format warning**: Users selecting modern (dot notation) format are warned about potential checkCIF compatibility issues
-- **"Don't show again" option**: Warning can be suppressed via checkbox preference
-
-### Data Name Validation
-- **IUCr registered prefix support**: Validates CIF data names against 60+ official IUCr registered prefixes
-- **Customizable prefix list**: User-editable registered prefixes (via Settings → View Recognised Prefixes...)
-- **Validation-aware syntax highlighting**: Color-coded field names based on validation status:
-  - Blue: Valid (known in CIF dictionaries)
-  - Cyan: Registered (IUCr official prefix)
-  - Orange: Unknown (not recognized)
-  - Dark yellow with strikethrough: Deprecated
-
-### Dictionary Management
-- **Title-based dictionary type detection**: Uses internal `_dictionary.title` field with alias mapping for accurate type identification
-- **Interactive update system**: Check for updates, load for session only, or download and save to user folder
-- **Dictionary metadata display**: Shows title, version, date, and source (COMCIF development vs IUCr release)
-- **Bulk dictionary loading**: Load all dictionaries from COMCIF or IUCr with one click
-- **Multi-format dictionary support**: Automatic format detection for DDLm and DDL1 dictionaries with unified parser factory
-- **Enhanced field metadata**: Tracks units, DDL format, and source dictionary per field
-
-### CIF2 Value Formatting
-- **Smart bracket quoting**: Automatically quotes values containing CIF2 special characters (`[`, `]`, `{`, `}`)
-- **Triple-quoted string support**: Supports `'''...'\'\'` and `"""..."""` for multiline values (CIF2 feature)
-- **Syntax highlighting**: Proper highlighting for single-line and multi-line triple-quoted strings
 
 ## Building Executable
 ```bash

@@ -8,7 +8,7 @@ This file is also read by PyInstaller for embedding version info in executables.
 
 # Version components
 VERSION_MAJOR = 1
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 # Version string
 __version__ = f"{VERSION_MAJOR}.{VERSION_MINOR}"
