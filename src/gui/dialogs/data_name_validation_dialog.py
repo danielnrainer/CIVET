@@ -249,6 +249,12 @@ class DataNameValidationDialog(QDialog):
     
     # Category display configuration
     CATEGORY_CONFIG = {
+        FieldCategory.MALFORMED: {
+            'icon': '🔧',
+            'color': '#e74c3c',  # Red
+            'label': 'Malformed Fields',
+            'expanded': True,
+        },
         FieldCategory.UNKNOWN: {
             'icon': '⚠',
             'color': '#e67e22',  # Orange
@@ -304,6 +310,7 @@ class DataNameValidationDialog(QDialog):
         self._fields_to_delete: Set[str] = set()
         self._deprecated_updates: Dict[str, str] = {}  # old_name -> new_name
         self._format_corrections: Dict[str, str] = {}  # old_name -> corrected_name
+        self._malformed_fixes: Dict[str, str] = {}  # old_name -> correct_name
         self._prefixes_to_allow: Set[str] = set()
         self._fields_to_allow: Set[str] = set()
         
@@ -369,6 +376,7 @@ class DataNameValidationDialog(QDialog):
             (FieldCategory.VALID, len(self.validation_report.valid_fields)),
             (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
             (FieldCategory.USER_ALLOWED, len(self.validation_report.user_allowed_fields)),
+            (FieldCategory.MALFORMED, len(self.validation_report.malformed_fields)),
             (FieldCategory.UNKNOWN, len(self.validation_report.unknown_fields)),
             (FieldCategory.DEPRECATED, len(self.validation_report.deprecated_fields)),
         ]
@@ -394,7 +402,8 @@ class DataNameValidationDialog(QDialog):
             "+ Field = allow field as is (this session)<br>"
             "<span style='color: #c0392b;'>✕ Delete</span> = remove entry from CIF<br>"
             "⊘ Skip = ignore field (this session)<br>"
-            "<span style='color: #27ae60;'>+ Modern</span> = add modern equivalent (keep both)"
+            "<span style='color: #27ae60;'>+ Modern</span> = add modern equivalent (keep both)<br>"
+            "🔧 <span style='color: #e74c3c;'>Malformed</span> = field name can be auto-corrected"
         )
         instructions_label.setWordWrap(True)
         summary_layout.addWidget(instructions_label)
@@ -412,6 +421,11 @@ class DataNameValidationDialog(QDialog):
         self.filter_combo.addItem("All Categories", None)
         
         # Add categories that have items
+        if self.validation_report.malformed_fields:
+            self.filter_combo.addItem(
+                f"🔧 Malformed ({len(self.validation_report.malformed_fields)})",
+                FieldCategory.MALFORMED
+            )
         if self.validation_report.unknown_fields:
             self.filter_combo.addItem(
                 f"⚠ Unknown ({len(self.validation_report.unknown_fields)})",
@@ -512,8 +526,9 @@ class DataNameValidationDialog(QDialog):
         self._field_items.clear()
         self._category_items.clear()
         
-        # Order categories: unknown and deprecated first (expanded), then others
+        # Order categories: malformed, unknown and deprecated first (expanded), then others
         category_order = [
+            (FieldCategory.MALFORMED, self.validation_report.malformed_fields),
             (FieldCategory.UNKNOWN, self.validation_report.unknown_fields),
             (FieldCategory.DEPRECATED, self.validation_report.deprecated_fields),
             (FieldCategory.REGISTERED_LOCAL, self.validation_report.registered_local_fields),
@@ -681,6 +696,36 @@ class DataNameValidationDialog(QDialog):
             )
             layout.addWidget(ignore_btn)
         
+        elif category == FieldCategory.MALFORMED:
+            suggested = field_result.suggested_format
+            
+            # Fix button
+            if suggested:
+                fix_btn = QPushButton("✓ Fix")
+                fix_btn.setMaximumWidth(BUTTON_WIDTH)
+                fix_btn.setStyleSheet("color: #27ae60;")  # Green
+                fix_btn.setToolTip(
+                    f"Rename '{field_name}'\n"
+                    f"to '{suggested}'"
+                )
+                fix_btn.clicked.connect(
+                    lambda checked, fn=field_name, sf=suggested:
+                        self._on_fix_malformed(fn, sf)
+                )
+                layout.addWidget(fix_btn)
+            
+            # Skip button
+            skip_btn = QPushButton("⊘ Skip")
+            skip_btn.setMaximumWidth(BUTTON_WIDTH)
+            skip_btn.setToolTip(
+                f"Ignore '{field_name}' for\n"
+                f"this session only"
+            )
+            skip_btn.clicked.connect(
+                lambda checked, fn=field_name: self._on_ignore_field(fn)
+            )
+            layout.addWidget(skip_btn)
+        
         elif category == FieldCategory.DEPRECATED:
             modern_name = field_result.modern_equivalent
             
@@ -803,6 +848,24 @@ class DataNameValidationDialog(QDialog):
         )
         self._update_apply_button()
     
+    def _on_fix_malformed(self, field_name: str, correct_name: str) -> None:
+        """
+        Mark malformed field for renaming to the correct name.
+        
+        Args:
+            field_name: The malformed field name
+            correct_name: The correct field name from the dictionary
+        """
+        self._malformed_fixes[field_name.lower()] = correct_name
+        self._pending_actions[field_name.lower()] = FieldAction.FIX_MALFORMED
+        
+        self._mark_field_as_handled(
+            field_name,
+            f"Will rename to {correct_name}",
+            color="#27ae60"
+        )
+        self._update_apply_button()
+    
     def _on_update_deprecated(self, field_name: str, modern_name: str) -> None:
         """
         Mark deprecated field to have its modern equivalent added alongside.
@@ -884,6 +947,7 @@ class DataNameValidationDialog(QDialog):
         self._fields_to_delete.discard(field_name_lower)
         self._deprecated_updates.pop(field_name_lower, None)
         self._format_corrections.pop(field_name_lower, None)
+        self._malformed_fixes.pop(field_name_lower, None)
         self._fields_to_allow.discard(field_name_lower)
         
         # Find the original field result to restore buttons
@@ -922,6 +986,7 @@ class DataNameValidationDialog(QDialog):
         field_name_lower = field_name.lower()
         
         all_fields = (
+            self.validation_report.malformed_fields +
             self.validation_report.unknown_fields +
             self.validation_report.deprecated_fields +
             self.validation_report.registered_local_fields +
@@ -988,6 +1053,7 @@ class DataNameValidationDialog(QDialog):
             self._fields_to_delete or
             self._deprecated_updates or
             self._format_corrections or
+            self._malformed_fixes or
             self._prefixes_to_allow or
             self._fields_to_allow
         )
@@ -1061,6 +1127,7 @@ class DataNameValidationDialog(QDialog):
         self._fields_to_delete.clear()
         self._deprecated_updates.clear()
         self._format_corrections.clear()
+        self._malformed_fixes.clear()
         self._prefixes_to_allow.clear()
         self._fields_to_allow.clear()
         
@@ -1084,6 +1151,7 @@ class DataNameValidationDialog(QDialog):
             (FieldCategory.VALID, len(self.validation_report.valid_fields)),
             (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
             (FieldCategory.USER_ALLOWED, len(self.validation_report.user_allowed_fields)),
+            (FieldCategory.MALFORMED, len(self.validation_report.malformed_fields)),
             (FieldCategory.UNKNOWN, len(self.validation_report.unknown_fields)),
             (FieldCategory.DEPRECATED, len(self.validation_report.deprecated_fields)),
         ]
@@ -1113,6 +1181,11 @@ class DataNameValidationDialog(QDialog):
         self.filter_combo.clear()
         self.filter_combo.addItem("All Categories", None)
         
+        if self.validation_report.malformed_fields:
+            self.filter_combo.addItem(
+                f"🔧 Malformed ({len(self.validation_report.malformed_fields)})",
+                FieldCategory.MALFORMED
+            )
         if self.validation_report.unknown_fields:
             self.filter_combo.addItem(
                 f"⚠ Unknown ({len(self.validation_report.unknown_fields)})",
@@ -1191,3 +1264,12 @@ class DataNameValidationDialog(QDialog):
             Dict mapping incorrectly formatted field names to corrected names
         """
         return self._format_corrections.copy()
+    
+    def get_malformed_fixes(self) -> Dict[str, str]:
+        """
+        Get malformed field fix mappings.
+        
+        Returns:
+            Dict mapping malformed field names to their correct dictionary names
+        """
+        return self._malformed_fixes.copy()

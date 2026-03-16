@@ -1230,7 +1230,7 @@ class CIFDictionaryManager:
         
         return malformed_fields
     
-    def _guess_modern_equivalent(self, field_name: str) -> Optional[str]:
+    def guess_modern_equivalent(self, field_name: str) -> Optional[str]:
         """
         Try to guess the correct modern (dot notation) equivalent of a malformed field.
         
@@ -1245,6 +1245,7 @@ class CIFDictionaryManager:
         Returns:
             The correct modern field name if found, None otherwise
         """
+        self._ensure_loaded()
         if not field_name.startswith('_'):
             return None
         
@@ -1266,6 +1267,10 @@ class CIFDictionaryManager:
                 return guessed_name
         
         return None
+    
+    def _guess_modern_equivalent(self, field_name: str) -> Optional[str]:
+        """Alias for backwards compatibility with internal callers."""
+        return self.guess_modern_equivalent(field_name)
     
     def fix_malformed_fields_in_content(self, content: str, fixes: List[Dict[str, str]]) -> Tuple[str, List[str]]:
         """

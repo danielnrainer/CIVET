@@ -18,7 +18,6 @@ class CheckConfigDialog(QDialog):
         self.skip_matching_defaults = False
         self.reformat_after_checks = False
         self.check_duplicates_aliases = True  # Enabled by default
-        self.fix_malformed_fields = True  # Enabled by default - new option
         self.validate_data_names = True  # Enabled by default - validate against dictionaries
         
         self.init_ui()
@@ -42,19 +41,10 @@ class CheckConfigDialog(QDialog):
         cleanup_group = QGroupBox("Pre-Check Cleanup")
         cleanup_layout = QVBoxLayout(cleanup_group)
         
-        # Option: Fix malformed field names (ENABLED BY DEFAULT)
-        self.fix_malformed_checkbox = QCheckBox(
-            "Fix malformed field names (RECOMMENDED)\n"
-            "(Correct fields like _diffrn_total_exposure_time → _diffrn.total_exposure_time)"
-        )
-        self.fix_malformed_checkbox.setChecked(self.fix_malformed_fields)
-        self.fix_malformed_checkbox.setStyleSheet("font-weight: bold;")
-        cleanup_layout.addWidget(self.fix_malformed_checkbox)
-        
         # Option: Validate data names against dictionaries (ENABLED BY DEFAULT)
         self.validate_data_names_checkbox = QCheckBox(
             "Validate data names against dictionaries (RECOMMENDED)\n"
-            "(Check all field names are valid, flag unknown/deprecated fields)"
+            "(Fix malformed fields, flag unknown/deprecated fields)"
         )
         self.validate_data_names_checkbox.setChecked(self.validate_data_names)
         self.validate_data_names_checkbox.setStyleSheet("font-weight: bold;")
@@ -119,7 +109,6 @@ class CheckConfigDialog(QDialog):
     def get_config(self):
         """Get the current configuration settings."""
         return {
-            'fix_malformed_fields': self.fix_malformed_checkbox.isChecked(),
             'validate_data_names': self.validate_data_names_checkbox.isChecked(),
             'auto_fill_missing': self.auto_fill_checkbox.isChecked(),
             'skip_matching_defaults': self.skip_defaults_checkbox.isChecked(),

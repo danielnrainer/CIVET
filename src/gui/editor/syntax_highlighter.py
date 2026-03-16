@@ -15,8 +15,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     colors based on whether a field is:
     - valid: Known in the CIF dictionary (blue)
     - registered: Uses a registered IUCr prefix (cyan/teal)
-    - user_allowed: User has allowed this prefix/field (cyan/teal)
-    - unknown: Not recognized in any dictionary (orange)
+    - user_allowed: User has allowed this prefix/field (cyan/teal & italicised)
+    - unknown: Not recognized in any dictionary or prefix (red)
     - deprecated: Field is deprecated (dark yellow with strikethrough)
     
     If no validator is set, all fields are highlighted in blue (backwards compatible).
@@ -123,10 +123,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         # User-allowed format - same as registered local (cyan/teal)
         self.user_allowed_format = QTextCharFormat()
         self.user_allowed_format.setForeground(QColor("#008B8B"))  # Cyan/Teal (DarkCyan)
+        self.user_allowed_format.setFontItalic(True)
         
         # Unknown format - for unrecognized fields
         self.unknown_format = QTextCharFormat()
-        self.unknown_format.setForeground(QColor("#FF6600"))  # Orange
+        self.unknown_format.setForeground(QColor("#FF0000"))  # Red
         
         # Deprecated format - for deprecated fields
         self.deprecated_format = QTextCharFormat()

@@ -7,7 +7,7 @@ Settings are persisted to the user's configuration directory.
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
                             QCheckBox, QPushButton, QFontComboBox, QGroupBox,
-                            QMessageBox)
+                            QMessageBox, QComboBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 import sys
@@ -39,11 +39,16 @@ class EditorSettingsDialog(QDialog):
         # Load current settings
         all_settings = load_settings()
         self.editor_settings = all_settings.get('editor', {})
+        self.dialog_settings = all_settings.get('dialogs', {})
         
         # Ensure all required keys exist
         for key, value in DEFAULT_SETTINGS['editor'].items():
             if key not in self.editor_settings:
                 self.editor_settings[key] = value
+
+        for key, value in DEFAULT_SETTINGS.get('dialogs', {}).items():
+            if key not in self.dialog_settings:
+                self.dialog_settings[key] = value
         
         self.init_ui()
         self.load_settings_into_ui()
@@ -103,6 +108,37 @@ class EditorSettingsDialog(QDialog):
         
         display_group.setLayout(display_layout)
         layout.addWidget(display_group)
+
+        # Dialog behavior settings group
+        dialog_group = QGroupBox("Dialog Behavior")
+        dialog_layout = QVBoxLayout()
+
+        default_mode_row = QHBoxLayout()
+        default_mode_row.addWidget(QLabel("Default Dialog Interaction:"))
+        self.default_dialog_mode_combo = QComboBox()
+        self.default_dialog_mode_combo.addItem("Browse editor (read-only) while open", "browse_readonly")
+        self.default_dialog_mode_combo.addItem("Classic modal (lock editor while open)", "modal_lock_editor")
+        default_mode_row.addWidget(self.default_dialog_mode_combo)
+        dialog_layout.addLayout(default_mode_row)
+
+        dialog_mode_row = QHBoxLayout()
+        dialog_mode_row.addWidget(QLabel("Validation Results Dialog:"))
+        self.validation_dialog_mode_combo = QComboBox()
+        self.validation_dialog_mode_combo.addItem("Use default", "inherit_default")
+        self.validation_dialog_mode_combo.addItem("Browse editor (read-only) while open", "browse_readonly")
+        self.validation_dialog_mode_combo.addItem("Classic modal (lock editor while open)", "modal_lock_editor")
+        dialog_mode_row.addWidget(self.validation_dialog_mode_combo)
+        dialog_layout.addLayout(dialog_mode_row)
+
+        dialog_help = QLabel(
+            "Controls how result dialogs interact with the main editor. "
+            "This setting is designed to be reused by additional dialogs in the future."
+        )
+        dialog_help.setWordWrap(True)
+        dialog_layout.addWidget(dialog_help)
+
+        dialog_group.setLayout(dialog_layout)
+        layout.addWidget(dialog_group)
         
         # Buttons
         button_layout = QHBoxLayout()
@@ -132,12 +168,26 @@ class EditorSettingsDialog(QDialog):
         self.line_numbers_checkbox.blockSignals(True)
         self.syntax_highlighting_checkbox.blockSignals(True)
         self.ruler_checkbox.blockSignals(True)
+        self.default_dialog_mode_combo.blockSignals(True)
+        self.validation_dialog_mode_combo.blockSignals(True)
         
         self.font_combo.setCurrentFont(QFont(self.editor_settings.get('font_family', 'Consolas')))
         self.font_size_spinbox.setValue(self.editor_settings.get('font_size', 10))
         self.line_numbers_checkbox.setChecked(self.editor_settings.get('line_numbers_enabled', True))
         self.syntax_highlighting_checkbox.setChecked(self.editor_settings.get('syntax_highlighting_enabled', True))
         self.ruler_checkbox.setChecked(self.editor_settings.get('show_ruler', True))
+
+        default_mode = self.dialog_settings.get('default_interaction_mode', 'browse_readonly')
+        default_index = self.default_dialog_mode_combo.findData(default_mode)
+        if default_index < 0:
+            default_index = self.default_dialog_mode_combo.findData('browse_readonly')
+        self.default_dialog_mode_combo.setCurrentIndex(max(default_index, 0))
+
+        mode_value = self.dialog_settings.get('data_name_validation_results_mode', 'inherit_default')
+        mode_index = self.validation_dialog_mode_combo.findData(mode_value)
+        if mode_index < 0:
+            mode_index = self.validation_dialog_mode_combo.findData('inherit_default')
+        self.validation_dialog_mode_combo.setCurrentIndex(max(mode_index, 0))
         
         # Unblock signals after loading
         self.font_combo.blockSignals(False)
@@ -145,6 +195,8 @@ class EditorSettingsDialog(QDialog):
         self.line_numbers_checkbox.blockSignals(False)
         self.syntax_highlighting_checkbox.blockSignals(False)
         self.ruler_checkbox.blockSignals(False)
+        self.default_dialog_mode_combo.blockSignals(False)
+        self.validation_dialog_mode_combo.blockSignals(False)
     
     def _update_settings_from_ui(self):
         """Update settings dictionary from UI components."""
@@ -153,6 +205,8 @@ class EditorSettingsDialog(QDialog):
         self.editor_settings['line_numbers_enabled'] = self.line_numbers_checkbox.isChecked()
         self.editor_settings['syntax_highlighting_enabled'] = self.syntax_highlighting_checkbox.isChecked()
         self.editor_settings['show_ruler'] = self.ruler_checkbox.isChecked()
+        self.dialog_settings['default_interaction_mode'] = self.default_dialog_mode_combo.currentData()
+        self.dialog_settings['data_name_validation_results_mode'] = self.validation_dialog_mode_combo.currentData()
     
     def accept_and_save(self):
         """Accept dialog and save settings to user config."""
@@ -170,6 +224,8 @@ class EditorSettingsDialog(QDialog):
             set_setting('editor.line_numbers_enabled', self.editor_settings['line_numbers_enabled'])
             set_setting('editor.syntax_highlighting_enabled', self.editor_settings['syntax_highlighting_enabled'])
             set_setting('editor.show_ruler', self.editor_settings['show_ruler'])
+            set_setting('dialogs.default_interaction_mode', self.dialog_settings['default_interaction_mode'])
+            set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings['data_name_validation_results_mode'])
             
             self.accept()
         except Exception as e:
@@ -189,6 +245,7 @@ class EditorSettingsDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             # Reset in memory
             self.editor_settings = DEFAULT_SETTINGS['editor'].copy()
+            self.dialog_settings = DEFAULT_SETTINGS.get('dialogs', {}).copy()
             
             # Reload UI
             self.load_settings_into_ui()
@@ -200,6 +257,8 @@ class EditorSettingsDialog(QDialog):
                 set_setting('editor.line_numbers_enabled', self.editor_settings['line_numbers_enabled'])
                 set_setting('editor.syntax_highlighting_enabled', self.editor_settings['syntax_highlighting_enabled'])
                 set_setting('editor.show_ruler', self.editor_settings['show_ruler'])
+                set_setting('dialogs.default_interaction_mode', self.dialog_settings.get('default_interaction_mode', 'browse_readonly'))
+                set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings.get('data_name_validation_results_mode', 'browse_readonly'))
                 
                 # Apply to editor if callback provided
                 if self.on_settings_changed:

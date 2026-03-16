@@ -36,6 +36,10 @@ DEFAULT_SETTINGS = {
     "general": {
         "last_directory": "",
         "recent_files": []
+    },
+    "dialogs": {
+        "default_interaction_mode": "browse_readonly",
+        "data_name_validation_results_mode": "inherit_default"
     }
 }
 

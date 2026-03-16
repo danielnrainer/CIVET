@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
                            QButtonGroup, QComboBox)
-from PyQt6.QtCore import Qt, QRegularExpression, QTimer
+from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
 import os
@@ -18,7 +18,7 @@ from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from utils.data_name_validator import DataNameValidator, FieldCategory
 from utils.registered_prefixes import get_prefix_data_source
-from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_user_prefixes_path
+from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_user_prefixes_path, get_setting
 from utils.cif2_value_formatting import (
     format_cif2_value, is_multiline, needs_quoting,
     validate_cif2_content, fix_cif2_compliance_issues
@@ -77,6 +77,10 @@ class CIFEditor(QMainWindow):
         
         # Initialize data name validator
         self.data_name_validator = DataNameValidator(self.dict_manager)
+
+        # Track dialog-driven read-only state so editor is scrollable while dialogs are open.
+        self._dialog_editor_lock_count = 0
+        self._editor_readonly_before_dialog = False
         
         self.init_ui()
         
@@ -138,8 +142,13 @@ class CIFEditor(QMainWindow):
         for display_name, file_path, legacy_path in bundled_rules:
             self.builtin_combo.addItem(display_name, {'path': file_path, 'legacy_path': legacy_path})
         
-        # Default to first item (usually 3D ED Modern)
-        self.builtin_combo.setCurrentIndex(0)
+        # Default to Legacy variant if available
+        legacy_index = next(
+            (i for i in range(self.builtin_combo.count())
+             if 'Legacy' in self.builtin_combo.itemText(i)),
+            0,
+        )
+        self.builtin_combo.setCurrentIndex(legacy_index)
     
     def _populate_user_combo(self):
         """Populate the user field rules combo box."""
@@ -1282,7 +1291,7 @@ class CIFEditor(QMainWindow):
         # Open dialog for editing
         dialog = MultilineInputDialog(current_value, self)
         dialog.setWindowTitle("Edit Refinement Special Details")
-        result = dialog.exec()
+        result = self._show_dialog_with_configured_interaction(dialog)
         
         if result in [MultilineInputDialog.RESULT_ABORT, MultilineInputDialog.RESULT_STOP_SAVE]:
             return result
@@ -1376,7 +1385,7 @@ class CIFEditor(QMainWindow):
                             )
                         )
                         
-                        if dialog.exec() == QDialog.DialogCode.Accepted:
+                        if self._show_dialog_with_configured_interaction(dialog) == QDialog.DialogCode.Accepted:
                             # Check if fixes were applied
                             if dialog.fixed_content:
                                 # Use the fixed content instead
@@ -1474,7 +1483,7 @@ class CIFEditor(QMainWindow):
         
         # Show configuration dialog first
         config_dialog = CheckConfigDialog(self)
-        if config_dialog.exec() != QDialog.DialogCode.Accepted:
+        if self._show_dialog_with_configured_interaction(config_dialog) != QDialog.DialogCode.Accepted:
             return  # User cancelled
         
         # Get configuration settings
@@ -1483,18 +1492,12 @@ class CIFEditor(QMainWindow):
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
         
-        # PRE-CHECK STEP 1: Validate data names against dictionaries (if enabled)
+        # PRE-CHECK: Validate data names against dictionaries (if enabled)
+        # This now includes malformed field detection (e.g. _diffrn_flux_density → _diffrn.flux_density)
         if config.get('validate_data_names', True):
             validation_success = self._validate_data_names_before_checks()
             if not validation_success:
                 return  # User cancelled or aborted
-        
-        # PRE-CHECK STEP 2: Fix malformed field names (if enabled)
-        if config.get('fix_malformed_fields', True):
-            malformed_fix_success = self._fix_malformed_fields_before_checks()
-            if not malformed_fix_success:
-                # User may have aborted, but we continue unless they explicitly cancelled
-                pass
         
         # Single field set processing
         success = self._process_single_field_set(config, initial_state)
@@ -1543,13 +1546,16 @@ class CIFEditor(QMainWindow):
             
             # Check if there are any issues to report
             has_issues = (len(report.unknown_fields) > 0 or 
-                         len(report.deprecated_fields) > 0)
+                         len(report.deprecated_fields) > 0 or
+                         len(report.malformed_fields) > 0)
             
             if not has_issues:
                 return True  # All fields valid, continue
             
             # Build a quick summary
             issues = []
+            if report.malformed_fields:
+                issues.append(f"{len(report.malformed_fields)} malformed field name(s)")
             if report.unknown_fields:
                 issues.append(f"{len(report.unknown_fields)} unknown field(s)")
             if report.deprecated_fields:
@@ -1585,8 +1591,11 @@ class CIFEditor(QMainWindow):
             
             dialog.changes_requested.connect(on_changes_requested)
             
-            # Show dialog (stays open until user closes it)
-            dialog.exec()
+            # Show dialog with configured editor interaction behavior.
+            self._show_dialog_with_configured_interaction(
+                dialog,
+                "dialogs.data_name_validation_results_mode"
+            )
             
             # If changes were applied, do final cleanup
             if dialog.has_changes_applied():
@@ -1602,6 +1611,71 @@ class CIFEditor(QMainWindow):
                 "Continuing with field checks..."
             )
             return True  # Continue despite error
+
+    def _resolve_dialog_interaction_mode(self, mode_setting_key: str) -> str:
+        """Resolve an effective dialog interaction mode from defaults/overrides."""
+        default_mode = get_setting("dialogs.default_interaction_mode", "browse_readonly")
+
+        if mode_setting_key == "dialogs.default_interaction_mode":
+            mode = default_mode
+        else:
+            mode = get_setting(mode_setting_key, "inherit_default")
+            if mode == "inherit_default":
+                mode = default_mode
+
+        if mode not in {"browse_readonly", "modal_lock_editor"}:
+            return "browse_readonly"
+        return mode
+
+    def _lock_editor_for_dialog(self) -> None:
+        """Temporarily lock editor editing while preserving scroll/navigation."""
+        if self._dialog_editor_lock_count == 0 and self.text_editor is not None:
+            self._editor_readonly_before_dialog = self.text_editor.isReadOnly()
+            self.text_editor.setReadOnly(True)
+        self._dialog_editor_lock_count += 1
+
+    def _unlock_editor_for_dialog(self) -> None:
+        """Release one dialog lock and restore original read-only state when done."""
+        if self._dialog_editor_lock_count <= 0:
+            return
+
+        self._dialog_editor_lock_count -= 1
+        if self._dialog_editor_lock_count == 0 and self.text_editor is not None:
+            self.text_editor.setReadOnly(self._editor_readonly_before_dialog)
+
+    def _show_dialog_with_configured_interaction(
+        self,
+        dialog: QDialog,
+        mode_setting_key: str = "dialogs.default_interaction_mode"
+    ) -> int:
+        """Show a dialog and return its result while honoring interaction settings."""
+        mode = self._resolve_dialog_interaction_mode(mode_setting_key)
+
+        if mode == "modal_lock_editor":
+            dialog.setModal(True)
+            dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            return int(dialog.exec())
+
+        self._lock_editor_for_dialog()
+        dialog.setModal(False)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+
+        loop = QEventLoop(self)
+        result_code = int(QDialog.DialogCode.Rejected)
+
+        def _on_dialog_finished(code: int) -> None:
+            nonlocal result_code
+            result_code = int(code)
+            self._unlock_editor_for_dialog()
+            if loop.isRunning():
+                loop.quit()
+
+        dialog.finished.connect(_on_dialog_finished)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        loop.exec()
+        return result_code
 
     def _fix_malformed_fields_before_checks(self) -> bool:
         """
@@ -2329,7 +2403,7 @@ class CIFEditor(QMainWindow):
                 
                 # Let user resolve conflicts individually
                 dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager, cif_format)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
+                if self._show_dialog_with_configured_interaction(dialog) == QDialog.DialogCode.Accepted:
                     resolutions = dialog.get_resolutions()
                 else:
                     return  # User cancelled
@@ -2665,7 +2739,7 @@ class CIFEditor(QMainWindow):
             if resolve_reply == QMessageBox.StandardButton.Yes:
                 # Manual resolution using existing dialog
                 dialog = FieldConflictDialog(conflicts, content, self, self.dict_manager, cif_format)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
+                if self._show_dialog_with_configured_interaction(dialog) == QDialog.DialogCode.Accepted:
                     resolutions = dialog.get_resolutions()
                 else:
                     # User cancelled the dialog - ask if they want to abort or auto-resolve
@@ -3114,7 +3188,7 @@ class CIFEditor(QMainWindow):
         """Show detailed dictionary information dialog."""
         try:
             dialog = DictionaryInfoDialog(self.dict_manager, self)
-            dialog.exec()
+            self._show_dialog_with_configured_interaction(dialog)
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -3126,7 +3200,7 @@ class CIFEditor(QMainWindow):
         """Show the About dialog with version and credits."""
         try:
             dialog = AboutDialog(self)
-            dialog.exec()
+            self._show_dialog_with_configured_interaction(dialog)
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -3160,8 +3234,11 @@ class CIFEditor(QMainWindow):
             
             dialog.changes_requested.connect(on_changes_requested)
             
-            # Show dialog (it will stay open until user closes it)
-            dialog.exec()
+            # Show dialog with configured editor interaction behavior.
+            self._show_dialog_with_configured_interaction(
+                dialog,
+                "dialogs.data_name_validation_results_mode"
+            )
             
             # If any changes were applied during the session, do final cleanup
             if dialog.has_changes_applied():
@@ -3182,6 +3259,7 @@ class CIFEditor(QMainWindow):
         - Deleting fields marked for deletion
         - Adding modern equivalents alongside deprecated fields (keeping both)
         - Correcting embedded local prefix format (e.g., _chemical_oxdiff_formula → _chemical_oxdiff.formula)
+        - Fixing malformed field names (e.g., _diffrn_flux_density → _diffrn.flux_density)
         - The dialog already updates the validator's allowed lists
         """
         content = self.text_editor.toPlainText()
@@ -3195,6 +3273,11 @@ class CIFEditor(QMainWindow):
         
         # Get format corrections (old_name -> corrected_name)
         format_corrections = dialog.get_format_corrections()
+        
+        # Get malformed fixes (old_name -> correct_name) - these are renames, same as format corrections
+        malformed_fixes = dialog.get_malformed_fixes()
+        # Merge malformed fixes into format_corrections since they are handled identically
+        format_corrections.update(malformed_fixes)
         
         # First, check which modern fields already exist (to avoid duplicates)
         existing_fields = set()
@@ -3299,8 +3382,12 @@ class CIFEditor(QMainWindow):
                     changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
                 if deprecated_to_add:
                     changes_summary.append(f"Added modern equivalents for {len(deprecated_to_add)} deprecated field(s)")
-                if format_corrections:
-                    changes_summary.append(f"Corrected format of {len(format_corrections)} field(s)")
+                # format_corrections now includes both embedded prefix fixes and malformed fixes
+                num_format = len(format_corrections) - len(malformed_fixes)
+                if num_format > 0:
+                    changes_summary.append(f"Corrected format of {num_format} field(s)")
+                if malformed_fixes:
+                    changes_summary.append(f"Fixed {len(malformed_fixes)} malformed field name(s)")
                 
                 QMessageBox.information(
                     self, 
@@ -3314,7 +3401,7 @@ class CIFEditor(QMainWindow):
             self,
             on_settings_changed=self._apply_editor_settings
         )
-        result = dialog.exec()
+        result = self._show_dialog_with_configured_interaction(dialog)
         
         # If user clicked OK, settings were already applied by the callback
         # If user clicked Cancel, no changes were made
@@ -3442,7 +3529,7 @@ class CIFEditor(QMainWindow):
                         )
                     )
                     
-                    return dialog.exec() == QDialog.DialogCode.Accepted
+                    return self._show_dialog_with_configured_interaction(dialog) == QDialog.DialogCode.Accepted
                 
                 # User chose to proceed without fixing
                 return True
@@ -3609,7 +3696,7 @@ class CIFEditor(QMainWindow):
         """Show dialog with all recognised CIF data name prefixes."""
         try:
             dialog = RecognisedPrefixesDialog(self.data_name_validator, self)
-            dialog.exec()
+            self._show_dialog_with_configured_interaction(dialog)
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -3648,7 +3735,7 @@ class CIFEditor(QMainWindow):
                     )
                 )
             
-            dialog.exec()
+            self._show_dialog_with_configured_interaction(dialog)
             
         except Exception as e:
             QMessageBox.critical(

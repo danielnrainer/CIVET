@@ -39,6 +39,7 @@ class FieldCategory(Enum):
     USER_ALLOWED = "user_allowed"      # User has allowed this prefix/field
     UNKNOWN = "unknown"                # Not recognized
     DEPRECATED = "deprecated"          # Deprecated field
+    MALFORMED = "malformed"            # Malformed name matchable to a known field
 
 
 class FieldAction(Enum):
@@ -50,6 +51,7 @@ class FieldAction(Enum):
     IGNORE_SESSION = "ignore_session"  # Ignore for this session only
     CORRECT_FORMAT = "correct_format"  # Apply suggested format correction
     DEPRECATION_UPDATE = "deprecation_update"  # Add modern equivalent alongside deprecated field
+    FIX_MALFORMED = "fix_malformed"    # Rename malformed field to correct name
 
 
 @dataclass
@@ -74,6 +76,7 @@ class ValidationReport:
     user_allowed_fields: List[FieldValidationResult] = field(default_factory=list)
     unknown_fields: List[FieldValidationResult] = field(default_factory=list)
     deprecated_fields: List[FieldValidationResult] = field(default_factory=list)
+    malformed_fields: List[FieldValidationResult] = field(default_factory=list)
     total_fields: int = 0
 
 
@@ -208,6 +211,22 @@ class DataNameValidator:
             self._validation_cache[cache_key] = result
             return result
         
+        # Check if field is a malformed version of a known field
+        # e.g. _diffrn_flux_density → _diffrn.flux_density
+        if '.' not in field_name_lower:
+            modern_equiv = self.dict_manager.guess_modern_equivalent(field_name)
+            if modern_equiv:
+                result = FieldValidationResult(
+                    field_name=field_name,
+                    category=FieldCategory.MALFORMED,
+                    line_number=line_number,
+                    description=f"Should be {modern_equiv}",
+                    suggested_format=modern_equiv,
+                    prefix=prefix
+                )
+                self._validation_cache[cache_key] = result
+                return result
+        
         # Check if field uses a registered IUCr prefix
         if is_registered_prefix(field_name):
             prefix_info = get_prefix_info(prefix) or ""
@@ -338,6 +357,8 @@ class DataNameValidator:
                         report.unknown_fields.append(result)
                     elif result.category == FieldCategory.DEPRECATED:
                         report.deprecated_fields.append(result)
+                    elif result.category == FieldCategory.MALFORMED:
+                        report.malformed_fields.append(result)
         
         return report
     
