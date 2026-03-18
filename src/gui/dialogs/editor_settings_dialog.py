@@ -7,9 +7,9 @@ Settings are persisted to the user's configuration directory.
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
                             QCheckBox, QPushButton, QFontComboBox, QGroupBox,
-                            QMessageBox, QComboBox)
+                            QMessageBox, QComboBox, QColorDialog, QGridLayout)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 import sys
 import os
 
@@ -22,6 +22,21 @@ from utils.user_config import (
 
 class EditorSettingsDialog(QDialog):
     """Dialog for editing editor settings."""
+
+    COLOR_LABELS = [
+        ('field_default', 'Fallback data names'),
+        ('valid', 'Valid fields'),
+        ('registered_local', 'Registered local-prefix fields'),
+        ('user_allowed', 'User-allowed fields'),
+        ('unknown', 'Unknown fields'),
+        ('malformed', 'Malformed fields'),
+        ('deprecated', 'Deprecated fields'),
+        ('value', 'Quoted values'),
+        ('multiline', 'Multiline values'),
+        ('loop_keyword', 'loop_ keyword'),
+        ('loop_field', 'Loop field names'),
+        ('loop_data', 'Loop data values'),
+    ]
     
     def __init__(self, parent=None, on_settings_changed=None):
         """
@@ -33,18 +48,26 @@ class EditorSettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Editor Settings")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(520)
         self.on_settings_changed = on_settings_changed
         
         # Load current settings
         all_settings = load_settings()
         self.editor_settings = all_settings.get('editor', {})
         self.dialog_settings = all_settings.get('dialogs', {})
+        self.color_buttons = {}
         
         # Ensure all required keys exist
         for key, value in DEFAULT_SETTINGS['editor'].items():
             if key not in self.editor_settings:
                 self.editor_settings[key] = value
+
+        default_colors = DEFAULT_SETTINGS['editor']['syntax_highlighting_colors']
+        current_colors = self.editor_settings.get('syntax_highlighting_colors', {})
+        merged_colors = default_colors.copy()
+        if isinstance(current_colors, dict):
+            merged_colors.update(current_colors)
+        self.editor_settings['syntax_highlighting_colors'] = merged_colors
 
         for key, value in DEFAULT_SETTINGS.get('dialogs', {}).items():
             if key not in self.dialog_settings:
@@ -108,6 +131,38 @@ class EditorSettingsDialog(QDialog):
         
         display_group.setLayout(display_layout)
         layout.addWidget(display_group)
+
+        # Syntax highlighting colors group
+        colors_group = QGroupBox("Syntax Highlighting Colors")
+        colors_layout = QVBoxLayout()
+
+        colors_help = QLabel(
+            "Choose the colours used for syntax highlighting. These settings also drive the "
+            "Syntax Highlighting Guide shown from the Help menu."
+        )
+        colors_help.setWordWrap(True)
+        colors_layout.addWidget(colors_help)
+
+        colors_grid = QGridLayout()
+        colors_grid.setColumnStretch(1, 1)
+
+        for row, (key, label_text) in enumerate(self.COLOR_LABELS):
+            label = QLabel(label_text + ":")
+            colors_grid.addWidget(label, row, 0)
+
+            button = QPushButton()
+            button.setMinimumWidth(120)
+            button.clicked.connect(lambda checked, color_key=key: self.choose_color(color_key))
+            self.color_buttons[key] = button
+            colors_grid.addWidget(button, row, 1)
+
+            reset_button = QPushButton("Default")
+            reset_button.clicked.connect(lambda checked, color_key=key: self.reset_color_to_default(color_key))
+            colors_grid.addWidget(reset_button, row, 2)
+
+        colors_layout.addLayout(colors_grid)
+        colors_group.setLayout(colors_layout)
+        layout.addWidget(colors_group)
 
         # Dialog behavior settings group
         dialog_group = QGroupBox("Dialog Behavior")
@@ -188,6 +243,9 @@ class EditorSettingsDialog(QDialog):
         if mode_index < 0:
             mode_index = self.validation_dialog_mode_combo.findData('inherit_default')
         self.validation_dialog_mode_combo.setCurrentIndex(max(mode_index, 0))
+
+        for color_key in self.color_buttons:
+            self._update_color_button(color_key)
         
         # Unblock signals after loading
         self.font_combo.blockSignals(False)
@@ -207,6 +265,45 @@ class EditorSettingsDialog(QDialog):
         self.editor_settings['show_ruler'] = self.ruler_checkbox.isChecked()
         self.dialog_settings['default_interaction_mode'] = self.default_dialog_mode_combo.currentData()
         self.dialog_settings['data_name_validation_results_mode'] = self.validation_dialog_mode_combo.currentData()
+
+    def _update_color_button(self, color_key: str) -> None:
+        """Refresh the label and preview for one color button."""
+        color_value = self.editor_settings['syntax_highlighting_colors'].get(
+            color_key,
+            DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'][color_key]
+        )
+        button = self.color_buttons[color_key]
+        button.setText(color_value.upper())
+
+        color = QColor(color_value)
+        text_color = '#000000'
+        if color.isValid() and color.lightness() < 128:
+            text_color = '#FFFFFF'
+
+        button.setStyleSheet(
+            f"background-color: {color_value}; color: {text_color}; font-family: Consolas, monospace;"
+        )
+
+    def choose_color(self, color_key: str) -> None:
+        """Open a color picker for a syntax-highlighting color."""
+        current_value = self.editor_settings['syntax_highlighting_colors'].get(
+            color_key,
+            DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'][color_key]
+        )
+        current_color = QColor(current_value)
+        color = QColorDialog.getColor(current_color, self, "Select Syntax Highlighting Color")
+        if not color.isValid():
+            return
+
+        self.editor_settings['syntax_highlighting_colors'][color_key] = color.name().upper()
+        self._update_color_button(color_key)
+
+    def reset_color_to_default(self, color_key: str) -> None:
+        """Reset one syntax-highlighting color to its default value."""
+        self.editor_settings['syntax_highlighting_colors'][color_key] = (
+            DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'][color_key]
+        )
+        self._update_color_button(color_key)
     
     def accept_and_save(self):
         """Accept dialog and save settings to user config."""
@@ -224,6 +321,7 @@ class EditorSettingsDialog(QDialog):
             set_setting('editor.line_numbers_enabled', self.editor_settings['line_numbers_enabled'])
             set_setting('editor.syntax_highlighting_enabled', self.editor_settings['syntax_highlighting_enabled'])
             set_setting('editor.show_ruler', self.editor_settings['show_ruler'])
+            set_setting('editor.syntax_highlighting_colors', self.editor_settings['syntax_highlighting_colors'])
             set_setting('dialogs.default_interaction_mode', self.dialog_settings['default_interaction_mode'])
             set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings['data_name_validation_results_mode'])
             
@@ -245,6 +343,7 @@ class EditorSettingsDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             # Reset in memory
             self.editor_settings = DEFAULT_SETTINGS['editor'].copy()
+            self.editor_settings['syntax_highlighting_colors'] = DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'].copy()
             self.dialog_settings = DEFAULT_SETTINGS.get('dialogs', {}).copy()
             
             # Reload UI
@@ -257,8 +356,9 @@ class EditorSettingsDialog(QDialog):
                 set_setting('editor.line_numbers_enabled', self.editor_settings['line_numbers_enabled'])
                 set_setting('editor.syntax_highlighting_enabled', self.editor_settings['syntax_highlighting_enabled'])
                 set_setting('editor.show_ruler', self.editor_settings['show_ruler'])
+                set_setting('editor.syntax_highlighting_colors', self.editor_settings['syntax_highlighting_colors'])
                 set_setting('dialogs.default_interaction_mode', self.dialog_settings.get('default_interaction_mode', 'browse_readonly'))
-                set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings.get('data_name_validation_results_mode', 'browse_readonly'))
+                set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings.get('data_name_validation_results_mode', 'inherit_default'))
                 
                 # Apply to editor if callback provided
                 if self.on_settings_changed:

@@ -31,7 +31,21 @@ DEFAULT_SETTINGS = {
         "font_size": 10,
         "line_numbers_enabled": True,
         "syntax_highlighting_enabled": True,
-        "show_ruler": True
+        "show_ruler": True,
+        "syntax_highlighting_colors": {
+            "field_default": "#800080",
+            "valid": "#008000",
+            "registered_local": "#008B8B",
+            "user_allowed": "#008B8B",
+            "unknown": "#FF0000",
+            "deprecated": "#B8860B",
+            "malformed": "#FF0000",
+            "value": "#0000FF",
+            "multiline": "#0000FF",
+            "loop_keyword": "#FF6600",
+            "loop_field": "#CC6600",
+            "loop_data": "#996600"
+        }
     },
     "general": {
         "last_directory": "",

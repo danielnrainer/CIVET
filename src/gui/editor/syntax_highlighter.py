@@ -11,16 +11,42 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     CIF syntax highlighter with optional validation-aware field highlighting.
     
     The highlighter can be configured with a field validator callback that
-    determines the category of each field name. This allows for different
-    colors based on whether a field is:
-    - valid: Known in the CIF dictionary (blue)
+    determines the category of each field name. This allows for category-aware
+    formatting of CIF data names:
+    - valid: Known in the CIF dictionary (green)
     - registered: Uses a registered IUCr prefix (cyan/teal)
     - user_allowed: User has allowed this prefix/field (cyan/teal & italicised)
     - unknown: Not recognized in any dictionary or prefix (red)
     - deprecated: Field is deprecated (dark yellow with strikethrough)
+    - malformed: Malformed name matchable to a known field (red & italicised)
     
-    If no validator is set, all fields are highlighted in blue (backwards compatible).
+    If no validator is set, all data names are highlighted in a default
+    fallback color (purple).
+
+    Data value highlighting is also included:
+    - Quoted values and multi-line values (semicolon blocks and triple-quoted strings) (blue)
+    - loop_ keyword (orange and bold)
+    - loop field names (category-aware styling, additionally italicised)
+    - loop data values (dark orange)
+
+    Colours can be customized through the user config file under
+    editor.syntax_highlighting_colors.
     """
+
+    DEFAULT_COLOR_SCHEME = {
+        "field_default": "#800080",
+        "valid": "#008000",
+        "registered_local": "#008B8B",
+        "user_allowed": "#008B8B",
+        "unknown": "#FF0000",
+        "deprecated": "#B8860B",
+        "malformed": "#FF0000",
+        "value": "#0000FF",
+        "multiline": "#0000FF",
+        "loop_keyword": "#FF6600",
+        "loop_field": "#CC6600",
+        "loop_data": "#996600",
+    }
     
     # Validation result constants
     VALID = "valid"
@@ -28,6 +54,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     USER_ALLOWED = "user_allowed"
     UNKNOWN = "unknown"
     DEPRECATED = "deprecated"
+    MALFORMED = "malformed"
     
     # Block state constants for multi-line constructs
     STATE_NORMAL = 0
@@ -40,6 +67,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.highlighting_rules = []
+        self.color_scheme = self.DEFAULT_COLOR_SCHEME.copy()
         
         # Field validator callback - set by main_window to avoid circular imports
         self._field_validator: Optional[Callable[[str], str]] = None
@@ -47,7 +75,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         # Field names (starting with _ at beginning of line, including hyphens, brackets, slashes, etc.)
         # This is the default format used when no validator is set
         self.field_format = QTextCharFormat()
-        self.field_format.setForeground(QColor("#0000FF"))  # Blue
+        self.field_format.setForeground(QColor("#800080"))  # Purple
         
         # Field name pattern for manual matching (not in highlighting_rules when validator is set)
         self._field_pattern = QRegularExpression(r'^\s*(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
@@ -63,7 +91,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         # Values in quotes (single and double)
         self.value_format = QTextCharFormat()
-        self.value_format.setForeground(QColor("#008000"))  # Green
+        self.value_format.setForeground(QColor("#0000FF"))  # Blue
         
         # Single-quoted strings
         self.highlighting_rules.append((
@@ -92,7 +120,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         # Multi-line values format (semicolon blocks and multiline triple quotes)
         self.multiline_format = QTextCharFormat()
-        self.multiline_format.setForeground(QColor("#800080"))  # Purple
+        self.multiline_format.setForeground(QColor("#0000FF"))  # Blue
         
         # Loop-specific formats
         self.loop_keyword_format = QTextCharFormat()
@@ -109,12 +137,14 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.in_multiline = False
         self.in_loop = False
         self.in_loop_data = False
+
+        self.apply_color_scheme()
     
     def _init_validation_formats(self):
         """Initialize text formats for different validation categories."""
-        # Valid format - same as default field format (blue)
+        # Valid format - known dictionary field
         self.valid_format = QTextCharFormat()
-        self.valid_format.setForeground(QColor("#0000FF"))  # Blue
+        self.valid_format.setForeground(QColor("#008000"))  # Green
         
         # Registered local format - for fields with registered IUCr prefixes
         self.registered_local_format = QTextCharFormat()
@@ -133,6 +163,64 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.deprecated_format = QTextCharFormat()
         self.deprecated_format.setForeground(QColor("#B8860B"))  # Dark yellow/gold (DarkGoldenrod)
         self.deprecated_format.setFontStrikeOut(True)  # Strikethrough
+        
+        # Malformed format - for malformed field names matchable to known fields
+        self.malformed_format = QTextCharFormat()
+        self.malformed_format.setForeground(QColor("#FF0000"))  # Red
+        self.malformed_format.setFontItalic(True)
+
+    def apply_color_scheme(self, color_scheme=None):
+        """Apply a configurable syntax-highlighting color scheme."""
+        merged_scheme = self.DEFAULT_COLOR_SCHEME.copy()
+
+        if isinstance(color_scheme, dict):
+            for key, value in color_scheme.items():
+                if key in merged_scheme and isinstance(value, str) and QColor(value).isValid():
+                    merged_scheme[key] = value
+
+        self.color_scheme = merged_scheme
+
+        self.field_format.setForeground(QColor(self.color_scheme["field_default"]))
+        self.valid_format.setForeground(QColor(self.color_scheme["valid"]))
+        self.registered_local_format.setForeground(QColor(self.color_scheme["registered_local"]))
+        self.user_allowed_format.setForeground(QColor(self.color_scheme["user_allowed"]))
+        self.unknown_format.setForeground(QColor(self.color_scheme["unknown"]))
+        self.deprecated_format.setForeground(QColor(self.color_scheme["deprecated"]))
+        self.malformed_format.setForeground(QColor(self.color_scheme["malformed"]))
+        self.value_format.setForeground(QColor(self.color_scheme["value"]))
+        self.multiline_format.setForeground(QColor(self.color_scheme["multiline"]))
+        self.loop_keyword_format.setForeground(QColor(self.color_scheme["loop_keyword"]))
+        self.loop_field_format.setForeground(QColor(self.color_scheme["loop_field"]))
+        self.loop_data_format.setForeground(QColor(self.color_scheme["loop_data"]))
+
+    def get_color_scheme(self):
+        """Return the active syntax-highlighting color scheme."""
+        return self.color_scheme.copy()
+
+    def get_highlighting_guide_html(self):
+        """Build Help text that reflects the active syntax-highlighting scheme."""
+        scheme = self.get_color_scheme()
+        return (
+            "<b>Syntax Highlighting Guide</b><br><br>"
+            "CIVET uses colours and text styles to help you read CIF files and spot potential issues quickly.<br><br>"
+            "<b>Data names</b><br>"
+            f"<span style='color: {scheme['valid']};'>Known valid field</span>: present in a loaded dictionary<br>"
+            f"<span style='color: {scheme['registered_local']};'>Recognised local or IUCr prefix</span>: prefix is known, even if the field is not in the core dictionary set<br>"
+            f"<span style='color: {scheme['user_allowed']}; font-style: italic;'>User-allowed field or prefix</span>: accepted by your local configuration<br>"
+            f"<span style='color: {scheme['unknown']};'>Unknown field name</span>: not recognised by loaded dictionaries or allowed prefixes<br>"
+            f"<span style='color: {scheme['malformed']}; font-style: italic;'>Malformed field name</span>: CIVET can usually suggest or apply a correction<br>"
+            f"<span style='color: {scheme['deprecated']}; text-decoration: line-through;'>Deprecated field name</span>: old name retained for compatibility but superseded<br><br>"
+            "<b>Other syntax</b><br>"
+            f"<span style='color: {scheme['value']};'>Quoted values</span> and "
+            f"<span style='color: {scheme['multiline']};'>multiline values</span><br>"
+            f"<span style='color: {scheme['loop_keyword']}; font-weight: bold;'>loop_</span> keyword<br>"
+            f"<span style='color: {scheme['loop_field']}; font-style: italic;'>Loop field names</span> when no validation category overrides them<br>"
+            f"<span style='color: {scheme['loop_data']};'>Loop data values</span><br><br>"
+            "<b>Notes</b><br>"
+            "Loop field names are also shown in italics as an extra visual cue.<br>"
+            f"If validation-aware highlighting is unavailable, data names fall back to <span style='color: {scheme['field_default']};'>this default colour</span>.<br>"
+            "You can customise these colours manually in settings.json under <code>editor.syntax_highlighting_colors</code>."
+        )
     
     def set_field_validator(self, validator_callback: Optional[Callable[[str], str]]):
         """
@@ -144,9 +232,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         - "user_allowed" - User has allowed this prefix/field
         - "unknown" - Not recognized
         - "deprecated" - Deprecated field
+        - "malformed" - Malformed name matchable to a known field
         
         If set to None, the highlighter reverts to default behavior
-        (all fields highlighted in blue).
+        (all data names highlighted in purple).
         
         After setting, call rehighlight() to apply the new validation.
         
@@ -170,7 +259,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             The QTextCharFormat to use for this field.
         """
         if self._field_validator is None:
-            return self.field_format  # Default blue
+            return self.field_format  # Default fallback color
         
         try:
             category = self._field_validator(field_name)
@@ -185,6 +274,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                 return self.unknown_format
             elif category == self.DEPRECATED:
                 return self.deprecated_format
+            elif category == self.MALFORMED:
+                return self.malformed_format
             else:
                 # Unknown category, use default
                 return self.field_format

@@ -218,15 +218,15 @@ class ManagePrefixesDialog(QDialog):
                     self.fields_to_add.discard(field)
                 self._populate_lists()
     
-    def get_prefix_changes(self) -> tuple[Set[str], Set[str]]:
+    def get_prefix_changes(self) -> tuple:
         """Get prefix additions and removals."""
         return self.prefixes_to_add, self.prefixes_to_remove
     
-    def get_field_changes(self) -> tuple[Set[str], Set[str]]:
+    def get_field_changes(self) -> tuple:
         """Get field additions and removals."""
         return self.fields_to_add, self.fields_to_remove
     
-    def get_updated_pending(self) -> tuple[Set[str], Set[str]]:
+    def get_updated_pending(self) -> tuple:
         """Get updated pending sets."""
         return self.pending_prefixes, self.pending_fields
 
@@ -402,7 +402,7 @@ class DataNameValidationDialog(QDialog):
             "+ Field = allow field as is (this session)<br>"
             "<span style='color: #c0392b;'>✕ Delete</span> = remove entry from CIF<br>"
             "⊘ Skip = ignore field (this session)<br>"
-            "<span style='color: #27ae60;'>+ Modern</span> = add modern equivalent (keep both)<br>"
+            "<span style='color: #27ae60;'>+ Successor</span> = add successor field (keep both)<br>"
             "🔧 <span style='color: #e74c3c;'>Malformed</span> = field name can be auto-corrected"
         )
         instructions_label.setWordWrap(True)
@@ -582,12 +582,15 @@ class DataNameValidationDialog(QDialog):
         details = field_result.description
         if field_result.line_number > 0:
             details = f"(line {field_result.line_number}) {details}"
-        if field_result.modern_equivalent:
+        if category == FieldCategory.DEPRECATED and field_result.successor_name:
+            details += f" → {field_result.successor_name}"
+        elif field_result.modern_equivalent:
             details += f" → {field_result.modern_equivalent}"
         if field_result.suggested_dictionary:
             details += f" (try loading: {field_result.suggested_dictionary})"
         
         field_item = QTreeWidgetItem([field_result.field_name, details, ""])
+        field_item.setToolTip(1, details)
         parent_item.addChild(field_item)
         
         self._field_items[field_result.field_name.lower()] = field_item
@@ -727,28 +730,28 @@ class DataNameValidationDialog(QDialog):
             layout.addWidget(skip_btn)
         
         elif category == FieldCategory.DEPRECATED:
-            modern_name = field_result.modern_equivalent
+            successor = field_result.successor_name or field_result.modern_equivalent
             
-            # Add Modern button (if modern equivalent exists)
-            if modern_name:
-                add_modern_btn = QPushButton("+ Modern")
-                add_modern_btn.setMaximumWidth(BUTTON_WIDTH)
-                add_modern_btn.setStyleSheet("color: #27ae60;")  # Green
-                add_modern_btn.setToolTip(
-                    f"Add modern equivalent '{modern_name}'\n"
+            # Add Successor button (if a successor exists)
+            if successor:
+                add_successor_btn = QPushButton("+ Successor")
+                add_successor_btn.setMaximumWidth(BUTTON_WIDTH)
+                add_successor_btn.setStyleSheet("color: #27ae60;")  # Green
+                add_successor_btn.setToolTip(
+                    f"Add successor '{successor}'\n"
                     f"alongside deprecated '{field_name}'\n"
                     f"(both fields will have the same value)"
                 )
-                add_modern_btn.clicked.connect(
-                    lambda checked, fn=field_name, mn=modern_name: self._on_update_deprecated(fn, mn)
+                add_successor_btn.clicked.connect(
+                    lambda checked, fn=field_name, sn=successor: self._on_update_deprecated(fn, sn)
                 )
-                layout.addWidget(add_modern_btn)
+                layout.addWidget(add_successor_btn)
             
             # Skip button
             skip_btn = QPushButton("⊘ Skip")
             skip_btn.setMaximumWidth(BUTTON_WIDTH)
             skip_btn.setToolTip(
-                f"Skip adding modern equivalent\n"
+                f"Skip adding successor\n"
                 f"(keep only '{field_name}')"
             )
             skip_btn.clicked.connect(
@@ -866,22 +869,22 @@ class DataNameValidationDialog(QDialog):
         )
         self._update_apply_button()
     
-    def _on_update_deprecated(self, field_name: str, modern_name: str) -> None:
+    def _on_update_deprecated(self, field_name: str, successor_name: str) -> None:
         """
-        Mark deprecated field to have its modern equivalent added alongside.
+        Mark deprecated field to have its successor added alongside.
         
-        Per expert advice, both the deprecated field AND its modern equivalent
-        should exist in the CIF with the same value for maximum compatibility.
+        Both the deprecated field AND its successor should exist in the CIF
+        with the same value for maximum compatibility.
         
         Args:
             field_name: The deprecated field name (will be kept)
-            modern_name: The modern equivalent to add
+            successor_name: The successor field to add (legacy or modern form)
         """
-        self._deprecated_updates[field_name.lower()] = modern_name
+        self._deprecated_updates[field_name.lower()] = successor_name
         self._pending_actions[field_name.lower()] = FieldAction.DEPRECATION_UPDATE
         
         # Update UI to show pending action
-        self._mark_field_as_handled(field_name, f"Will add {modern_name}", color="#27ae60")
+        self._mark_field_as_handled(field_name, f"Will add {successor_name}", color="#27ae60")
         self._update_apply_button()
     
     def _on_skip_deprecated(self, field_name: str) -> None:

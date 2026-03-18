@@ -500,6 +500,11 @@ class CIFEditor(QMainWindow):
         
         edit_menu.addSeparator()
         
+        reload_action = edit_menu.addAction("Reload File")
+        reload_action.setShortcut("Ctrl+Shift+R")
+        reload_action.setToolTip("Reload the current file from disk, discarding all unsaved changes")
+        reload_action.triggered.connect(self.reload_file)
+        
         # View menu for editor settings
         view_menu = menubar.addMenu("View")
         
@@ -569,6 +574,11 @@ class CIFEditor(QMainWindow):
         
         # Help menu
         help_menu = menubar.addMenu("Help")
+
+        syntax_guide_action = help_menu.addAction("Syntax Highlighting Guide...")
+        syntax_guide_action.triggered.connect(self.show_syntax_highlighting_guide)
+
+        help_menu.addSeparator()
         
         about_action = help_menu.addAction("About CIVET...")
         about_action.triggered.connect(self.show_about_dialog)
@@ -852,6 +862,33 @@ class CIFEditor(QMainWindow):
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open file:\n{e}")
+
+    def reload_file(self):
+        """Reload the current file from disk, discarding all unsaved changes."""
+        if not self.current_file:
+            QMessageBox.information(self, "No File", "No file is currently open.")
+            return
+        
+        if self.modified:
+            reply = QMessageBox.question(
+                self, "Reload File",
+                "You have unsaved changes. Reloading will discard them.\n\n"
+                "Do you want to reload?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        try:
+            with open(self.current_file, "r", encoding="utf-8") as file:
+                content = file.read()
+            
+            self.text_editor.setText(content)
+            self.modified = False
+            self.update_status_bar()
+            self.update_window_title(self.current_file)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to reload file:\n{e}")
 
     def save_file(self):
         if self.current_file:
@@ -2820,15 +2857,15 @@ class CIFEditor(QMainWindow):
                         changes_made.append(f"Added {modern_equiv} (kept {field_name})")
             
             if resolved_count > 0:
-                change_summary = f"✅ Added modern equivalents for {resolved_count} deprecated field(s):\n\n"
+                change_summary = f"✅ Added successors for {resolved_count} deprecated field(s):\n\n"
                 for change in changes_made:
                     change_summary += f"• {change}\n"
-                change_summary += "\nBoth deprecated and modern field names now exist in the CIF."
+                change_summary += "\nBoth deprecated and successor field names now exist in the CIF."
                 
-                QMessageBox.information(self, "Modern Equivalents Added", change_summary)
+                QMessageBox.information(self, "Successor Fields Added", change_summary)
             else:
                 QMessageBox.information(self, "No Changes Made", 
-                                      "No modern equivalents could be added (they may already exist).")
+                                      "No successor fields could be added (they may already exist).")
             
             return True
             
@@ -3207,6 +3244,16 @@ class CIFEditor(QMainWindow):
             print(f"About dialog error: {error_details}")
             QMessageBox.critical(self, "Error", 
                                f"Failed to show About dialog:\n{str(e)}")
+
+    def show_syntax_highlighting_guide(self):
+        """Show a quick explanation of syntax highlighting colours and styles."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Syntax Highlighting Guide")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setTextFormat(Qt.TextFormat.RichText)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dialog.setText(self.cif_text_editor.highlighter.get_highlighting_guide_html())
+        self._show_dialog_with_configured_interaction(dialog)
     
     def validate_data_names(self):
         """Validate all data names in the current CIF against dictionaries."""
@@ -3288,7 +3335,7 @@ class CIFEditor(QMainWindow):
                 if parts:
                     existing_fields.add(parts[0].lower())
         
-        # Filter deprecated_updates to only add modern fields that don't already exist
+        # Filter deprecated_updates to only add successor fields that don't already exist
         deprecated_to_add = {}
         for old_name, new_name in deprecated_updates.items():
             if new_name.lower() not in existing_fields:
@@ -3381,7 +3428,7 @@ class CIFEditor(QMainWindow):
                 if fields_to_delete:
                     changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
                 if deprecated_to_add:
-                    changes_summary.append(f"Added modern equivalents for {len(deprecated_to_add)} deprecated field(s)")
+                    changes_summary.append(f"Added successors for {len(deprecated_to_add)} deprecated field(s)")
                 # format_corrections now includes both embedded prefix fixes and malformed fixes
                 num_format = len(format_corrections) - len(malformed_fixes)
                 if num_format > 0:

@@ -201,8 +201,12 @@ class DictionaryInfoDialog(QDialog):
         self.dict_table.setAlternatingRowColors(True)
         self.dict_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.dict_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.dict_table.horizontalHeader().setStretchLastSection(True)
-        self.dict_table.verticalHeader().setVisible(False)
+        h_header = self.dict_table.horizontalHeader()
+        if h_header:
+            h_header.setStretchLastSection(True)
+        v_header = self.dict_table.verticalHeader()
+        if v_header:
+            v_header.setVisible(False)
         
         # Connect selection change and double-click for update download
         self.dict_table.itemSelectionChanged.connect(self.on_selection_changed)
@@ -422,6 +426,8 @@ class DictionaryInfoDialog(QDialog):
             
             # Resize columns
             header = self.dict_table.horizontalHeader()
+            if header is None:
+                return
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Active
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Dictionary Title
             header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Date
@@ -442,66 +448,17 @@ class DictionaryInfoDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load dictionary information: {str(e)}")
     
-    def on_selection_changed(self):
-        """Handle table selection changes"""
-        current_row = self.dict_table.currentRow()
-        if current_row >= 0:
-            try:
-                # Get the filename from the table (column 9 - Filename)
-                filename_item = self.dict_table.item(current_row, 9)
-                if filename_item:
-                    filename = filename_item.text()
-                    
-                    # Find the dictionary info by filename
-                    detailed_info = self.dict_manager.get_detailed_dictionary_info()
-                    dict_info = None
-                    for info in detailed_info:
-                        if info.name == filename:
-                            dict_info = info
-                            break
-                    
-                    if dict_info:
-                        details_html = f"""
-                        <h3>{dict_info.name}</h3>
-                        <b>Description:</b> {dict_info.description or 'No description available'}<br><br>
-                        <b>Full Path:</b> {dict_info.path}<br>
-                    <b>Source Type:</b> {dict_info.source_type.upper()}<br>
-                    """
-                    
-                    if dict_info.version:
-                        details_html += f"<b>Version:</b> {dict_info.version}<br>"
-                    
-                    if dict_info.source:
-                        source_color = "green" if dict_info.source == "IUCr" else "blue" if dict_info.source == "COMCIF" else "black"
-                        details_html += f'<b>Source:</b> <span style="color: {source_color};">{dict_info.source}</span><br>'
-                    
-                    if dict_info.status:
-                        status_color = "green" if dict_info.status == "release" else "orange" if dict_info.status == "development" else "gray"
-                        details_html += f'<b>Status:</b> <span style="color: {status_color};">{dict_info.status.capitalize()}</span><br>'
-                    
-                    details_html += f"""
-                    <b>File Size:</b> {self.format_file_size(dict_info.size_bytes)}<br>
-                    <b>Field Count:</b> {dict_info.field_count}<br>
-                    <b>Loaded:</b> {dict_info.loaded_time or 'Unknown'}
-                    """
-                    
-                    self.details_text.setHtml(details_html)
-                
-            except Exception as e:
-                self.details_text.setPlainText(f"Error loading details: {str(e)}")
-        else:
-            self.details_text.clear()
-    
     def format_file_size(self, size_bytes: int) -> str:
         """Format file size in human-readable format"""
         if size_bytes == 0:
             return "0 B"
         
+        size = float(size_bytes)
         for unit in ['B', 'KB', 'MB', 'GB']:
-            if size_bytes < 1024.0:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024.0
-        return f"{size_bytes:.1f} TB"
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
     
     def load_dictionary_from_file(self):
         """Load a dictionary from a local file"""
@@ -771,7 +728,7 @@ class DictionaryInfoDialog(QDialog):
         """Handle changes to the Active checkbox"""
         # Get the checkbox that triggered this
         checkbox = self.sender()
-        if not checkbox:
+        if not isinstance(checkbox, QCheckBox):
             return
         
         dict_name = checkbox.property("dict_name")
@@ -806,8 +763,9 @@ class DictionaryInfoDialog(QDialog):
             
             # Update parent dictionary status if available
             try:
-                if self.parent() and hasattr(self.parent(), 'update_dictionary_status'):
-                    self.parent().update_dictionary_status()
+                parent = self.parent()
+                if parent is not None and hasattr(parent, 'update_dictionary_status'):
+                    parent.update_dictionary_status()  # type: ignore[attr-defined]
             except Exception as e:
                 print(f"Warning: Failed to update parent dictionary status: {e}")
             
@@ -1098,7 +1056,10 @@ class DictionaryInfoDialog(QDialog):
 
     def on_selection_changed(self):
         """Handle table selection changes"""
-        selected_rows = self.dict_table.selectionModel().selectedRows()
+        selection_model = self.dict_table.selectionModel()
+        if selection_model is None:
+            return
+        selected_rows = selection_model.selectedRows()
         
         if not selected_rows:
             self.remove_btn.setEnabled(False)
@@ -1152,7 +1113,10 @@ class DictionaryInfoDialog(QDialog):
     
     def remove_selected_dictionary(self):
         """Remove the selected dictionaries"""
-        selected_rows = self.dict_table.selectionModel().selectedRows()
+        selection_model = self.dict_table.selectionModel()
+        if selection_model is None:
+            return
+        selected_rows = selection_model.selectedRows()
         
         if not selected_rows:
             return

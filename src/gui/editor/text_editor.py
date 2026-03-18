@@ -58,7 +58,8 @@ class CIFTextEditor(QWidget):
             'font_size': 10,
             'line_numbers_enabled': True,
             'syntax_highlighting_enabled': True,
-            'show_ruler': True
+            'show_ruler': True,
+            'syntax_highlighting_colors': DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'].copy()
         }
         
         self.init_ui()
@@ -123,6 +124,8 @@ class CIFTextEditor(QWidget):
                 'syntax_highlighting_enabled', DEFAULT_SETTINGS['editor']['syntax_highlighting_enabled'])
             self.settings['show_ruler'] = editor_settings.get(
                 'show_ruler', DEFAULT_SETTINGS['editor']['show_ruler'])
+            self.settings['syntax_highlighting_colors'] = editor_settings.get(
+                'syntax_highlighting_colors', DEFAULT_SETTINGS['editor']['syntax_highlighting_colors']).copy()
         except Exception as e:
             print(f"Error loading settings: {e}")
     
@@ -135,6 +138,7 @@ class CIFTextEditor(QWidget):
             set_setting('editor.line_numbers_enabled', self.settings['line_numbers_enabled'])
             set_setting('editor.syntax_highlighting_enabled', self.settings['syntax_highlighting_enabled'])
             set_setting('editor.show_ruler', self.settings['show_ruler'])
+            set_setting('editor.syntax_highlighting_colors', self.settings['syntax_highlighting_colors'])
         except Exception as e:
             print(f"Error saving settings: {e}")
     
@@ -157,6 +161,7 @@ class CIFTextEditor(QWidget):
         # Update other settings
         self.line_numbers.setVisible(self.settings['line_numbers_enabled'])
         if hasattr(self, 'highlighter'):
+            self.highlighter.apply_color_scheme(self.settings.get('syntax_highlighting_colors'))
             self.highlighter.setDocument(
                 self.text_editor.document() if self.settings['syntax_highlighting_enabled'] 
                 else None

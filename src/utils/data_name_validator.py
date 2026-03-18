@@ -62,7 +62,8 @@ class FieldValidationResult:
     line_number: int
     description: str = ""              # Why this category
     suggested_dictionary: str = ""     # If unknown, suggest a dict
-    modern_equivalent: str = ""        # If deprecated, suggest replacement
+    modern_equivalent: str = ""        # If deprecated, the modern (dot-notation) replacement
+    successor_name: str = ""           # Format-aware successor (legacy or modern, depending on file)
     prefix: str = ""                   # Extracted prefix if applicable
     suggested_format: str = ""         # Suggested correct format (for embedded local prefixes)
     embedded_prefix: str = ""          # If local prefix is embedded in category extension
@@ -314,6 +315,10 @@ class DataNameValidator:
         report = ValidationReport()
         seen_fields: Set[str] = set()
         
+        # Detect file format once so we can choose the right successor name
+        cif_format = self.dict_manager.detect_cif_format(content)  # "LEGACY"/"MODERN"/"MIXED"
+        prefer_legacy = cif_format in ("LEGACY", "MIXED")
+        
         # Parse CIF content to extract field names and line numbers
         lines = content.split('\n')
         
@@ -356,6 +361,14 @@ class DataNameValidator:
                     elif result.category == FieldCategory.UNKNOWN:
                         report.unknown_fields.append(result)
                     elif result.category == FieldCategory.DEPRECATED:
+                        # Compute format-aware successor name
+                        if result.modern_equivalent:
+                            successor = result.modern_equivalent
+                            if prefer_legacy:
+                                legacy = self.dict_manager.get_cif1_equivalent(result.modern_equivalent)
+                                if legacy:
+                                    successor = legacy
+                            result.successor_name = successor
                         report.deprecated_fields.append(result)
                     elif result.category == FieldCategory.MALFORMED:
                         report.malformed_fields.append(result)

@@ -1987,7 +1987,7 @@ class CIFDictionaryManager:
         """
         return IUCR_DICTIONARIES.copy()
     
-    def get_all_available_dictionaries(self) -> Dict[str, Dict[str, str]]:
+    def get_all_available_dictionaries(self) -> Dict[str, Dict[str, Dict[str, str]]]:
         """
         Get information about all available dictionaries (both COMCIF and IUCr).
         
