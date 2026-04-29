@@ -46,6 +46,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         "loop_keyword": "#FF6600",
         "loop_field": "#CC6600",
         "loop_data": "#996600",
+        "list_bracket": "#8B008B",
+        "table_brace": "#FC87FC",
     }
     
     # Validation result constants
@@ -63,6 +65,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     STATE_LOOP_DATA = 3
     STATE_TRIPLE_SINGLE_QUOTE = 4  # Inside ''' ... '''
     STATE_TRIPLE_DOUBLE_QUOTE = 5  # Inside """ ... """
+    STATE_LIST_VALUE = 6           # Inside [...] spanning multiple lines
+    STATE_TABLE_VALUE = 7          # Inside {...} spanning multiple lines
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -138,6 +142,18 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.in_loop = False
         self.in_loop_data = False
 
+        # CIF2 list/table bracket formats
+        self.list_bracket_format = QTextCharFormat()
+        self.list_bracket_format.setForeground(QColor("#8B008B"))  # Dark magenta
+        self.list_bracket_format.setFontWeight(QFont.Weight.Bold)
+
+        self.table_brace_format = QTextCharFormat()
+        self.table_brace_format.setForeground(QColor("#8B008B"))  # Dark magenta
+        self.table_brace_format.setFontWeight(QFont.Weight.Bold)
+
+        # Depth counter for multi-line list/table tracking
+        self._bracket_depth = 0
+
         self.apply_color_scheme()
     
     def _init_validation_formats(self):
@@ -192,6 +208,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.loop_keyword_format.setForeground(QColor(self.color_scheme["loop_keyword"]))
         self.loop_field_format.setForeground(QColor(self.color_scheme["loop_field"]))
         self.loop_data_format.setForeground(QColor(self.color_scheme["loop_data"]))
+        self.list_bracket_format.setForeground(QColor(self.color_scheme["list_bracket"]))
+        self.table_brace_format.setForeground(QColor(self.color_scheme["table_brace"]))
 
     def get_color_scheme(self):
         """Return the active syntax-highlighting color scheme."""
@@ -306,6 +324,16 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             # Inside a multi-line triple double-quoted string
             self._handle_multiline_triple_quote(text, '"""', self.STATE_TRIPLE_DOUBLE_QUOTE)
             return
+        elif prev_state == self.STATE_LIST_VALUE:
+            # Inside a multi-line CIF2 list [...]
+            self._handle_multiline_bracket(text, '[', ']',
+                                           self.STATE_LIST_VALUE, self.list_bracket_format)
+            return
+        elif prev_state == self.STATE_TABLE_VALUE:
+            # Inside a multi-line CIF2 table {...}
+            self._handle_multiline_bracket(text, '{', '}',
+                                           self.STATE_TABLE_VALUE, self.table_brace_format)
+            return
         else:
             self.in_multiline = False
             self.in_loop = False
@@ -329,6 +357,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         # Check for triple-quoted strings that start on this line
         if self._check_triple_quote_start(text):
+            return
+        
+        # Check for CIF2 list/table values on this line
+        if self._check_bracket_start(text):
             return
         
         # Check for loop start
@@ -472,6 +504,99 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             # String continues
             self.setFormat(0, len(text), self.multiline_format)
             self.setCurrentBlockState(state)
+
+    def _check_bracket_start(self, text: str) -> bool:
+        """Check if this line contains the start of a CIF2 list or table value.
+        
+        Detects [...] and {...} constructs. If they close on the same line,
+        highlights inline. If they span multiple lines, sets block state.
+        
+        Returns True if this line was handled as a bracket line.
+        """
+        for open_ch, close_ch, state, fmt in [
+            ('[', ']', self.STATE_LIST_VALUE, self.list_bracket_format),
+            ('{', '}', self.STATE_TABLE_VALUE, self.table_brace_format),
+        ]:
+            # Find the first unquoted opening bracket
+            pos = self._find_unquoted(text, open_ch)
+            if pos == -1:
+                continue
+            
+            # Count bracket depth from this position
+            depth = 0
+            i = pos
+            while i < len(text):
+                ch = text[i]
+                if ch in ("'", '"'):
+                    # Skip quoted strings
+                    end = text.find(ch, i + 1)
+                    i = end + 1 if end != -1 else len(text)
+                    continue
+                if ch == open_ch:
+                    depth += 1
+                elif ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        # Closed on same line — inline highlight
+                        self.setFormat(pos, i - pos + 1, fmt)
+                        return False  # Let normal processing continue
+                i += 1
+            
+            # Multi-line bracket — highlight from opening bracket to end of line
+            self.setFormat(pos, len(text) - pos, fmt)
+            self._bracket_depth = depth
+            self.setCurrentBlockState(state)
+            return True
+        
+        return False
+
+    def _handle_multiline_bracket(self, text: str, open_ch: str, close_ch: str,
+                                   state: int, fmt: QTextCharFormat):
+        """Handle a continuation line inside a multi-line list or table.
+        
+        Applies bracket format and checks if the construct closes on this line.
+        """
+        depth = self._bracket_depth
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch in ("'", '"'):
+                end = text.find(ch, i + 1)
+                i = end + 1 if end != -1 else len(text)
+                continue
+            if ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    # Closing bracket found
+                    self.setFormat(0, i + 1, fmt)
+                    self._bracket_depth = 0
+                    self.setCurrentBlockState(self.STATE_NORMAL)
+                    return
+            i += 1
+        
+        # Still open — highlight entire line and continue
+        self.setFormat(0, len(text), fmt)
+        self._bracket_depth = depth
+        self.setCurrentBlockState(state)
+
+    @staticmethod
+    def _find_unquoted(text: str, char: str) -> int:
+        """Find the first occurrence of *char* that is not inside quotes.
+        
+        Returns the index, or -1 if not found.
+        """
+        in_single = False
+        in_double = False
+        for i, ch in enumerate(text):
+            if ch == "'" and not in_double:
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            elif ch == char and not in_single and not in_double:
+                return i
+        return -1
     
     def _apply_standard_rules(self, text: str, stripped_text: str):
         """Apply standard highlighting rules without validation (backwards compatible)."""

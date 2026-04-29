@@ -62,7 +62,7 @@ class DictionarySuggestionDialog(QDialog):
     """Dialog for displaying and managing dictionary suggestions."""
     
     def __init__(self, suggestions: List[DictionarySuggestion], 
-                 cif_format: str = "CIF1",
+                 cif_format: str = "LEGACY",
                  load_dictionary_callback: Optional[Callable[[str], bool]] = None,
                  dictionary_manager=None,
                  update_status_callback: Optional[Callable[[str], None]] = None,
@@ -317,7 +317,7 @@ class DictionarySuggestionDialog(QDialog):
 
 
 def show_dictionary_suggestions(suggestions: List[DictionarySuggestion], 
-                              cif_format: str = "CIF1",
+                              cif_format: str = "LEGACY",
                               load_callback: Optional[Callable] = None,
                               dictionary_manager=None,
                               update_status_callback: Optional[Callable] = None,

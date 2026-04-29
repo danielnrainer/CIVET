@@ -109,25 +109,25 @@ class CIFFormatAnalyzer:
         if not matches:
             return "legacy"  # Default if no fields found
         
-        cif1_count = 0
-        cif2_count = 0
+        legacy_count = 0
+        modern_count = 0
         
         for field in matches:
             if '.' in field:
-                cif2_count += 1
+                modern_count += 1
             else:
-                cif1_count += 1
+                legacy_count += 1
         
-        total = cif1_count + cif2_count
+        total = legacy_count + modern_count
         if total == 0:
             return "legacy"
         
-        cif2_ratio = cif2_count / total
+        modern_ratio = modern_count / total
         
         # Determine format based on ratio
-        if cif2_ratio >= 0.7:
+        if modern_ratio >= 0.7:
             return "modern"
-        elif cif2_ratio <= 0.3:
+        elif modern_ratio <= 0.3:
             return "legacy"
         else:
             return "Mixed"
@@ -162,9 +162,9 @@ class FieldRulesValidator:
         """
         # Check if there's an official dictionary mapping
         if preferred_format == "legacy":
-            official_equiv = self.dict_manager.get_cif1_equivalent(field_name)
+            official_equiv = self.dict_manager.map_to_legacy(field_name)
         else:
-            official_equiv = self.dict_manager.get_cif2_equivalent(field_name)
+            official_equiv = self.dict_manager.map_to_modern(field_name)
         
         if official_equiv:
             return AutoFixType.YES
@@ -274,9 +274,9 @@ class FieldRulesValidator:
             if field_format != preferred_format:
                 # Try to find the equivalent in the preferred format
                 if preferred_format == "modern":
-                    equivalent = self.dict_manager.get_cif2_equivalent(field)
+                    equivalent = self.dict_manager.map_to_modern(field)
                 else:
-                    equivalent = self.dict_manager.get_cif1_equivalent(field)
+                    equivalent = self.dict_manager.map_to_legacy(field)
                 
                 if equivalent:
                     suggested_fix = f"Convert to {preferred_format} format: {equivalent}"
@@ -328,19 +328,19 @@ class FieldRulesValidator:
             canonical = None
             
             # Check if this field has equivalents
-            cif2_equiv = self.dict_manager.get_cif2_equivalent(field)
-            cif1_equiv = self.dict_manager.get_cif1_equivalent(field)
+            modern_equiv = self.dict_manager.map_to_modern(field)
+            legacy_equiv = self.dict_manager.map_to_legacy(field)
             
-            if cif2_equiv:
-                canonical = cif2_equiv
-                if cif2_equiv in unique_fields and cif2_equiv not in aliases:
-                    aliases.append(cif2_equiv)
+            if modern_equiv:
+                canonical = modern_equiv
+                if modern_equiv in unique_fields and modern_equiv not in aliases:
+                    aliases.append(modern_equiv)
             
-            if cif1_equiv:
+            if legacy_equiv:
                 if not canonical:
                     canonical = field  # Use current field as canonical if no CIF2 equiv
-                if cif1_equiv in unique_fields and cif1_equiv not in aliases:
-                    aliases.append(cif1_equiv)
+                if legacy_equiv in unique_fields and legacy_equiv not in aliases:
+                    aliases.append(legacy_equiv)
             
             # If we found multiple aliases, it's an issue
             if len(aliases) > 1:
@@ -353,11 +353,11 @@ class FieldRulesValidator:
         for canonical, alias_group in field_groups.items():
             if len(alias_group) > 1:
                 # Determine the best field to keep
-                cif2_fields = [f for f in alias_group if '.' in f]
-                cif1_fields = [f for f in alias_group if '.' not in f]
+                modern_fields = [f for f in alias_group if '.' in f]
+                legacy_fields = [f for f in alias_group if '.' not in f]
                 
-                # Prefer CIF2 format if available, otherwise use first CIF1
-                preferred = cif2_fields[0] if cif2_fields else cif1_fields[0]
+                # Prefer modern format if available, otherwise use first CIF1
+                preferred = modern_fields[0] if modern_fields else legacy_fields[0]
                 
                 issues.append(ValidationIssue(
                     issue_type=IssueType.DUPLICATE_ALIAS,
@@ -410,10 +410,10 @@ class FieldRulesValidator:
     def _load_checkcif_compatibility_fields(self) -> Set[str]:
         """Load fields from checkcif_compatibility.cif_rules to exclude from deprecated warnings"""
         try:
-            from .cif_dictionary_manager import get_resource_path
+            from .user_config import get_bundled_resource_path
             import os
             
-            compat_file = os.path.join(get_resource_path('field_rules'), 'checkcif_compatibility.cif_rules')
+            compat_file = str(get_bundled_resource_path(os.path.join('field_rules', 'checkcif_compatibility.cif_rules')))
             if not os.path.exists(compat_file):
                 return set()
             
@@ -440,23 +440,23 @@ class FieldRulesValidator:
             if not self.dict_manager.is_known_field(field):
                 # Check if it might be a simple format issue
                 if '.' in field:
-                    # CIF2 format - try CIF1 equivalent
-                    potential_cif1 = field.replace('.', '_')
-                    if self.dict_manager.is_known_field(potential_cif1):
-                        suggested_fix = f"Use known field: {potential_cif1}"
+                    # modern format - try legacy equivalent
+                    potential_legacy = field.replace('.', '_')
+                    if self.dict_manager.is_known_field(potential_legacy):
+                        suggested_fix = f"Use known field: {potential_legacy}"
                         auto_fix_type = AutoFixType.YES
                     else:
                         suggested_fix = "Verify field name or add to custom dictionary"
                         auto_fix_type = self._determine_auto_fix_type(field)
                 else:
-                    # CIF1 format - try CIF2 equivalent
-                    potential_cif2 = None
+                    # legacy format - try modern equivalent
+                    potential_modern = None
                     if '_' in field[1:]:  # Skip first underscore
                         parts = field[1:].split('_')
                         if len(parts) >= 2:
-                            potential_cif2 = f"_{parts[0]}.{'_'.join(parts[1:])}"
-                            if self.dict_manager.is_known_field(potential_cif2):
-                                suggested_fix = f"Use known field: {potential_cif2}"
+                            potential_modern = f"_{parts[0]}.{'_'.join(parts[1:])}"
+                            if self.dict_manager.is_known_field(potential_modern):
+                                suggested_fix = f"Use known field: {potential_modern}"
                                 auto_fix_type = AutoFixType.YES
                             else:
                                 suggested_fix = "Verify field name or add to custom dictionary"
@@ -535,14 +535,14 @@ class FieldRulesValidator:
         
         # Determine the replacement based on target format
         if target_format == "legacy":
-            # Convert to CIF1 format
-            replacement = self.dict_manager.get_cif1_equivalent(field)
+            # Convert to legacy format
+            replacement = self.dict_manager.map_to_legacy(field)
             if not replacement:
                 # Convert dots to underscores for generic conversion
                 replacement = field.replace('.', '_')
         else:  # CIF2
-            # Convert to CIF2 format
-            replacement = self.dict_manager.get_cif2_equivalent(field)
+            # Convert to modern format
+            replacement = self.dict_manager.map_to_modern(field)
             if not replacement:
                 return content, None
         

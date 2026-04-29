@@ -320,12 +320,12 @@ class DictionaryInfoDialog(QDialog):
             # Update summary
             total_dicts = len(detailed_info)
             active_dicts = sum(1 for info in detailed_info if info.is_active)
-            total_fields = dict_summary.get('total_cif1_mappings', 0)
+            total_fields = dict_summary.get('total_legacy_mappings', 0)
             
             summary_text = f"""
             <b>Total Dictionaries:</b> {total_dicts}<br>
             <b>Active Dictionaries:</b> {active_dicts}<br>
-            <b>Total Field Mappings:</b> {total_fields} CIF1→CIF2, {dict_summary.get('total_cif2_mappings', 0)} CIF2→CIF1<br>
+            <b>Total Field Mappings:</b> {total_fields} Legacy→Modern, {dict_summary.get('total_modern_mappings', 0)} Modern→Legacy<br>
             <b>Primary Dictionary:</b> {detailed_info[0].name if detailed_info else 'None'}
             """
             if total_dicts > 1:

@@ -44,7 +44,9 @@ DEFAULT_SETTINGS = {
             "multiline": "#0000FF",
             "loop_keyword": "#FF6600",
             "loop_field": "#CC6600",
-            "loop_data": "#996600"
+            "loop_data": "#996600",
+            "list_bracket": "#8B008B",
+            "table_brace": "#FC87FC",
         }
     },
     "general": {
@@ -287,46 +289,4 @@ def get_bundled_resource_path(relative_path: str) -> Path:
     return base_path / relative_path
 
 
-def open_user_config_directory() -> bool:
-    """
-    Open the user config directory in the system file explorer.
-    
-    Returns:
-        True if successful, False otherwise.
-    """
-    import subprocess
-    
-    try:
-        config_dir = ensure_user_config_directory()
-        
-        if sys.platform == 'win32':
-            os.startfile(str(config_dir))
-        elif sys.platform == 'darwin':
-            subprocess.run(['open', str(config_dir)], check=True)
-        else:
-            subprocess.run(['xdg-open', str(config_dir)], check=True)
-        
-        return True
-    except Exception as e:
-        print(f"Error opening config directory: {e}")
-        return False
 
-
-def get_config_info() -> Dict[str, str]:
-    """
-    Get information about the current configuration setup.
-    
-    Returns:
-        Dictionary with paths and status information.
-    """
-    config_dir = get_user_config_directory()
-    
-    return {
-        'config_directory': str(config_dir),
-        'settings_file': str(get_settings_path()),
-        'dictionaries_directory': str(get_user_dictionaries_directory()),
-        'field_rules_directory': str(get_user_field_rules_directory()),
-        'prefixes_file': str(get_user_prefixes_path()),
-        'config_exists': config_dir.exists(),
-        'settings_exists': get_settings_path().exists(),
-    }

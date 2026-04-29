@@ -71,8 +71,8 @@ class DDL1DictionaryParser:
         self.dictionary_path = dictionary_path
         
         # Primary output - mirrors CIFDictionaryParser interface
-        self._cif1_to_cif2: Optional[Dict[str, str]] = None
-        self._cif2_to_cif1: Optional[Dict[str, List[str]]] = None
+        self._legacy_to_modern: Optional[Dict[str, str]] = None
+        self._modern_to_legacy: Optional[Dict[str, List[str]]] = None
         self._deprecated_fields: Set[str] = set()
         self._replaced_fields: Set[str] = set()
         self._field_aliases: Dict[str, List[FieldAlias]] = {}
@@ -100,15 +100,15 @@ class DDL1DictionaryParser:
             since DDL1 fields are typically legacy format only.
         """
         if self._parsed:
-            return self._cif1_to_cif2, self._cif2_to_cif1
+            return self._legacy_to_modern, self._modern_to_legacy
         
         print(f"Parsing DDL1 dictionary: {self.dictionary_path}")
         
         if not self.dictionary_path:
             raise ValueError("No dictionary path specified")
         
-        self._cif1_to_cif2 = {}
-        self._cif2_to_cif1 = {}
+        self._legacy_to_modern = {}
+        self._modern_to_legacy = {}
         self._deprecated_fields = set()
         self._replaced_fields = set()
         self._field_aliases = {}
@@ -130,10 +130,10 @@ class DDL1DictionaryParser:
         
         self._parsed = True
         print(f"Parsed {len(self._all_known_fields)} field definitions from DDL1 dictionary")
-        if self._cif1_to_cif2:
-            print(f"Found {len(self._cif1_to_cif2)} field alias mappings")
+        if self._legacy_to_modern:
+            print(f"Found {len(self._legacy_to_modern)} field alias mappings")
         
-        return self._cif1_to_cif2, self._cif2_to_cif1
+        return self._legacy_to_modern, self._modern_to_legacy
     
     def _extract_data_blocks(self, content: str) -> List[DDL1BlockData]:
         """
@@ -519,28 +519,28 @@ class DDL1DictionaryParser:
                 self._alias_to_definition[alias.name.lower()] = canonical_name
         
         # Build CIF1<->CIF2 mappings
-        # In DDL1, there are no CIF2 equivalents, so we create identity mappings
+        # In DDL1, there are no modern equivalents, so we create identity mappings
         # and aliasing between alternate names
         if len(block.names) > 1:
             # Multiple names: first is canonical, others are aliases
             for name in block.names[1:]:
                 alias_lower = name.lower()
-                self._cif1_to_cif2[alias_lower] = canonical_name
-                if canonical_name not in self._cif2_to_cif1:
-                    self._cif2_to_cif1[canonical_name] = []
-                if alias_lower not in self._cif2_to_cif1[canonical_name]:
-                    self._cif2_to_cif1[canonical_name].append(alias_lower)
+                self._legacy_to_modern[alias_lower] = canonical_name
+                if canonical_name not in self._modern_to_legacy:
+                    self._modern_to_legacy[canonical_name] = []
+                if alias_lower not in self._modern_to_legacy[canonical_name]:
+                    self._modern_to_legacy[canonical_name].append(alias_lower)
         
         # Add related alternate aliases to mappings
         for related_item, related_function in block.related_items:
             if related_function.lower() == 'alternate':
                 alias_lower = related_item.lower()
                 if alias_lower != canonical_name:
-                    self._cif1_to_cif2[alias_lower] = canonical_name
-                    if canonical_name not in self._cif2_to_cif1:
-                        self._cif2_to_cif1[canonical_name] = []
-                    if alias_lower not in self._cif2_to_cif1[canonical_name]:
-                        self._cif2_to_cif1[canonical_name].append(alias_lower)
+                    self._legacy_to_modern[alias_lower] = canonical_name
+                    if canonical_name not in self._modern_to_legacy:
+                        self._modern_to_legacy[canonical_name] = []
+                    if alias_lower not in self._modern_to_legacy[canonical_name]:
+                        self._modern_to_legacy[canonical_name].append(alias_lower)
     
     # ---- Public API methods (mirrors CIFDictionaryParser interface) ----
     

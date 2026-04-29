@@ -3,12 +3,10 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPalette
+from . import RESULT_ABORT, RESULT_STOP_SAVE
 
 
 class CIFInputDialog(QDialog):
-    # Define result codes as class attributes
-    RESULT_ABORT = 2  # User wants to abort all changes
-    RESULT_STOP_SAVE = 3  # User wants to stop but save changes
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
     def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit", suggestions=None):
@@ -177,10 +175,10 @@ class CIFInputDialog(QDialog):
         self.inputField.setText(selected_text)
         
     def abort_changes(self):
-        self.done(self.RESULT_ABORT)
+        self.done(RESULT_ABORT)
         
     def stop_and_save(self):
-        self.done(self.RESULT_STOP_SAVE)
+        self.done(RESULT_STOP_SAVE)
     
     def use_default(self):
         self.done(self.RESULT_USE_DEFAULT)
@@ -245,10 +243,10 @@ class CIFInputDialog(QDialog):
             
             if result == QDialog.DialogCode.Accepted:
                 return dialog.getText(), QDialog.DialogCode.Accepted
-            elif result == MultilineInputDialog.RESULT_ABORT:
-                return None, CIFInputDialog.RESULT_ABORT
-            elif result == MultilineInputDialog.RESULT_STOP_SAVE:
-                return dialog.getText(), CIFInputDialog.RESULT_STOP_SAVE
+            elif result == RESULT_ABORT:
+                return None, RESULT_ABORT
+            elif result == RESULT_STOP_SAVE:
+                return dialog.getText(), RESULT_STOP_SAVE
             elif result == MultilineInputDialog.RESULT_USE_DEFAULT:
                 return default_value, QDialog.DialogCode.Accepted
             else:
@@ -260,10 +258,10 @@ class CIFInputDialog(QDialog):
             
             if result == QDialog.DialogCode.Accepted:
                 return dialog.getValue(), QDialog.DialogCode.Accepted
-            elif result == CIFInputDialog.RESULT_ABORT:
-                return None, CIFInputDialog.RESULT_ABORT
-            elif result == CIFInputDialog.RESULT_STOP_SAVE:
-                return dialog.getValue(), CIFInputDialog.RESULT_STOP_SAVE
+            elif result == RESULT_ABORT:
+                return None, RESULT_ABORT
+            elif result == RESULT_STOP_SAVE:
+                return dialog.getValue(), RESULT_STOP_SAVE
             elif result == CIFInputDialog.RESULT_USE_DEFAULT:
                 return default_value, QDialog.DialogCode.Accepted
             else:

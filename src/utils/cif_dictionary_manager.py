@@ -39,20 +39,6 @@ HTTP_HEADERS = {
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
 
 
-def get_resource_path(relative_path: str) -> str:
-    """
-    Get the absolute path to a resource file.
-    Works in both development and PyInstaller environments.
-    
-    Args:
-        relative_path: Relative path to the resource file
-        
-    Returns:
-        Absolute path to the resource file
-    """
-    return str(get_bundled_resource_path(relative_path))
-
-
 def get_user_dictionaries_directory() -> str:
     """
     Get the path to the user's dictionaries directory.
@@ -353,12 +339,30 @@ class DictionaryInfo:
         return os.path.splitext(self.name)[0].replace('cif_', '').replace('cif-', '')
 
 
-class CIFVersion(Enum):
-    """CIF format version enumeration"""
+class FieldNotation(Enum):
+    """Field notation style enumeration — how data names are written.
+    
+    Both notations are valid in both CIF 1.1 and CIF 2.0 files.
+    """
+    LEGACY = "legacy"    # Underscore-only: _cell_length_a
+    MODERN = "modern"    # Dot notation:    _cell.length_a
+    MIXED = "mixed"      # Both styles present
+    UNKNOWN = "unknown"  # Cannot determine
+
+
+class CIFSyntaxVersion(Enum):
+    """CIF file format version — the syntax specification, not the field notation.
+    
+    CIF 1.1: ASCII-oriented, basic quoting
+    CIF 2.0: UTF-8, triple-quoted strings, lists [...], tables {...}, requires header
+    """
     CIF1 = "1.1"
     CIF2 = "2.0"
-    MIXED = "mixed"
     UNKNOWN = "unknown"
+
+
+# Backward-compatible alias — deprecated, use FieldNotation instead
+CIFVersion = FieldNotation
 
 
 @dataclass
@@ -393,12 +397,12 @@ class CIFDictionaryManager:
         if cif_core_path is None:
             # Use resource path function to find bundled dictionary
             # Use the development version (3.3.0) as primary - it has 3D ED fields
-            cif_core_path = get_resource_path('dictionaries/cif_core_3.3.0.dic')
+            cif_core_path = str(get_bundled_resource_path('dictionaries/cif_core_3.3.0.dic'))
             
         self.parser = CIFDictionaryParser(cif_core_path)
         self._loaded = False
-        self._cif1_to_cif2: Optional[Dict[str, str]] = None
-        self._cif2_to_cif1: Optional[Dict[str, List[str]]] = None
+        self._legacy_to_modern: Optional[Dict[str, str]] = None
+        self._modern_to_legacy: Optional[Dict[str, List[str]]] = None
         
         # Multi-dictionary support with enhanced tracking
         self._additional_parsers: List[CIFDictionaryParser] = []
@@ -457,12 +461,12 @@ class CIFDictionaryManager:
         self._load_default_dictionaries()
         
         # Common field patterns for quick detection (fallback only)
-        self._cif1_patterns = [
+        self._legacy_patterns = [
             r'^_[a-zA-Z][a-zA-Z0-9_\-\[\]()]*$',
             r'^_[a-zA-Z][a-zA-Z0-9_\-\[\]()]*_[a-zA-Z0-9_\-\[\]()]+$'
         ]
         
-        self._cif2_patterns = [
+        self._modern_patterns = [
             r'^_[a-zA-Z][a-zA-Z0-9_\-\[\]()]*\.[a-zA-Z][a-zA-Z0-9_\-\[\]()]*$'
         ]
         
@@ -508,7 +512,7 @@ class CIFDictionaryManager:
                 print(f"Warning: Could not read user dictionaries directory: {e}")
         
         # 2. Then, load from bundled dictionaries folder
-        dictionaries_dir = get_resource_path("dictionaries")
+        dictionaries_dir = str(get_bundled_resource_path("dictionaries"))
         
         if not os.path.exists(dictionaries_dir):
             print(f"Warning: Dictionaries directory not found: {dictionaries_dir}")
@@ -547,16 +551,16 @@ class CIFDictionaryManager:
             
             # Start with the primary dictionary if it's active
             if self._dictionary_infos and self._dictionary_infos[0].is_active:
-                self._cif1_to_cif2, self._cif2_to_cif1 = self.parser.parse_dictionary()
+                self._legacy_to_modern, self._modern_to_legacy = self.parser.parse_dictionary()
                 # Update primary dictionary field count
-                self._dictionary_infos[0].field_count = len(self._cif1_to_cif2)
+                self._dictionary_infos[0].field_count = len(self._legacy_to_modern)
                 # Add primary parser's known fields to merged set
                 if hasattr(self.parser, '_all_known_fields_lower'):
                     self._merged_known_fields_lower.update(self.parser._all_known_fields_lower)
             else:
                 # If primary is inactive, start with empty mappings
-                self._cif1_to_cif2 = {}
-                self._cif2_to_cif1 = {}
+                self._legacy_to_modern = {}
+                self._modern_to_legacy = {}
             
             # Merge active additional dictionaries only
             for i, additional_parser in enumerate(self._additional_parsers):
@@ -569,32 +573,32 @@ class CIFDictionaryManager:
                     if not dict_info.is_active:
                         continue
                     
-                    add_cif1_to_cif2, add_cif2_to_cif1 = additional_parser.parse_dictionary()
+                    add_legacy_to_modern, add_modern_to_legacy = additional_parser.parse_dictionary()
                     
                     # Update field count for this dictionary
-                    # For DDL1 parsers, cif1_to_cif2 may be empty (no aliases),
+                    # For DDL1 parsers, legacy_to_modern may be empty (no aliases),
                     # so use _field_metadata count as the primary source
                     if hasattr(additional_parser, '_field_metadata') and additional_parser._field_metadata:
                         dict_info.field_count = len(additional_parser._field_metadata)
                     else:
-                        dict_info.field_count = len(add_cif1_to_cif2)
+                        dict_info.field_count = len(add_legacy_to_modern)
                     
-                    # Merge CIF1 -> CIF2 mappings
-                    for cif1_field, cif2_field in add_cif1_to_cif2.items():
-                        if cif1_field not in self._cif1_to_cif2:
-                            self._cif1_to_cif2[cif1_field] = cif2_field
+                    # Merge Legacy -> Modern mappings
+                    for legacy_field, modern_field in add_legacy_to_modern.items():
+                        if legacy_field not in self._legacy_to_modern:
+                            self._legacy_to_modern[legacy_field] = modern_field
                         # Note: In case of conflicts, earlier dictionaries take precedence
                     
-                    # Merge CIF2 -> CIF1 mappings
-                    for cif2_field, cif1_fields in add_cif2_to_cif1.items():
-                        if cif2_field not in self._cif2_to_cif1:
-                            self._cif2_to_cif1[cif2_field] = cif1_fields[:]
+                    # Merge Modern -> Legacy mappings
+                    for modern_field, legacy_fields in add_modern_to_legacy.items():
+                        if modern_field not in self._modern_to_legacy:
+                            self._modern_to_legacy[modern_field] = legacy_fields[:]
                         else:
                             # Merge alias lists, avoiding duplicates
-                            existing_aliases = set(self._cif2_to_cif1[cif2_field])
-                            for alias in cif1_fields:
+                            existing_aliases = set(self._modern_to_legacy[modern_field])
+                            for alias in legacy_fields:
                                 if alias not in existing_aliases:
-                                    self._cif2_to_cif1[cif2_field].append(alias)
+                                    self._modern_to_legacy[modern_field].append(alias)
                                     existing_aliases.add(alias)
                     
                     # Merge all known fields from this parser (critical for DDL1 dictionaries
@@ -608,74 +612,145 @@ class CIFDictionaryManager:
             self._loaded = True
         
     def _add_missing_field_mappings(self):
-        """Add manually identified missing field mappings not covered by the dictionary"""
-        # Fix: _diffrn_radiation.wavelength (CIF2-style) should map to _diffrn_radiation_wavelength (CIF1-style)
-        # This is a CIF2->CIF1 conversion issue
-        if '_diffrn_radiation.wavelength' not in self._cif2_to_cif1:
-            self._cif2_to_cif1['_diffrn_radiation.wavelength'] = ['_diffrn_radiation_wavelength']
+        """Add manually identified missing field mappings not covered by the dictionary."""
+        # _diffrn_radiation.wavelength (modern) <-> _diffrn_radiation_wavelength (legacy)
+        # Modern->Legacy mapping
+        if '_diffrn_radiation.wavelength' not in self._modern_to_legacy:
+            self._modern_to_legacy['_diffrn_radiation.wavelength'] = ['_diffrn_radiation_wavelength']
             
-        # Also ensure the reverse mapping exists for CIF1->CIF2 conversion
-        if '_diffrn_radiation_wavelength' not in self._cif1_to_cif2:
-            self._cif1_to_cif2['_diffrn_radiation_wavelength'] = '_diffrn_radiation_wavelength.value'
+        # Legacy->Modern mapping
+        if '_diffrn_radiation_wavelength' not in self._legacy_to_modern:
+            self._legacy_to_modern['_diffrn_radiation_wavelength'] = '_diffrn_radiation.wavelength'
         
 
         
-    def detect_cif_version(self, content: str) -> CIFVersion:
+    def detect_notation(self, content: str) -> FieldNotation:
         """
-        Detect the CIF version from file content.
+        Detect the field notation style from CIF content.
+        
+        Analyzes field name patterns (dots vs underscores only).
+        Does NOT look at the version header — notation and syntax version
+        are independent concepts.
+        
+        Skips comments and semicolon text blocks to avoid false positives.
         
         Args:
             content: CIF file content as string
             
         Returns:
-            CIFVersion enum indicating the detected version
+            FieldNotation enum indicating the detected notation style
         """
         lines = content.strip().split('\n')
         
-        # Check for explicit version declaration
-        for line in lines[:5]:  # Check first 5 lines
-            line = line.strip()
-            if line.startswith('#\\#CIF_2.0'):
-                return CIFVersion.CIF2
-            elif line.startswith('#\\#CIF_1.1'):
-                return CIFVersion.CIF1
+        legacy_fields = 0
+        modern_fields = 0
+        in_text_block = False
         
-        # Analyze field patterns
-        cif1_fields = 0
-        cif2_fields = 0
+        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
         
-        # Find all field names in the content (including hyphens and special chars)
-        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
-        
-        for match in field_pattern.finditer(content):
-            field_name = match.group(2)
+        for line in lines:
+            stripped = line.strip()
             
-            # Check if it matches CIF2 pattern (contains dot)
-            if '.' in field_name:
-                cif2_fields += 1
-            else:
-                # Check if it's a known CIF1 field or pattern
-                cif1_fields += 1
+            # Track semicolon text block boundaries
+            if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
+                in_text_block = not in_text_block
+                continue
+            
+            # Skip lines inside text blocks
+            if in_text_block:
+                continue
+            
+            # Skip comment lines
+            if stripped.startswith('#'):
+                continue
+            
+            match = field_pattern.match(line)
+            if match:
+                field_name = match.group(2)
+                if '.' in field_name:
+                    modern_fields += 1
+                else:
+                    legacy_fields += 1
         
-        # Determine version based on field patterns
-        if cif2_fields > 0 and cif1_fields > 0:
-            return CIFVersion.MIXED
-        elif cif2_fields > 0:
-            return CIFVersion.CIF2
-        elif cif1_fields > 0:
-            return CIFVersion.CIF1
+        if modern_fields > 0 and legacy_fields > 0:
+            return FieldNotation.MIXED
+        elif modern_fields > 0:
+            return FieldNotation.MODERN
+        elif legacy_fields > 0:
+            return FieldNotation.LEGACY
         else:
-            return CIFVersion.UNKNOWN
-    
-    def get_cif2_equivalent(self, field_name: str) -> Optional[str]:
+            return FieldNotation.UNKNOWN
+
+    def detect_syntax_version(self, content: str) -> CIFSyntaxVersion:
         """
-        Get the CIF2 equivalent of a CIF1 field name.
+        Detect the CIF syntax version from file content.
+        
+        Checks for explicit version headers first.  If no header is found,
+        scans for CIF2-only constructs (lists, tables, triple-quoted strings).
         
         Args:
-            field_name: CIF1 field name
+            content: CIF file content as string
             
         Returns:
-            CIF2 field name or None if not found
+            CIFSyntaxVersion enum (CIF1, CIF2, or UNKNOWN)
+        """
+        lines = content.strip().split('\n')
+        
+        # Check for explicit version header (authoritative)
+        for line in lines[:5]:
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                return CIFSyntaxVersion.CIF2
+            elif stripped.startswith('#\\#CIF_1'):
+                return CIFSyntaxVersion.CIF1
+        
+        # No header — scan for CIF2-only constructs
+        from .cif_format_converter import CIFFormatConverter
+        converter = CIFFormatConverter.__new__(CIFFormatConverter)
+        # Call the static-like detection without full init
+        constructs = CIFFormatConverter._detect_cif2_constructs_static(content)
+        if constructs:
+            return CIFSyntaxVersion.CIF2
+        
+        # No header, no CIF2 constructs — assume CIF 1.1
+        return CIFSyntaxVersion.CIF1
+
+    def detect_cif_version(self, content: str) -> FieldNotation:
+        """
+        Detect field notation from file content.
+        
+        .. deprecated::
+            Use :meth:`detect_notation` instead.  This method conflated
+            notation with syntax version.  It now delegates to detect_notation()
+            but the header-based shortcuts are preserved for backward compat.
+        
+        Args:
+            content: CIF file content as string
+            
+        Returns:
+            FieldNotation (aliased as CIFVersion) enum
+        """
+        lines = content.strip().split('\n')
+        
+        # Preserve old behaviour: headers map to notation constants
+        for line in lines[:5]:
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                return FieldNotation.MODERN
+            elif stripped.startswith('#\\#CIF_1'):
+                return FieldNotation.LEGACY
+        
+        return self.detect_notation(content)
+    
+    def map_to_modern(self, field_name: str) -> Optional[str]:
+        """
+        Map a legacy field name to its modern equivalent via dictionary mappings.
+        
+        Args:
+            field_name: legacy field name
+            
+        Returns:
+            modern field name or None if not found
         """
         self._ensure_loaded()
         
@@ -686,22 +761,22 @@ class CIFDictionaryManager:
             return definition_id
         
         # Fall back to the legacy mapping (may have incorrect case)
-        return self._cif1_to_cif2.get(field_name.lower())
+        return self._legacy_to_modern.get(field_name.lower())
     
-    def get_cif1_equivalent(self, field_name: str) -> Optional[str]:
+    def map_to_legacy(self, field_name: str) -> Optional[str]:
         """
-        Get the CIF1 equivalent of a CIF2 field name.
+        Map a modern field name to its legacy equivalent via dictionary mappings.
         
         Args:
-            field_name: CIF2 field name
+            field_name: modern field name
             
         Returns:
-            Primary CIF1 field name (without dots) or None if not found
+            Primary legacy field name (without dots) or None if not found
         """
         self._ensure_loaded()
-        aliases = self._cif2_to_cif1.get(field_name.lower(), [])
+        aliases = self._modern_to_legacy.get(field_name.lower(), [])
         
-        # Find the first alias without dots (CIF1 format)
+        # Find the first alias without dots (legacy format)
         for alias in aliases:
             if '.' not in alias:
                 return alias
@@ -735,33 +810,33 @@ class CIFDictionaryManager:
             return True
             
         # Check CIF format conversion mappings (case-insensitive)
-        if (field_name.lower() in self._cif1_to_cif2 or 
-            field_name.lower() in self._cif2_to_cif1):
+        if (field_name.lower() in self._legacy_to_modern or 
+            field_name.lower() in self._modern_to_legacy):
             return True
         
         # Also check exact case match for backwards compatibility
-        if (field_name in self._cif1_to_cif2 or 
-            field_name in self._cif2_to_cif1):
+        if (field_name in self._legacy_to_modern or 
+            field_name in self._modern_to_legacy):
             return True
         
-        # For CIF2 format fields (with dots), also check if the CIF1 equivalent exists
+        # For modern format fields (with dots), also check if the legacy equivalent exists
         if '.' in field_name:
-            cif1_equivalent = field_name.replace('.', '_')
-            if (cif1_equivalent.lower() in self._cif1_to_cif2 or 
-                cif1_equivalent.lower() in self._cif2_to_cif1 or
-                cif1_equivalent in self._cif1_to_cif2 or 
-                cif1_equivalent in self._cif2_to_cif1):
+            legacy_equivalent = field_name.replace('.', '_')
+            if (legacy_equivalent.lower() in self._legacy_to_modern or 
+                legacy_equivalent.lower() in self._modern_to_legacy or
+                legacy_equivalent in self._legacy_to_modern or 
+                legacy_equivalent in self._modern_to_legacy):
                 return True
         
-        # For CIF1 format fields (with underscores), check if CIF2 equivalent exists
+        # For legacy format fields (with underscores), check if modern equivalent exists
         elif '_' in field_name[1:]:  # Skip first underscore
             parts = field_name[1:].split('_')
             if len(parts) >= 2:
-                cif2_equivalent = f"_{parts[0]}.{'_'.join(parts[1:])}"
-                if (cif2_equivalent.lower() in self._cif1_to_cif2 or 
-                    cif2_equivalent.lower() in self._cif2_to_cif1 or
-                    cif2_equivalent in self._cif1_to_cif2 or 
-                    cif2_equivalent in self._cif2_to_cif1):
+                modern_equivalent = f"_{parts[0]}.{'_'.join(parts[1:])}"
+                if (modern_equivalent.lower() in self._legacy_to_modern or 
+                    modern_equivalent.lower() in self._modern_to_legacy or
+                    modern_equivalent in self._legacy_to_modern or 
+                    modern_equivalent in self._modern_to_legacy):
                     return True
         
         # As a fallback, directly search the dictionary file
@@ -814,13 +889,13 @@ class CIFDictionaryManager:
         """
         self._ensure_loaded()
         
-        # If it's a CIF1 field, return the CIF2 equivalent
-        cif2_equiv = self._cif1_to_cif2.get(field_name)
-        if cif2_equiv:
-            return cif2_equiv
+        # If it's a legacy field, return the modern equivalent
+        modern_equiv = self._legacy_to_modern.get(field_name)
+        if modern_equiv:
+            return modern_equiv
             
-        # If it's already a CIF2 field, return as is
-        if field_name in self._cif2_to_cif1:
+        # If it's already a modern field, return as is
+        if field_name in self._modern_to_legacy:
             return field_name
             
         # Not found in dictionary, return original
@@ -865,7 +940,7 @@ class CIFDictionaryManager:
         
         # Fields that should NOT be considered deprecated despite what the dictionary says
         non_deprecated_whitelist = {
-            '_diffrn_source',  # Has valid CIF2 equivalent, not deprecated
+            '_diffrn_source',  # Has valid modern equivalent, not deprecated
         }
         
         if field_name in non_deprecated_whitelist:
@@ -925,17 +1000,17 @@ class CIFDictionaryManager:
                     if meta and not self.is_field_deprecated(meta.definition_id):
                         return meta.definition_id
         
-        # Try getting CIF2 equivalent if this is a CIF1 field
-        cif2_equiv = self.get_cif2_equivalent(deprecated_field)
-        if cif2_equiv and not self.is_field_deprecated(cif2_equiv):
-            return cif2_equiv
+        # Try getting modern equivalent if this is a legacy field
+        modern_equiv = self.map_to_modern(deprecated_field)
+        if modern_equiv and not self.is_field_deprecated(modern_equiv):
+            return modern_equiv
         
         return None
     
-    def get_non_deprecated_aliases(self, cif2_field: str) -> List[str]:
-        """Get only non-deprecated aliases for a CIF2 field"""
+    def get_non_deprecated_aliases(self, modern_field: str) -> List[str]:
+        """Get only non-deprecated aliases for a modern field"""
         self._ensure_loaded()
-        return self.parser.get_non_deprecated_aliases(cif2_field)
+        return self.parser.get_non_deprecated_aliases(modern_field)
     
     def get_canonical_name(self, field_name: str) -> str:
         """
@@ -1056,23 +1131,23 @@ class CIFDictionaryManager:
         # Try each variation to find a working mapping
         for field_variant in field_variations:
             if prefer_format == "legacy":
-                # Try to get CIF2 equivalent first, then find its CIF1 alias
-                cif2_equiv = self.get_cif2_equivalent(field_variant)
-                if cif2_equiv:
-                    # Find the CIF1 alias for this CIF2 field
-                    cif1_alias = self.get_cif1_equivalent(cif2_equiv)
-                    if cif1_alias and cif1_alias != old_field_name:
+                # Try to get modern equivalent first, then find its CIF1 alias
+                modern_equiv = self.map_to_modern(field_variant)
+                if modern_equiv:
+                    # Find the CIF1 alias for this modern field
+                    legacy_alias = self.map_to_legacy(modern_equiv)
+                    if legacy_alias and legacy_alias != old_field_name:
                         # Make sure the CIF1 alias is not deprecated
-                        if not self.is_field_deprecated(cif1_alias):
-                            return cif1_alias
-                    # If no CIF1 alias, return the CIF2 field if it's not deprecated
-                    if not self.is_field_deprecated(cif2_equiv):
-                        return cif2_equiv
+                        if not self.is_field_deprecated(legacy_alias):
+                            return legacy_alias
+                    # If no CIF1 alias, return the modern field if it's not deprecated
+                    if not self.is_field_deprecated(modern_equiv):
+                        return modern_equiv
             else:
-                # Prefer CIF2 format
-                cif2_equiv = self.get_cif2_equivalent(field_variant)
-                if cif2_equiv and not self.is_field_deprecated(cif2_equiv):
-                    return cif2_equiv
+                # Prefer modern format
+                modern_equiv = self.map_to_modern(field_variant)
+                if modern_equiv and not self.is_field_deprecated(modern_equiv):
+                    return modern_equiv
         
         # Fallback: look for non-deprecated aliases within the same field definition
         field_info = self.get_field_info(old_field_name)
@@ -1212,7 +1287,7 @@ class CIFDictionaryManager:
             if self.is_known_field(field_name):
                 continue
             
-            # Skip if already has a dot (CIF2 format) - those are either valid or truly unknown
+            # Skip if already has a dot (modern format) - those are either valid or truly unknown
             if '.' in field_name:
                 continue
             
@@ -1318,27 +1393,27 @@ class CIFDictionaryManager:
             # Find mixed usage patterns (including hyphens and special chars)
             field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
             
-            cif1_fields = []
-            cif2_fields = []
+            legacy_fields = []
+            modern_fields = []
             
             for match in field_pattern.finditer(content):
                 field_name = match.group(2)
                 if '.' in field_name:
-                    cif2_fields.append(field_name)
+                    modern_fields.append(field_name)
                 else:
-                    cif1_fields.append(field_name)
+                    legacy_fields.append(field_name)
             
             issues.append(f"Mixed legacy/modern format detected")
-            issues.append(f"Found {len(cif1_fields)} CIF1-style fields and {len(cif2_fields)} CIF2-style fields")
+            issues.append(f"Found {len(legacy_fields)} legacy-style fields and {len(modern_fields)} modern-style fields")
             
-            suggestions.append("Convert to consistent CIF2 format")
+            suggestions.append("Convert to consistent modern format")
             suggestions.append("Update deprecated field names to modern equivalents")
         
         return {
             'version': version,
             'issues': issues,
             'suggestions': suggestions,
-            'is_valid': version in [CIFVersion.CIF1, CIFVersion.CIF2]
+            'is_valid': version in [CIFVersion.LEGACY, CIFVersion.MODERN]
         }
     
     @staticmethod
@@ -2021,8 +2096,8 @@ class CIFDictionaryManager:
             'primary_dictionary': self._dictionary_infos[0].path if self._dictionary_infos else None,
             'additional_dictionaries': [info.path for info in self._dictionary_infos[1:]] if len(self._dictionary_infos) > 1 else [],
             'total_dictionaries': len(self._dictionary_infos),
-            'total_cif1_mappings': len(self._cif1_to_cif2) if self._cif1_to_cif2 else 0,
-            'total_cif2_mappings': len(self._cif2_to_cif1) if self._cif2_to_cif1 else 0,
+            'total_legacy_mappings': len(self._legacy_to_modern) if self._legacy_to_modern else 0,
+            'total_modern_mappings': len(self._modern_to_legacy) if self._modern_to_legacy else 0,
             'dictionaries': [
                 {
                     'name': info.name,
@@ -2353,11 +2428,11 @@ class CIFDictionaryManager:
                 # Determine canonical form for this field
                 canonical = None
                 
-                # Check if field is in CIF1 format and has a CIF2 equivalent
-                if field in self._cif1_to_cif2:
-                    canonical = self._cif1_to_cif2[field]
-                # Check if field is already in CIF2 format
-                elif field in self._cif2_to_cif1:
+                # Check if field is in legacy format and has a modern equivalent
+                if field in self._legacy_to_modern:
+                    canonical = self._legacy_to_modern[field]
+                # Check if field is already in modern format
+                elif field in self._modern_to_legacy:
                     canonical = field
                 # For unknown fields, use the field itself as canonical
                 else:
@@ -2380,11 +2455,11 @@ class CIFDictionaryManager:
             # Determine canonical form for this field
             canonical = None
             
-            # Check if field is in CIF1 format and has a CIF2 equivalent
-            if field in self._cif1_to_cif2:
-                canonical = self._cif1_to_cif2[field]
-            # Check if field is already in CIF2 format
-            elif field in self._cif2_to_cif1:
+            # Check if field is in legacy format and has a modern equivalent
+            if field in self._legacy_to_modern:
+                canonical = self._legacy_to_modern[field]
+            # Check if field is already in modern format
+            elif field in self._modern_to_legacy:
                 canonical = field
             
             # Only process fields that have known aliases in our dictionaries
@@ -2418,7 +2493,7 @@ class CIFDictionaryManager:
             cif_content: CIF file content as string
             
         Returns:
-            Dictionary with format statistics: {'cif1_fields': count, 'cif2_fields': count}
+            Dictionary with format statistics: {'legacy_fields': count, 'modern_fields': count}
         """
         self._ensure_loaded()
         
@@ -2426,20 +2501,20 @@ class CIFDictionaryManager:
         # Exclude field references within multi-line text blocks
         found_fields = set(self._extract_fields_excluding_text_blocks(cif_content))
         
-        cif1_count = 0
-        cif2_count = 0
+        legacy_count = 0
+        modern_count = 0
         
         for field in found_fields:
-            if field in self._cif1_to_cif2:
-                cif1_count += 1
-            elif field in self._cif2_to_cif1:
-                cif2_count += 1
+            if field in self._legacy_to_modern:
+                legacy_count += 1
+            elif field in self._modern_to_legacy:
+                modern_count += 1
         
         return {
-            'cif1_fields': cif1_count,
-            'cif2_fields': cif2_count,
-            'is_mixed': cif1_count > 0 and cif2_count > 0,
-            'total_known_fields': cif1_count + cif2_count
+            'legacy_fields': legacy_count,
+            'modern_fields': modern_count,
+            'is_mixed': legacy_count > 0 and modern_count > 0,
+            'total_known_fields': legacy_count + modern_count
         }
     
     def resolve_field_aliases(self, cif_content: str, prefer_cif2: bool = True) -> Tuple[str, List[str]]:
@@ -2448,7 +2523,7 @@ class CIFDictionaryManager:
         
         Args:
             cif_content: CIF file content as string
-            prefer_cif2: If True, prefer CIF2 format; if False, prefer CIF1 format
+            prefer_cif2: If True, prefer modern format; if False, prefer legacy format
             
         Returns:
             Tuple of (cleaned_cif_content, list_of_changes_made)
@@ -2497,7 +2572,7 @@ class CIFDictionaryManager:
                     fields_to_remove.remove(first_alias)
             else:
                 # Keep the CIF1 form (find it from aliases)
-                cif1_candidates = [f for f in alias_list if f in self._cif1_to_cif2]
+                cif1_candidates = [f for f in alias_list if f in self._legacy_to_modern]
                 if cif1_candidates:
                     preferred_field = cif1_candidates[0]  # Take first CIF1 form found
                     fields_to_remove = [f for f in alias_list if f != preferred_field]
@@ -2623,7 +2698,7 @@ class CIFDictionaryManager:
         
         Args:
             cif_content: CIF file content
-            target_format: 'CIF1' or 'CIF2'
+            target_format: 'LEGACY' or 'MODERN'
             
         Returns:
             Tuple of (updated_content, list_of_changes)
@@ -2671,21 +2746,21 @@ class CIFDictionaryManager:
         
         Args:
             field_name: Field name to convert
-            target_format: 'CIF1' or 'CIF2'
+            target_format: 'LEGACY' or 'MODERN'
             
         Returns:
             Converted field name
         """
         self._ensure_loaded()
         
-        if target_format.upper() == 'CIF2':
+        if target_format.upper() == 'MODERN':
             # Convert CIF1 to CIF2
-            if field_name in self._cif1_to_cif2:
-                return self._cif1_to_cif2[field_name]
+            if field_name in self._legacy_to_modern:
+                return self._legacy_to_modern[field_name]
         else:
             # Convert CIF2 to CIF1  
-            if field_name in self._cif2_to_cif1:
-                return self._cif2_to_cif1[field_name]
+            if field_name in self._modern_to_legacy:
+                return self._modern_to_legacy[field_name]
         
         return field_name  # No conversion needed
     
@@ -2864,9 +2939,9 @@ class CIFDictionaryManager:
         deprecated_mappings = {}
         
         for field in field_list:
-            # Check if this is a CIF1 field with a CIF2 equivalent
-            if field in self._cif1_to_cif2:
-                modern_field = self._cif1_to_cif2[field]
+            # Check if this is a legacy field with a modern equivalent
+            if field in self._legacy_to_modern:
+                modern_field = self._legacy_to_modern[field]
                 if modern_field != field:  # Only if they're different
                     deprecated_mappings[field] = modern_field
         
@@ -2887,7 +2962,7 @@ class CIFDictionaryManager:
         """
         all_changes = []
         
-        # Step 1: Resolve field aliases (only actual conflicts, prefer CIF2 format)
+        # Step 1: Resolve field aliases (only actual conflicts, prefer modern format)
         cleaned_content, alias_changes = self.resolve_field_aliases(cif_content, prefer_cif2=True)
         all_changes.extend(alias_changes)
         
@@ -2895,7 +2970,7 @@ class CIFDictionaryManager:
         # Do NOT mass-convert deprecated fields unless specifically requested
         return cleaned_content, all_changes
     
-    def convert_cif_format(self, cif_content: str, target_format: str = 'CIF2') -> Tuple[str, List[str]]:
+    def convert_cif_format(self, cif_content: str, target_format: str = 'MODERN') -> Tuple[str, List[str]]:
         """
         Convert CIF content to a specific format (CIF1 or CIF2).
         
@@ -2904,7 +2979,7 @@ class CIFDictionaryManager:
         
         Args:
             cif_content: CIF file content as string
-            target_format: 'CIF1' or 'CIF2'
+            target_format: 'LEGACY' or 'MODERN'
             
         Returns:
             Tuple of (converted_cif_content, list_of_changes_made)
@@ -2917,27 +2992,27 @@ class CIFDictionaryManager:
         # 1. Convert actual CIF fields (excluding text blocks)
         found_fields = list(set(self._extract_fields_excluding_text_blocks(cif_content)))
         
-        if target_format.upper() == 'CIF2':
-            # Convert all CIF1 fields to CIF2
+        if target_format.upper() == 'MODERN':
+            # Convert all legacy fields to CIF2
             for field in found_fields:
-                if field in self._cif1_to_cif2:
-                    cif2_field = self._cif1_to_cif2[field]
+                if field in self._legacy_to_modern:
+                    modern_field = self._legacy_to_modern[field]
                     old_content = converted_content
-                    converted_content = self._replace_field_text_block_aware(converted_content, field, cif2_field)
+                    converted_content = self._replace_field_text_block_aware(converted_content, field, modern_field)
                     if old_content != converted_content:
-                        all_changes.append(f"Converted '{field}' to '{cif2_field}'")
+                        all_changes.append(f"Converted '{field}' to '{modern_field}'")
         
-        elif target_format.upper() == 'CIF1':
-            # Convert all CIF2 fields to CIF1 (use first CIF1 alternative)
+        elif target_format.upper() == 'LEGACY':
+            # Convert all modern fields to CIF1 (use first CIF1 alternative)
             for field in found_fields:
-                if field in self._cif2_to_cif1:
-                    cif1_alternatives = self._cif2_to_cif1[field]
+                if field in self._modern_to_legacy:
+                    cif1_alternatives = self._modern_to_legacy[field]
                     if cif1_alternatives:
-                        cif1_field = cif1_alternatives[0]  # Use first alternative
+                        legacy_field = cif1_alternatives[0]  # Use first alternative
                         old_content = converted_content
-                        converted_content = self._replace_field_text_block_aware(converted_content, field, cif1_field)
+                        converted_content = self._replace_field_text_block_aware(converted_content, field, legacy_field)
                         if old_content != converted_content:
-                            all_changes.append(f"Converted '{field}' to '{cif1_field}'")
+                            all_changes.append(f"Converted '{field}' to '{legacy_field}'")
         
         # 2. Convert field references within text blocks  
         text_block_content, text_block_changes = self._convert_fields_within_text_blocks(converted_content, target_format)
@@ -3273,13 +3348,3 @@ def detect_cif_version(cif_content: str) -> CIFVersion:
     return manager.detect_cif_version(cif_content)
 
 
-def get_modern_field_name(old_field_name: str) -> Optional[str]:
-    """Convenience function to get modern field name."""
-    manager = CIFDictionaryManager()
-    return manager.get_modern_equivalent(old_field_name)
-
-
-def validate_cif_format(cif_content: str) -> Dict[str, Any]:
-    """Convenience function to validate CIF format."""
-    manager = CIFDictionaryManager()
-    return manager.validate_mixed_cif(cif_content)

@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QFontMetrics
 from typing import List, Optional
-from utils.cif_dictionary_manager import CIFVersion
+from utils.cif_dictionary_manager import FieldNotation
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
 from utils.format_compatibility_warning import show_modern_format_warning
 
@@ -20,7 +20,7 @@ from utils.format_compatibility_warning import show_modern_format_warning
 class FormatConversionDialog(QDialog):
     """Dialog for suggesting conversion to modern CIF format"""
     
-    def __init__(self, original_content: str, detected_version: CIFVersion, 
+    def __init__(self, original_content: str, detected_version: FieldNotation, 
                  format_converter, parent=None):
         super().__init__(parent)
         self.original_content = original_content
@@ -65,9 +65,9 @@ class FormatConversionDialog(QDialog):
         
         # Version detection info
         version_text = {
-            CIFVersion.CIF1: "Legacy CIF format detected",
-            CIFVersion.MIXED: "Mixed CIF format detected",
-            CIFVersion.UNKNOWN: "Unknown CIF format detected"
+            FieldNotation.LEGACY: "Legacy field notation detected",
+            FieldNotation.MIXED: "Mixed field notation detected",
+            FieldNotation.UNKNOWN: "Unknown field notation detected"
         }
         
         detection_label = QLabel(f"📋 {version_text.get(self.detected_version, 'Unknown format')}")
@@ -142,7 +142,7 @@ class FormatConversionDialog(QDialog):
         layout.addWidget(preview_tabs)
         
         # Warning for mixed format
-        if self.detected_version == CIFVersion.MIXED:
+        if self.detected_version == FieldNotation.MIXED:
             warning_frame = QFrame()
             warning_frame.setStyleSheet("""
                 QFrame { 
@@ -214,7 +214,7 @@ class FormatConversionDialog(QDialog):
         """Generate the conversion preview and changes summary"""
         try:
             # Perform the conversion
-            self.converted_content, self.conversion_changes = self.format_converter.convert_to_cif2(self.original_content)
+            self.converted_content, self.conversion_changes = self.format_converter.convert_to_modern(self.original_content)
             
             # Update changes summary
             if self.conversion_changes:
@@ -278,7 +278,7 @@ class FormatConversionDialog(QDialog):
         return self.user_choice
 
 
-def suggest_format_conversion(content: str, detected_version: CIFVersion, 
+def suggest_format_conversion(content: str, detected_version: FieldNotation, 
                             format_converter, parent=None):
     """
     Show format conversion suggestion dialog if content is not in modern format.
@@ -294,7 +294,7 @@ def suggest_format_conversion(content: str, detected_version: CIFVersion,
         user_choice: 'convert', 'keep_original', or 'cancel'
     """
     # Only suggest conversion for non-modern formats
-    if detected_version in [CIFVersion.CIF1, CIFVersion.MIXED, CIFVersion.UNKNOWN]:
+    if detected_version in [FieldNotation.LEGACY, FieldNotation.MIXED, FieldNotation.UNKNOWN]:
         dialog = FormatConversionDialog(content, detected_version, format_converter, parent)
         result = dialog.exec()
         

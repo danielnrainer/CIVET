@@ -317,17 +317,6 @@ def get_all_prefix_info() -> Dict[str, Dict]:
     return data.get("prefixes", {}).copy()
 
 
-def get_category_dictionary_suggestions() -> Dict[str, str]:
-    """
-    Get category-based dictionary suggestions.
-    
-    Returns:
-        Dict mapping category patterns (e.g., 'pd_') to dictionary filenames.
-    """
-    data, _ = _load_prefix_data()
-    return data.get("category_dictionary_suggestions", {}).copy()
-
-
 # Legacy compatibility - these are now functions that return fresh data
 # For code that imports these as module-level constants
 

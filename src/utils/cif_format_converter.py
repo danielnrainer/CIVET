@@ -2,12 +2,12 @@
 CIF Format Converter
 ====================
 
-Converts between CIF1 and CIF2 formats, handling:
+Converts between CIF1 and modern formats, handling:
 - Field name modernization (deprecated → current)
 - Format compliance fixing (mixed → pure)
 - Version header management
 - Data type conversions where applicable
-- modern-only field support (fields without CIF1 aliases)
+- modern-only field support (fields without legacy aliases)
 - Duplicate/alias detection and removal
 - checkCIF compatibility (retaining legacy notation for unsupported modern fields)
 
@@ -16,19 +16,8 @@ Converts between CIF1 and CIF2 formats, handling:
 import re
 import os
 from typing import Dict, List, Tuple, Optional, Set
-from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion
-
-
-def get_resource_path(relative_path: str) -> str:
-    """Get absolute path to resource, works for dev and PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        import sys
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(os.path.dirname(__file__))
-    
-    return os.path.join(base_path, relative_path)
+from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
+from .user_config import get_bundled_resource_path
 
 
 class CIFFormatConverter:
@@ -56,7 +45,7 @@ class CIFFormatConverter:
         """
         try:
             # Try field_rules directory first (production location)
-            config_path = get_resource_path(os.path.join('field_rules', 'checkcif_compatibility.cif_rules'))
+            config_path = str(get_bundled_resource_path(os.path.join('field_rules', 'checkcif_compatibility.cif_rules')))
             if not os.path.exists(config_path):
                 # Try alternative path for development
                 config_path = os.path.join(
@@ -92,9 +81,11 @@ class CIFFormatConverter:
                 '_cell_measurement_temperature'
             }
     
-    def convert_to_cif2(self, cif_content: str, remove_duplicates: bool = True) -> Tuple[str, List[str]]:
+    def convert_to_modern_notation(self, cif_content: str, remove_duplicates: bool = True) -> Tuple[str, List[str]]:
         """
-        Convert CIF content to CIF2 format.
+        Convert CIF field names to modern dot notation.
+        
+        Only converts field names — does NOT add/change/remove any version header.
         
         Args:
             cif_content: Original CIF content
@@ -106,36 +97,26 @@ class CIFFormatConverter:
         lines = cif_content.split('\n')
         converted_lines = []
         changes = []
-        unknown_fields = []  # Track unknown fields
-        checkcif_legacy_retained = []  # Track fields retained for checkCIF
-        deprecated_fields_found = {}  # Track deprecated fields BEFORE conversion: field_name -> value
-        
-        # Add CIF2 header if not present
-        header_added = False
-        if not any(line.strip().startswith('#\\#CIF_2.0') for line in lines[:5]):
-            converted_lines.append('#\\#CIF_2.0')
-            converted_lines.append('')
-            changes.append("Added CIF2 version header")
-            header_added = True
+        unknown_fields = []
+        deprecated_fields_found = {}
         
         # Track loop state for proper field conversion within loops
         in_loop = False
         loop_field_count = 0
-        in_text_block = False  # Track text blocks like _iucr_refine_fcf_details
+        in_text_block = False
         
         for i, line in enumerate(lines):
             original_line = line
             
-            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
+            # Track text block boundaries (semicolon-delimited blocks)
             if line.strip() == ';':
                 in_text_block = not in_text_block
-                converted_lines.append(line)  # Keep semicolon as-is
+                converted_lines.append(line)
                 continue
             
-            # Convert field names inside text blocks but don't remove them as duplicates
+            # Preserve text block content as-is
             if in_text_block:
-                converted_line = self._convert_field_names_in_text(line)
-                converted_lines.append(converted_line)
+                converted_lines.append(line)
                 continue
             
             # Before converting, check if this line contains a deprecated field
@@ -143,7 +124,6 @@ class CIFFormatConverter:
             if field_match:
                 indent, field_name, value = field_match.groups()
                 if self.dict_manager.is_field_deprecated(field_name):
-                    # Store the deprecated field for later processing
                     deprecated_fields_found[field_name] = value
             
             # Check for loop start/end
@@ -152,64 +132,90 @@ class CIFFormatConverter:
                 loop_field_count = 0
                 converted_line = line
             elif in_loop and line.strip().startswith('_'):
-                # This is a loop field definition
                 loop_field_count += 1
-                converted_line = self._convert_line_to_cif2(line, unknown_fields)
+                converted_line = self._convert_line_to_modern(line, unknown_fields)
             elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
-                # This might be loop data (not a field definition)
-                # Check if we've seen field definitions and now have data
                 if loop_field_count > 0:
-                    # This is loop data, don't convert field names in data
                     converted_line = line
                 else:
-                    # Still in field definitions
-                    converted_line = self._convert_line_to_cif2(line, unknown_fields)
+                    converted_line = self._convert_line_to_modern(line, unknown_fields)
             elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip() == 'loop_'):
-                # End of loop (empty line, new data block, or new loop)
                 in_loop = False
                 loop_field_count = 0
                 if line.strip().startswith('_'):
-                    converted_line = self._convert_line_to_cif2(line, unknown_fields)
+                    converted_line = self._convert_line_to_modern(line, unknown_fields)
                 else:
                     converted_line = line
             else:
-                # Regular line processing
-                converted_line = self._convert_line_to_cif2(line, unknown_fields)
+                converted_line = self._convert_line_to_modern(line, unknown_fields)
             
             if converted_line != original_line:
-                changes.append(f"Line {i+1+(2 if header_added else 0)}: {original_line.strip()} → {converted_line.strip()}")
+                changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
             
             converted_lines.append(converted_line)
         
-        # Post-processing pipeline:
         converted_content = '\n'.join(converted_lines)
         
-        # 1. Remove duplicates first
+        # Post-processing pipeline
         if remove_duplicates:
             converted_content, dup_changes = self._remove_duplicate_aliases(converted_content)
             changes.extend(dup_changes)
         
-        # 2. Handle deprecated fields (add deprecated section)
-        # Pass the deprecated fields we found during initial scan
         converted_content, deprecated_changes = self._handle_deprecated_fields(
-            converted_content, 
-            deprecated_fields_found
+            converted_content, deprecated_fields_found
         )
         changes.extend(deprecated_changes)
         
-        # 3. Add legacy notation for checkCIF compatibility fields
         converted_content, compat_changes = self._add_checkcif_legacy_notation(converted_content)
         changes.extend(compat_changes)
         
-        # Add warnings for unknown fields
         if unknown_fields:
             changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
         
         return converted_content, changes
-    
-    def convert_to_cif1(self, cif_content: str) -> Tuple[str, List[str]]:
+
+    def convert_to_modern(self, cif_content: str, remove_duplicates: bool = True) -> Tuple[str, List[str]]:
         """
-        Convert CIF content to CIF1 format.
+        Convert CIF content to modern format (notation + CIF2 header).
+        
+        .. deprecated::
+            Use :meth:`convert_to_modern_notation` for notation-only conversion.
+            Header management should be done separately via ensure_cif2_compliant().
+        
+        Args:
+            cif_content: Original CIF content
+            remove_duplicates: If True, remove duplicate/alias fields after conversion
+            
+        Returns:
+            Tuple of (converted_content, list_of_changes_made)
+        """
+        # Notation conversion
+        converted_content, changes = self.convert_to_modern_notation(cif_content, remove_duplicates)
+        
+        # Also add CIF2 header (legacy behaviour of this method)
+        lines = converted_content.split('\n')
+        if not any(line.strip().startswith('#\\#CIF_2.0') for line in lines[:5]):
+            # Replace CIF1 header if present, otherwise prepend
+            replaced = False
+            for idx, line in enumerate(lines[:5]):
+                if line.strip().startswith('#\\#CIF_1'):
+                    lines[idx] = '#\\#CIF_2.0'
+                    replaced = True
+                    changes.insert(0, "Replaced CIF 1.1 header with CIF 2.0 header")
+                    break
+            if not replaced:
+                lines.insert(0, '#\\#CIF_2.0')
+                lines.insert(1, '')
+                changes.insert(0, "Added CIF 2.0 version header")
+            converted_content = '\n'.join(lines)
+        
+        return converted_content, changes
+    
+    def convert_to_legacy_notation(self, cif_content: str) -> Tuple[str, List[str]]:
+        """
+        Convert CIF field names to legacy underscore notation.
+        
+        Only converts field names — does NOT add/change/remove any version header.
         
         Args:
             cif_content: Original CIF content
@@ -220,89 +226,222 @@ class CIFFormatConverter:
         lines = cif_content.split('\n')
         converted_lines = []
         changes = []
-        unknown_fields = []  # Track unknown fields
+        unknown_fields = []
         
-        # Track loop state for proper field conversion within loops
         in_loop = False
         loop_field_count = 0
+        in_text_block = False
         
         for i, line in enumerate(lines):
-            # Skip CIF2 version headers
-            if line.strip().startswith('#\\#CIF_2.0'):
-                changes.append(f"Line {i+1}: Removed CIF2 version header")
+            stripped = line.strip()
+            
+            # Track text block boundaries
+            if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
+                in_text_block = not in_text_block
+                converted_lines.append(line)
                 continue
             
-            # Add CIF1 header if this was the first line and we're replacing CIF2 header
-            if i == 0 and line.strip().startswith('#\\#CIF_2.0'):
-                converted_lines.append('#\\#CIF_1.1')
-                converted_lines.append('')
-                changes.append("Added CIF1 version header")
+            if in_text_block:
+                converted_lines.append(line)
                 continue
             
             original_line = line
             
-            # Check for loop start/end
-            if line.strip() == 'loop_':
+            if stripped == 'loop_':
                 in_loop = True
                 loop_field_count = 0
                 converted_line = line
-            elif in_loop and line.strip().startswith('_'):
-                # This is a loop field definition
+            elif in_loop and stripped.startswith('_'):
                 loop_field_count += 1
-                converted_line = self._convert_line_to_cif1(line, unknown_fields)
-            elif in_loop and line.strip() and not line.strip().startswith('_') and not line.strip().startswith('#'):
-                # This might be loop data (not a field definition)
-                # Check if we've seen field definitions and now have data
+                converted_line = self._convert_line_to_legacy(line, unknown_fields)
+            elif in_loop and stripped and not stripped.startswith('_') and not stripped.startswith('#'):
                 if loop_field_count > 0:
-                    # This is loop data, don't convert field names in data
                     converted_line = line
                 else:
-                    # Still in field definitions
-                    converted_line = self._convert_line_to_cif1(line, unknown_fields)
-            elif in_loop and (line.strip() == '' or line.strip().startswith('data_') or line.strip() == 'loop_'):
-                # End of loop (empty line, new data block, or new loop)
+                    converted_line = self._convert_line_to_legacy(line, unknown_fields)
+            elif in_loop and (stripped == '' or stripped.startswith('data_') or stripped == 'loop_'):
                 in_loop = False
                 loop_field_count = 0
-                if line.strip().startswith('_'):
-                    converted_line = self._convert_line_to_cif1(line, unknown_fields)
+                if stripped.startswith('_'):
+                    converted_line = self._convert_line_to_legacy(line, unknown_fields)
                 else:
                     converted_line = line
             else:
-                # Regular line processing
-                converted_line = self._convert_line_to_cif1(line, unknown_fields)
+                converted_line = self._convert_line_to_legacy(line, unknown_fields)
             
             if converted_line != original_line:
                 changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
             
             converted_lines.append(converted_line)
         
-        # Add warnings for unknown fields
         if unknown_fields:
             changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
         
-        return '\n'.join(converted_lines), changes
-    
-    def fix_mixed_format(self, cif_content: str, target_version: CIFVersion = CIFVersion.CIF2) -> Tuple[str, List[str]]:
+        # Warn about CIF2-only constructs
+        converted_content = '\n'.join(converted_lines)
+        cif2_constructs = self.detect_cif2_constructs(converted_content)
+        if cif2_constructs:
+            changes.append(
+                f"WARNING: CIF2-only constructs detected that have no CIF 1.1 equivalent: "
+                f"{', '.join(cif2_constructs)}"
+            )
+        
+        return converted_content, changes
+
+    def convert_to_legacy(self, cif_content: str) -> Tuple[str, List[str]]:
         """
-        Fix a mixed-format CIF file to be compliant with specified version.
+        Convert CIF content to legacy format (notation + CIF1 header).
+        
+        .. deprecated::
+            Use :meth:`convert_to_legacy_notation` for notation-only conversion.
+            Header management should be done separately.
+        
+        Args:
+            cif_content: Original CIF content
+            
+        Returns:
+            Tuple of (converted_content, list_of_changes_made)
+        """
+        # Notation conversion
+        converted_content, changes = self.convert_to_legacy_notation(cif_content)
+        
+        # Also replace header (legacy behaviour of this method)
+        lines = converted_content.split('\n')
+        for idx, line in enumerate(lines[:5]):
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                lines[idx] = '#\\#CIF_1.1'
+                changes.insert(0, f"Line {idx+1}: Replaced CIF 2.0 header with CIF 1.1 header")
+                converted_content = '\n'.join(lines)
+                break
+        
+        return converted_content, changes
+    
+    def fix_mixed_format(self, cif_content: str, target_version: FieldNotation = FieldNotation.MODERN) -> Tuple[str, List[str]]:
+        """
+        Fix a mixed-format CIF file to be compliant with specified notation.
         
         Args:
             cif_content: Mixed-format CIF content
-            target_version: Target CIF version (CIF1 or CIF2)
+            target_version: Target notation (LEGACY or MODERN)
             
         Returns:
             Tuple of (fixed_content, list_of_changes_made)
         """
-        if target_version == CIFVersion.CIF2:
-            return self.convert_to_cif2(cif_content)
-        elif target_version == CIFVersion.CIF1:
-            return self.convert_to_cif1(cif_content)
+        if target_version == FieldNotation.MODERN:
+            return self.convert_to_modern(cif_content)
+        elif target_version == FieldNotation.LEGACY:
+            return self.convert_to_legacy(cif_content)
         else:
             raise ValueError(f"Cannot convert to {target_version}")
-    
-    def _convert_line_to_cif2(self, line: str, unknown_fields: List[str] = None) -> str:
+
+    def ensure_cif2_compliant(self, content: str) -> Tuple[str, List[str]]:
         """
-        Convert a single line to CIF2 format.
+        Ensure CIF content is CIF 2.0 compliant.
+        
+        Adds the ``#\\#CIF_2.0`` header if missing (replaces ``#\\#CIF_1.1`` if
+        present) and applies CIF2 value quoting rules.
+        
+        Args:
+            content: CIF file content
+            
+        Returns:
+            Tuple of (compliant_content, list_of_changes_made)
+        """
+        changes = []
+        lines = content.split('\n')
+        
+        # Handle header
+        header_found = False
+        for idx, line in enumerate(lines[:5]):
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                header_found = True
+                break
+            if stripped.startswith('#\\#CIF_1'):
+                lines[idx] = '#\\#CIF_2.0'
+                changes.append("Replaced CIF 1.1 header with CIF 2.0 header")
+                header_found = True
+                break
+            if stripped.startswith('data_'):
+                lines.insert(idx, '#\\#CIF_2.0')
+                lines.insert(idx + 1, '')
+                changes.append("Added CIF 2.0 header before data block")
+                header_found = True
+                break
+        
+        if not header_found:
+            lines.insert(0, '#\\#CIF_2.0')
+            lines.insert(1, '')
+            changes.append("Added CIF 2.0 header")
+        
+        result = '\n'.join(lines)
+        
+        # Apply CIF2 quoting rules
+        from .cif2_value_formatting import validate_cif2_content, fix_cif2_compliance_issues
+        issues = validate_cif2_content(result)
+        if issues:
+            result, fixes = fix_cif2_compliance_issues(result)
+            for line_num, field, old_val, new_val in fixes:
+                changes.append(f"CIF2 quoting: Line {line_num}: {old_val} → {new_val}")
+        
+        return result, changes
+
+    def check_cif1_compliance(self, content: str) -> List[str]:
+        """
+        Check whether CIF content can be represented as valid CIF 1.1.
+        
+        Returns:
+            List of compliance issues found.  Empty list means CIF1-compliant.
+        """
+        issues = []
+        
+        cif2_constructs = self.detect_cif2_constructs(content)
+        for construct in cif2_constructs:
+            issues.append(f"CIF2-only construct found: {construct}")
+        
+        return issues
+
+    def ensure_cif1_compliant(self, content: str) -> Tuple[str, List[str]]:
+        """
+        Ensure CIF content is CIF 1.1 compliant.
+        
+        If CIF2-only constructs are found, raises ValueError (they cannot
+        be automatically converted).  Otherwise replaces the header.
+        
+        Args:
+            content: CIF file content
+            
+        Returns:
+            Tuple of (compliant_content, list_of_changes_made)
+            
+        Raises:
+            ValueError: If CIF2-only constructs are present
+        """
+        issues = self.check_cif1_compliance(content)
+        if issues:
+            raise ValueError(
+                "Cannot ensure CIF 1.1 compliance — CIF2-only constructs present:\n" +
+                "\n".join(f"  • {issue}" for issue in issues)
+            )
+        
+        changes = []
+        lines = content.split('\n')
+        
+        for idx, line in enumerate(lines[:5]):
+            stripped = line.strip()
+            if stripped.startswith('#\\#CIF_2.0'):
+                lines[idx] = '#\\#CIF_1.1'
+                changes.append("Replaced CIF 2.0 header with CIF 1.1 header")
+                break
+            if stripped.startswith('#\\#CIF_1'):
+                break  # Already CIF1
+        
+        return '\n'.join(lines), changes
+    
+    def _convert_line_to_modern(self, line: str, unknown_fields: List[str] = None) -> str:
+        """
+        Convert a single line to modern format.
         
         Args:
             line: Line to convert
@@ -328,7 +467,7 @@ class CIFFormatConverter:
             unknown_fields.append(field_name)
         
         # Convert field name using dictionary lookup
-        converted_field = self._convert_field_to_cif2(field_name)
+        converted_field = self._convert_field_to_modern(field_name)
         if converted_field != field_name:
             if rest.strip():  # Has value after field name
                 return f"{indent}{converted_field} {rest}"
@@ -337,9 +476,9 @@ class CIFFormatConverter:
         
         return line
     
-    def _convert_line_to_cif1(self, line: str, unknown_fields: List[str] = None) -> str:
+    def _convert_line_to_legacy(self, line: str, unknown_fields: List[str] = None) -> str:
         """
-        Convert a single line to CIF1 format.
+        Convert a single line to legacy format.
         
         Args:
             line: Line to convert
@@ -365,7 +504,7 @@ class CIFFormatConverter:
             unknown_fields.append(field_name)
         
         # Convert field name using dictionary lookup
-        converted_field = self._convert_field_to_cif1(field_name)
+        converted_field = self._convert_field_to_legacy(field_name)
         if converted_field != field_name:
             if rest.strip():  # Has value after field name
                 return f"{indent}{converted_field} {rest}"
@@ -375,30 +514,30 @@ class CIFFormatConverter:
         return line
     
     def _convert_field_names_in_text(self, line: str) -> str:
-        """Convert field names within text blocks to CIF2 format."""
+        """Convert field names within text blocks to modern format."""
         import re
         field_pattern = r'(_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*)'
         def replace_field(match):
             field_name = match.group(1)
-            converted = self._convert_field_to_cif2(field_name)
+            converted = self._convert_field_to_modern(field_name)
             return converted if converted else field_name
         return re.sub(field_pattern, replace_field, line)
 
-    def _convert_field_to_cif2(self, field_name: str) -> str:
+    def _convert_field_to_modern(self, field_name: str) -> str:
         """
-        Convert a CIF1 field name to CIF2 format using the CIF core dictionary.
+        Convert a legacy field name to modern format using the CIF core dictionary.
         
         For deprecated fields with modern replacements (e.g., _cell_measurement_temperature
         -> _diffrn.ambient_temperature), this uses the modern replacement.
         
-        For non-deprecated fields, this uses the CIF2 alias (e.g., _space_group_it_number
+        For non-deprecated fields, this uses the modern alias (e.g., _space_group_it_number
         -> _space_group.IT_number).
         
         Args:
-            field_name: CIF1 field name (e.g., '_cell_length_a')
+            field_name: legacy field name (e.g., '_cell_length_a')
             
         Returns:
-            CIF2 field name (e.g., '_cell.length_a') based on dictionary lookups
+            modern field name (e.g., '_cell.length_a') based on dictionary lookups
         """
         # Check if this is a deprecated field with a modern replacement
         # (e.g., _cell_measurement_temperature -> _diffrn.ambient_temperature)
@@ -407,32 +546,32 @@ class CIFFormatConverter:
             if modern_replacement and modern_replacement != field_name:
                 return modern_replacement
         
-        # Otherwise, use standard CIF2 equivalent (alias conversion)
+        # Otherwise, use standard modern equivalent (alias conversion)
         # (e.g., _space_group_it_number -> _space_group.IT_number)
-        cif2_equivalent = self.dict_manager.get_cif2_equivalent(field_name)
+        modern_equivalent = self.dict_manager.map_to_modern(field_name)
         
-        if cif2_equivalent:
-            return cif2_equivalent
+        if modern_equivalent:
+            return modern_equivalent
             
         # If not found in dictionary, return original field name unchanged
         # (This preserves unknown/custom fields)
         return field_name
     
-    def _convert_field_to_cif1(self, field_name: str) -> str:
+    def _convert_field_to_legacy(self, field_name: str) -> str:
         """
-        Convert a CIF2 field name to CIF1 format using the CIF core dictionary.
+        Convert a modern field name to legacy format using the CIF core dictionary.
         
         Args:
-            field_name: CIF2 field name (e.g., '_cell.length_a')
+            field_name: modern field name (e.g., '_cell.length_a')
             
         Returns:
-            CIF1 field name (e.g., '_cell_length_a') based on dictionary lookups
+            legacy field name (e.g., '_cell_length_a') based on dictionary lookups
         """
         # Use dictionary lookup for accurate conversion
-        cif1_equivalent = self.dict_manager.get_cif1_equivalent(field_name)
+        legacy_equivalent = self.dict_manager.map_to_legacy(field_name)
         
-        if cif1_equivalent:
-            return cif1_equivalent
+        if legacy_equivalent:
+            return legacy_equivalent
             
         # If not found in dictionary, return original field name unchanged
         # (This preserves unknown/custom fields)
@@ -456,8 +595,8 @@ class CIFFormatConverter:
         # Try to find a field info that would indicate dot notation is used
         for pattern in test_patterns:
             # This is a simplified check - in a full implementation we'd scan the dictionary
-            # For now, we'll use a reasonable set of known CIF2 categories
-            known_cif2_categories = {
+            # For now, we'll use a reasonable set of known modern categories
+            known_modern_categories = {
                 'cell', 'atom_site', 'atom_type', 'space_group', 'symmetry',
                 'diffrn', 'diffrn_source', 'diffrn_detector', 'diffrn_radiation', 
                 'diffrn_reflns', 'diffrn_standards', 'diffrn_orient_matrix', 'diffrn_measurement',
@@ -472,7 +611,7 @@ class CIFFormatConverter:
                 'computing_molecular_graphics', 'computing_publication_material'
             }
             
-            if category in known_cif2_categories:
+            if category in known_modern_categories:
                 return True
                 
         return False
@@ -490,10 +629,10 @@ class CIFFormatConverter:
         """
         current_version = self.dict_manager.detect_cif_version(cif_content)
         
-        if target_version == CIFVersion.CIF2:
-            _, changes = self.convert_to_cif2(cif_content)
-        elif target_version == CIFVersion.CIF1:
-            _, changes = self.convert_to_cif1(cif_content)
+        if target_version == CIFVersion.MODERN:
+            _, changes = self.convert_to_modern(cif_content)
+        elif target_version == CIFVersion.LEGACY:
+            _, changes = self.convert_to_legacy(cif_content)
         else:
             return {
                 'error': f'Cannot convert to {target_version}',
@@ -523,77 +662,116 @@ class CIFFormatConverter:
             'preview_safe': len(changes) < 50  # Arbitrary threshold for "safe" preview
         }
     
-    def add_field_mapping(self, old_field: str, new_field: str):
-        """
-        Add a custom field mapping for conversions.
+    def _detect_modern_constructs(self, cif_content: str) -> List[str]:
+        """Detect modern-only constructs (lists, tables, triple-quoted strings) in content."""
+        return self._detect_cif2_constructs_static(cif_content)
+
+    def detect_cif2_constructs(self, cif_content: str) -> List[str]:
+        """Detect CIF2-only constructs (lists, tables, triple-quoted strings) in content.
         
-        Args:
-            old_field: Old/deprecated field name
-            new_field: Modern field name
-        """
-        self.field_mappings[old_field.lower()] = new_field.lower()
-        self.reverse_mappings[new_field.lower()] = old_field.lower()
-    
-    def validate_conversion_safety(self, cif_content: str, target_version: CIFVersion) -> Dict:
-        """
-        Validate that a conversion can be performed safely without data loss.
-        
-        Args:
-            cif_content: CIF content to validate
-            target_version: Target version for conversion
-            
         Returns:
-            Dictionary with safety analysis
+            List of human-readable descriptions of found constructs, e.g.
+            ["list values [...]", "table values {...}", "triple-quoted strings"].
+            Empty list means the content has no CIF2-only syntax.
         """
-        current_version = self.dict_manager.detect_cif_version(cif_content)
-        warnings = []
-        errors = []
+        return self._detect_cif2_constructs_static(cif_content)
+
+    @staticmethod
+    def _detect_cif2_constructs_static(cif_content: str) -> List[str]:
+        """Static implementation of CIF2 construct detection.
         
-        # Check for potential data loss scenarios
-        if target_version == CIFVersion.CIF1:
-            # Converting to CIF1 might lose some CIF2 features
-            if current_version == CIFVersion.CIF2:
-                # Check for modern-only constructs (lists, tables, etc.)
-                if '[' in cif_content or '{' in cif_content:
-                    warnings.append("CIF2 list/table constructs detected - may not be compatible with CIF1")
-                
-                # Check for triple-quoted strings
-                if '"""' in cif_content or "'''" in cif_content:
-                    warnings.append("CIF2 triple-quoted strings detected - will be converted to text fields")
+        Detects CIF2-only constructs: list values ``[...]``, table values
+        ``{...}``, and triple-quoted strings.  Only matches ``[`` / ``{``
+        when they appear at the **start** of a CIF value position (after a
+        field name, or as the sole content of a continuation line inside a
+        loop), and when the bracket content looks like a genuine CIF2
+        construct rather than a chemical formula (e.g. ``[Cu(CN)2]``).
         
-        # Check for unknown field mappings
-        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)', re.MULTILINE)
-        unmapped_fields = []
+        A CIF2 list has multiple whitespace-separated items like ``[1 2 3]``,
+        while a chemical formula bracket is a single expression with no
+        whitespace between ``[`` and ``]``.
+        """
+        found = []
+        in_text_block = False
+        in_triple_single = False
+        in_triple_double = False
         
-        for match in field_pattern.finditer(cif_content):
-            field_name = match.group(2).lower()
+        for line in cif_content.split('\n'):
+            stripped = line.strip()
             
-            if target_version == CIFVersion.CIF2:
-                if field_name not in self.field_mappings and not '.' in field_name:
-                    # This might be an old field without a known mapping
-                    unmapped_fields.append(field_name)
-            elif target_version == CIFVersion.CIF1:
-                if field_name not in self.reverse_mappings and '.' in field_name:
-                    # This might be a CIF2 field without a CIF1 equivalent
-                    unmapped_fields.append(field_name)
+            # Track semicolon text blocks
+            if stripped.startswith(';') and not in_triple_single and not in_triple_double:
+                in_text_block = not in_text_block
+                continue
+            if in_text_block:
+                continue
+            
+            # Track triple-quoted strings
+            if '"""' in stripped or "'''" in stripped:
+                if '"""' in stripped:
+                    in_triple_double = not in_triple_double
+                if "'''" in stripped:
+                    in_triple_single = not in_triple_single
+            if in_triple_single or in_triple_double:
+                continue
+            
+            # Skip comment lines
+            if stripped.startswith('#'):
+                continue
+            
+            # Determine the value portion of this line.
+            value_part = None
+            if stripped.startswith('_'):
+                # Field line: value comes after the field name
+                parts = stripped.split(None, 1)
+                if len(parts) == 2:
+                    value_part = parts[1].strip()
+            elif not stripped.startswith('loop_') and not stripped.startswith('data_') and stripped:
+                # Continuation / loop-data line — entire line is value(s)
+                value_part = stripped
+            
+            if value_part is not None:
+                vp = value_part.lstrip()
+                if vp.startswith('[') and 'list values [...]' not in found:
+                    if CIFFormatConverter._looks_like_cif2_list(vp):
+                        found.append('list values [...]')
+                elif vp.startswith('{') and 'table values {...}' not in found:
+                    found.append('table values {...}')
+            
+            # Check for triple-quoted strings (opening)
+            if ('"""' in stripped or "'''" in stripped) and 'triple-quoted strings' not in found:
+                found.append('triple-quoted strings')
         
-        if unmapped_fields:
-            warnings.append(f"Fields without known mappings: {', '.join(set(unmapped_fields[:5]))}")
-            if len(unmapped_fields) > 5:
-                warnings.append(f"... and {len(unmapped_fields) - 5} more")
+        return found
+
+    @staticmethod
+    def _looks_like_cif2_list(value: str) -> bool:
+        """Check if a value starting with ``[`` is likely a CIF2 list.
         
-        return {
-            'safe': len(errors) == 0,
-            'warnings': warnings,
-            'errors': errors,
-            'current_version': current_version,
-            'target_version': target_version
-        }
+        Returns True if the bracket content contains whitespace-separated
+        items (e.g. ``[1 2 3]``), which distinguishes CIF2 lists from
+        chemical formulas like ``[Cu(CN)2]`` that have no top-level spaces.
+        """
+        # Find matching closing bracket
+        depth = 0
+        for i, ch in enumerate(value):
+            if ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    inner = value[1:i]
+                    # A CIF2 list has whitespace between items at the top level
+                    # Strip quotes to avoid matching spaces inside quoted strings
+                    # Simple check: is there whitespace in the bracket content?
+                    return bool(inner.strip()) and ' ' in inner.strip()
+        # Unclosed bracket — treat as CIF2 list (unusual CIF1)
+        return True
     
     def _remove_duplicate_aliases(self, cif_content: str) -> Tuple[str, List[str]]:
         """
         Remove duplicate field definitions that are aliases of each other.
-        Keeps the modern (CIF2) version and removes legacy aliases.
+        Keeps the modern version and removes legacy aliases.
         
         Important: This method respects text blocks (semicolon-delimited) and will NOT
         remove field-like text within blocks such as _iucr_refine_fcf_details.
@@ -628,26 +806,26 @@ class CIFFormatConverter:
             if field_match:
                 field_name = field_match.group(1)
                 
-                # Get canonical form (modern/CIF2 version)
-                cif2_equiv = self.dict_manager.get_cif2_equivalent(field_name)
-                if not cif2_equiv:
-                    cif2_equiv = field_name  # Use as-is if no mapping
+                # Get canonical form (modern version)
+                modern_equiv = self.dict_manager.map_to_modern(field_name)
+                if not modern_equiv:
+                    modern_equiv = field_name  # Use as-is if no mapping
                 
                 # Check if we've seen this canonical field before
-                if cif2_equiv in seen_fields:
-                    prev_line, prev_field = seen_fields[cif2_equiv]
+                if modern_equiv in seen_fields:
+                    prev_line, prev_field = seen_fields[modern_equiv]
                     # Determine which one to keep (prefer modern notation)
                     if '.' in field_name and '.' not in prev_field:
                         # Current is modern, previous is legacy - remove previous
                         lines_to_remove.add(prev_line)
-                        seen_fields[cif2_equiv] = (i, field_name)
+                        seen_fields[modern_equiv] = (i, field_name)
                         changes.append(f"Removed duplicate legacy field {prev_field} (kept modern {field_name})")
                     else:
                         # Previous is modern or both same format - remove current
                         lines_to_remove.add(i)
                         changes.append(f"Removed duplicate field {field_name} (kept {prev_field})")
                 else:
-                    seen_fields[cif2_equiv] = (i, field_name)
+                    seen_fields[modern_equiv] = (i, field_name)
         
         # Second pass: rebuild content without removed lines
         cleaned_lines = [line for i, line in enumerate(lines) if i not in lines_to_remove]
@@ -720,12 +898,15 @@ class CIFFormatConverter:
                     # The modern replacement exists, so the deprecated field will be
                     # added to the deprecated section. Don't add it to main section.
                     continue
-                # If no modern replacement exists, fall through to normal handling
+                # Even without a modern replacement, if the deprecated field is already
+                # present in the file, skip it to avoid duplication with the deprecated section
+                if legacy_field in existing_fields:
+                    continue
             
             legacy_present = legacy_field in existing_fields
             
             # Find if there's a modern version of this field
-            modern_equiv = self.dict_manager.get_cif2_equivalent(legacy_field)
+            modern_equiv = self.dict_manager.map_to_modern(legacy_field)
             modern_present = modern_equiv and modern_equiv in existing_fields
             
             if modern_present and not legacy_present:

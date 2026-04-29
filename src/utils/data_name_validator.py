@@ -365,7 +365,7 @@ class DataNameValidator:
                         if result.modern_equivalent:
                             successor = result.modern_equivalent
                             if prefer_legacy:
-                                legacy = self.dict_manager.get_cif1_equivalent(result.modern_equivalent)
+                                legacy = self.dict_manager.map_to_legacy(result.modern_equivalent)
                                 if legacy:
                                     successor = legacy
                             result.successor_name = successor

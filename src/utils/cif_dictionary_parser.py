@@ -8,31 +8,10 @@ Handles both single-line and loop-based alias definitions.
 
 import re
 import os
-import sys
 from typing import Dict, List, Set, Optional, Tuple, NamedTuple, Any
 from pathlib import Path
 from dataclasses import dataclass
-
-
-def get_resource_path(relative_path: str) -> str:
-    """
-    Get the absolute path to a resource file.
-    Works in both development and PyInstaller environments.
-    
-    Args:
-        relative_path: Relative path to the resource file
-        
-    Returns:
-        Absolute path to the resource file
-    """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except AttributeError:
-        # Development environment - use the project root
-        base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    
-    return os.path.join(base_path, relative_path)
+from .user_config import get_bundled_resource_path
 
 
 class FieldAlias(NamedTuple):
@@ -49,7 +28,7 @@ class FieldAlias(NamedTuple):
 @dataclass
 class FieldMetadata:
     """Complete metadata for a CIF dictionary field"""
-    definition_id: str  # The canonical CIF2 field name (_definition.id)
+    definition_id: str  # The canonical modern field name (_definition.id)
     aliases: List[FieldAlias]  # All aliases including deprecated ones
     type_contents: Optional[str] = None  # _type.contents (Text, Real, Integer, Code, etc.)
     type_purpose: Optional[str] = None  # _type.purpose (Describe, Measurand, State, etc.)
@@ -83,11 +62,11 @@ class CIFDictionaryParser:
     def __init__(self, cif_core_path: Optional[str] = None):
         if cif_core_path is None:
             # Use resource path function to find bundled dictionary
-            cif_core_path = get_resource_path("dictionaries/cif_core.dic")
+            cif_core_path = str(get_bundled_resource_path("dictionaries/cif_core.dic"))
         
         self.cif_core_path = Path(cif_core_path)
-        self._cif1_to_cif2: Optional[Dict[str, str]] = None
-        self._cif2_to_cif1: Optional[Dict[str, List[str]]] = None
+        self._legacy_to_modern: Optional[Dict[str, str]] = None
+        self._modern_to_legacy: Optional[Dict[str, List[str]]] = None
         self._deprecated_fields: Set[str] = set()  # Track deprecated fields
         self._replaced_fields: Set[str] = set()  # Track replaced/obsolete fields
         self._field_aliases: Dict[str, List[FieldAlias]] = {}  # Track all aliases with deprecation info
@@ -111,15 +90,15 @@ class CIFDictionaryParser:
             Tuple of (cif1_to_cif2_mapping, cif2_to_cif1_mapping)
         """
         if self._parsed:
-            return self._cif1_to_cif2, self._cif2_to_cif1
+            return self._legacy_to_modern, self._modern_to_legacy
             
         print("Parsing CIF core dictionary...")
         
         if not self.cif_core_path.exists():
             raise FileNotFoundError(f"CIF core dictionary not found at: {self.cif_core_path}")
             
-        self._cif1_to_cif2 = {}
-        self._cif2_to_cif1 = {}
+        self._legacy_to_modern = {}
+        self._modern_to_legacy = {}
         self._deprecated_fields = set()
         self._replaced_fields = set()
         self._field_aliases = {}
@@ -135,11 +114,11 @@ class CIFDictionaryParser:
         self._parse_save_blocks(content)
         
         self._parsed = True
-        print(f"Parsed {len(self._cif1_to_cif2)} field mappings from CIF core dictionary")
+        print(f"Parsed {len(self._legacy_to_modern)} field mappings from CIF core dictionary")
         print(f"Found {len(self._deprecated_fields)} deprecated fields")
         print(f"Found {len(self._replaced_fields)} replaced/obsolete fields")
         
-        return self._cif1_to_cif2, self._cif2_to_cif1
+        return self._legacy_to_modern, self._modern_to_legacy
         
     def _parse_save_blocks(self, content: str) -> None:
         """Parse all save blocks to extract field definitions and aliases"""
@@ -164,12 +143,12 @@ class CIFDictionaryParser:
     def _parse_field_block(self, save_name: str, block_content: str) -> None:
         """Parse a field definition block to extract complete field metadata"""
         
-        # Extract the main definition ID (this is the CIF2 field name)
+        # Extract the main definition ID (this is the modern field name)
         def_id_match = re.search(r"_definition\.id\s+'([^']+)'", block_content)
         if not def_id_match:
             return
             
-        cif2_field = def_id_match.group(1)
+        modern_field = def_id_match.group(1)
         
         # Extract metadata
         type_contents = self._extract_field_value(block_content, '_type.contents')
@@ -184,7 +163,7 @@ class CIFDictionaryParser:
         replacement_field = None
 
         if is_replaced:
-            self._replaced_fields.add(cif2_field)
+            self._replaced_fields.add(modern_field)
             
             # Try to extract replacement field - handle both single value and loop formats
             # Format 1: Single quoted value: _definition_replaced.by 'field_name'
@@ -211,7 +190,7 @@ class CIFDictionaryParser:
         
         # Create comprehensive metadata object
         metadata = FieldMetadata(
-            definition_id=cif2_field,
+            definition_id=modern_field,
             aliases=aliases,
             type_contents=type_contents,
             type_purpose=type_purpose,
@@ -228,13 +207,13 @@ class CIFDictionaryParser:
         )
         
         # Store metadata
-        self._field_metadata[cif2_field] = metadata
-        self._field_aliases[cif2_field] = aliases
+        self._field_metadata[modern_field] = metadata
+        self._field_aliases[modern_field] = aliases
         
         # Add definition_id to known fields index
-        self._all_known_fields.add(cif2_field)
-        self._all_known_fields_lower.add(cif2_field.lower())
-        self._alias_to_definition[cif2_field.lower()] = cif2_field
+        self._all_known_fields.add(modern_field)
+        self._all_known_fields_lower.add(modern_field.lower())
+        self._alias_to_definition[modern_field.lower()] = modern_field
         
         # Process aliases for comprehensive indexing
         for alias_info in aliases:
@@ -242,34 +221,34 @@ class CIFDictionaryParser:
                 # Add to all known fields (regardless of deprecation)
                 self._all_known_fields.add(alias_info.name)
                 self._all_known_fields_lower.add(alias_info.name.lower())
-                self._alias_to_definition[alias_info.name.lower()] = cif2_field
+                self._alias_to_definition[alias_info.name.lower()] = modern_field
                 
                 if alias_info.is_deprecated or is_replaced:
                     self._deprecated_fields.add(alias_info.name)
         
         # Maintain backward compatibility with existing mapping system
         if is_replaced:
-            target_field = replacement_field.lower() if replacement_field else cif2_field.lower()
+            target_field = replacement_field.lower() if replacement_field else modern_field.lower()
             for alias_info in aliases:
                 if alias_info.name:
                     alias_lower = alias_info.name.lower()
-                    self._cif1_to_cif2[alias_lower] = target_field
-                    if target_field not in self._cif2_to_cif1:
-                        self._cif2_to_cif1[target_field] = []
-                    if alias_lower not in self._cif2_to_cif1[target_field]:
-                        self._cif2_to_cif1[target_field].append(alias_lower)
+                    self._legacy_to_modern[alias_lower] = target_field
+                    if target_field not in self._modern_to_legacy:
+                        self._modern_to_legacy[target_field] = []
+                    if alias_lower not in self._modern_to_legacy[target_field]:
+                        self._modern_to_legacy[target_field].append(alias_lower)
         else:
             # Add mappings for all aliases (including deprecated ones)
             # This is necessary for format conversion to work properly
             for alias_info in aliases:
-                if alias_info.name and alias_info.name != cif2_field:
+                if alias_info.name and alias_info.name != modern_field:
                     alias_lower = alias_info.name.lower()
-                    cif2_lower = cif2_field.lower()
-                    self._cif1_to_cif2[alias_lower] = cif2_lower
-                    if cif2_lower not in self._cif2_to_cif1:
-                        self._cif2_to_cif1[cif2_lower] = []
-                    if alias_lower not in self._cif2_to_cif1[cif2_lower]:
-                        self._cif2_to_cif1[cif2_lower].append(alias_lower)
+                    modern_lower = modern_field.lower()
+                    self._legacy_to_modern[alias_lower] = modern_lower
+                    if modern_lower not in self._modern_to_legacy:
+                        self._modern_to_legacy[modern_lower] = []
+                    if alias_lower not in self._modern_to_legacy[modern_lower]:
+                        self._modern_to_legacy[modern_lower].append(alias_lower)
     
     def _extract_field_value(self, block_content: str, field_name: str) -> Optional[str]:
         """
@@ -417,34 +396,34 @@ class CIFDictionaryParser:
         
         return field_lower in deprecated_lower or field_lower in replaced_lower
         
-    def get_field_aliases_info(self, cif2_field: str) -> List[FieldAlias]:
-        """Get all alias information for a CIF2 field including deprecation status"""
+    def get_field_aliases_info(self, modern_field: str) -> List[FieldAlias]:
+        """Get all alias information for a modern field including deprecation status"""
         if not self._parsed:
             self.parse_dictionary()
-        return self._field_aliases.get(cif2_field, [])
+        return self._field_aliases.get(modern_field, [])
         
-    def get_non_deprecated_aliases(self, cif2_field: str) -> List[str]:
-        """Get only non-deprecated aliases for a CIF2 field"""
+    def get_non_deprecated_aliases(self, modern_field: str) -> List[str]:
+        """Get only non-deprecated aliases for a modern field"""
         if not self._parsed:
             self.parse_dictionary()
-        aliases_info = self._field_aliases.get(cif2_field, [])
+        aliases_info = self._field_aliases.get(modern_field, [])
         return [alias.name for alias in aliases_info if not alias.is_deprecated]
         
-    def get_cif2_field(self, cif1_field: str) -> Optional[str]:
-        """Get the CIF2 field name for a CIF1 field"""
+    def get_modern_field(self, legacy_field: str) -> Optional[str]:
+        """Get the modern field name for a legacy field"""
         if not self._parsed:
             self.parse_dictionary()
-        return self._cif1_to_cif2.get(cif1_field)
+        return self._legacy_to_modern.get(legacy_field)
         
-    def get_cif1_field(self, cif2_field: str) -> Optional[str]:
-        """Get the primary CIF1 field name for a CIF2 field (first non-deprecated alias without dots)"""
+    def get_legacy_field(self, modern_field: str) -> Optional[str]:
+        """Get the primary legacy field name for a modern field (first non-deprecated alias without dots)"""
         if not self._parsed:
             self.parse_dictionary()
             
         # Get only non-deprecated aliases
-        aliases = self.get_non_deprecated_aliases(cif2_field)
+        aliases = self.get_non_deprecated_aliases(modern_field)
         
-        # Find the first alias without dots (CIF1 format)
+        # Find the first alias without dots (legacy format)
         for alias in aliases:
             if '.' not in alias:
                 return alias
@@ -711,16 +690,16 @@ if __name__ == "__main__":
             ('_atom_site_fract_x', 'Expected: _atom_site.fract_x'),
         ]
         
-        print("\nTesting CIF1 -> CIF2 conversions:")
+        print("\nTesting Legacy -> Modern conversions:")
         print("-" * 70)
-        for cif1_field, expected in test_fields:
-            cif2_field = parser.get_cif2_field(cif1_field)
-            print(f"{cif1_field:25} -> {cif2_field or 'NOT FOUND':25} | {expected}")
+        for legacy_field, expected in test_fields:
+            modern_field = parser.get_modern_field(legacy_field)
+            print(f"{legacy_field:25} -> {modern_field or 'NOT FOUND':25} | {expected}")
         
         print(f"\nTesting reverse conversions:")
         print("-" * 70)
-        print(f"_geom_torsion.angle -> {parser.get_cif1_field('_geom_torsion.angle')}")
-        print(f"_cell.length_a -> {parser.get_cif1_field('_cell.length_a')}")
+        print(f"_geom_torsion.angle -> {parser.get_legacy_field('_geom_torsion.angle')}")
+        print(f"_cell.length_a -> {parser.get_legacy_field('_cell.length_a')}")
         
         # Test new comprehensive lookup functionality
         print(f"\n\nTesting comprehensive field lookup (is_known_field):")
@@ -728,8 +707,8 @@ if __name__ == "__main__":
         
         # Test with definition_id
         test_cases = [
-            '_diffrn.ambient_temperature',  # CIF2 definition_id
-            '_diffrn_ambient_temperature',  # CIF1 alias
+            '_diffrn.ambient_temperature',  # modern definition_id
+            '_diffrn_ambient_temperature',  # legacy alias
             '_diffrn_ambient_temp',  # Another alias
             '_diffrn.ambient_temp',  # Yet another alias
             '_diffrn_radiation_detector',  # Deprecated alias
@@ -791,7 +770,7 @@ if __name__ == "__main__":
         
         print(f"\n\nParser Statistics:")
         print("-" * 70)
-        print(f"Total CIF1 -> CIF2 mappings: {len(cif1_to_cif2)}")
+        print(f"Total Legacy -> Modern mappings: {len(cif1_to_cif2)}")
         print(f"Total CIF2 definitions: {len(cif2_to_cif1)}")
         print(f"Total known fields (all): {len(parser._all_known_fields)}")
         print(f"Total with complete metadata: {len(parser._field_metadata)}")

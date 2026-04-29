@@ -26,16 +26,32 @@ class CIFField:
     represents field definition templates for validation.
     """
     
+    # Value type constants
+    TYPE_REGULAR = "regular"
+    TYPE_LIST = "list"       # CIF2 list: [val1 val2 ...]
+    TYPE_TABLE = "table"     # CIF2 table: {"key": val ...}
+
     def __init__(self, name: str, value: Any = None, is_multiline: bool = False, 
-                 line_number: int = None, raw_lines: List[str] = None):
+                 line_number: int = None, raw_lines: List[str] = None,
+                 value_type: str = None):
         self.name = name
         self.value = value
         self.is_multiline = is_multiline
         self.line_number = line_number  # Starting line number in the file
         self.raw_lines = raw_lines or []  # Original lines from the file
+        self.value_type = value_type or self.TYPE_REGULAR
     
+    @property
+    def is_list(self) -> bool:
+        return self.value_type == self.TYPE_LIST
+
+    @property
+    def is_table(self) -> bool:
+        return self.value_type == self.TYPE_TABLE
+
     def __repr__(self):
-        return f"CIFField(name='{self.name}', value='{self.value}', multiline={self.is_multiline})"
+        extra = f", type={self.value_type}" if self.value_type != self.TYPE_REGULAR else ""
+        return f"CIFField(name='{self.name}', value='{self.value}', multiline={self.is_multiline}{extra})"
 
 
 class CIFLoop:
@@ -375,14 +391,15 @@ class CIFParser:
                     continue
                 
                 # Normal field parsing
-                field_name, value, lines_consumed = self._parse_field(lines, i)
+                field_name, value, lines_consumed, value_type = self._parse_field(lines, i)
                 if field_name:
                     field = CIFField(
                         name=field_name,
                         value=value,
                         is_multiline=self._is_multiline_value(value),
                         line_number=i + 1,
-                        raw_lines=lines[i:i+lines_consumed]
+                        raw_lines=lines[i:i+lines_consumed],
+                        value_type=value_type,
                     )
                     self.fields[field_name] = field
                     self.content_blocks.append({'type': 'field', 'content': field})
@@ -566,18 +583,19 @@ class CIFParser:
         lines_consumed = i - start_index
         return multiline_value, lines_consumed
     
-    def _parse_field(self, lines: List[str], start_index: int) -> Tuple[str, str, int]:
+    def _parse_field(self, lines: List[str], start_index: int) -> Tuple[str, str, int, str]:
         """Parse a single field starting at the given line index.
         
         Returns:
-            Tuple of (field_name, value, lines_consumed)
+            Tuple of (field_name, value, lines_consumed, value_type)
+            value_type is one of CIFField.TYPE_REGULAR, TYPE_LIST, TYPE_TABLE.
         """
         line = lines[start_index].strip()
         
         # Parse field name
         parts = line.split(maxsplit=1)
         if not parts or not parts[0].startswith('_'):
-            return None, None, 1
+            return None, None, 1, CIFField.TYPE_REGULAR
         
         field_name = parts[0]
         
@@ -588,18 +606,32 @@ class CIFParser:
             # Check if it's a quoted string
             if (value_part.startswith("'") and value_part.endswith("'")) or \
                (value_part.startswith('"') and value_part.endswith('"')):
-                return field_name, value_part[1:-1], 1
+                return field_name, value_part[1:-1], 1, CIFField.TYPE_REGULAR
             
             # Check if it starts a multiline block
             if value_part == ';':
-                return self._parse_multiline_value(lines, start_index + 1, field_name)
+                name, val, consumed = self._parse_multiline_value(lines, start_index + 1, field_name)
+                return name, val, consumed, CIFField.TYPE_REGULAR
             
             # Check if content starts on same line as opening semicolon (;content...)
             if value_part.startswith(';') and len(value_part) > 1:
-                return self._parse_multiline_value_with_content_on_first_line(lines, start_index, field_name)
+                name, val, consumed = self._parse_multiline_value_with_content_on_first_line(lines, start_index, field_name)
+                return name, val, consumed, CIFField.TYPE_REGULAR
             
+            # CIF2 list value: starts with [
+            if value_part.startswith('['):
+                val, consumed, vtype = self._parse_bracket_value(
+                    lines, start_index, value_part, '[', ']', CIFField.TYPE_LIST)
+                return field_name, val, consumed, vtype
+
+            # CIF2 table value: starts with {
+            if value_part.startswith('{'):
+                val, consumed, vtype = self._parse_bracket_value(
+                    lines, start_index, value_part, '{', '}', CIFField.TYPE_TABLE)
+                return field_name, val, consumed, vtype
+
             # Regular single-line value
-            return field_name, value_part, 1
+            return field_name, value_part, 1, CIFField.TYPE_REGULAR
         
         # Value might be on the next line(s)
         if start_index + 1 < len(lines):
@@ -607,22 +639,134 @@ class CIFParser:
             
             # Check if next line starts multiline block
             if next_line == ';':
-                return self._parse_multiline_value(lines, start_index + 2, field_name)
+                name, val, consumed = self._parse_multiline_value(lines, start_index + 2, field_name)
+                return name, val, consumed, CIFField.TYPE_REGULAR
             
             # Check if next line contains content starting with semicolon (;content...)
             if next_line.startswith(';') and len(next_line) > 1:
-                return self._parse_multiline_value_with_content_on_first_line(lines, start_index + 1, field_name)
+                name, val, consumed = self._parse_multiline_value_with_content_on_first_line(lines, start_index + 1, field_name)
+                return name, val, consumed, CIFField.TYPE_REGULAR
             
+            # CIF2 list on next line
+            if next_line.startswith('['):
+                val, consumed, vtype = self._parse_bracket_value(
+                    lines, start_index + 1, next_line, '[', ']', CIFField.TYPE_LIST)
+                return field_name, val, consumed + 1, vtype  # +1 for field name line
+
+            # CIF2 table on next line
+            if next_line.startswith('{'):
+                val, consumed, vtype = self._parse_bracket_value(
+                    lines, start_index + 1, next_line, '{', '}', CIFField.TYPE_TABLE)
+                return field_name, val, consumed + 1, vtype  # +1 for field name line
+
             # Single line value on next line
             if next_line and not next_line.startswith('_'):
                 # Handle quoted values
                 if (next_line.startswith("'") and next_line.endswith("'")) or \
                    (next_line.startswith('"') and next_line.endswith('"')):
-                    return field_name, next_line[1:-1], 2
-                return field_name, next_line, 2
+                    return field_name, next_line[1:-1], 2, CIFField.TYPE_REGULAR
+                return field_name, next_line, 2, CIFField.TYPE_REGULAR
         
         # No value found
-        return field_name, None, 1
+        return field_name, None, 1, CIFField.TYPE_REGULAR
+
+    def _parse_bracket_value(
+        self, lines: List[str], start_index: int, first_value: str,
+        open_char: str, close_char: str, value_type: str,
+    ) -> Tuple[str, int, str]:
+        """Parse a CIF2 list ([...]) or table ({...}) value that may span multiple lines.
+        
+        Handles nesting, quoted strings inside brackets, and multi-line constructs.
+        
+        Args:
+            lines: All content lines
+            start_index: Index of the line where the bracket value begins
+            first_value: The text after the field name (may be the entire value)
+            open_char: Opening bracket character ('[' or '{')
+            close_char: Closing bracket character (']' or '}')
+            value_type: CIFField.TYPE_LIST or CIFField.TYPE_TABLE
+            
+        Returns:
+            Tuple of (collected_value, lines_consumed, value_type)
+        """
+        depth = 0
+        collected = []
+        in_single_quote = False
+        in_double_quote = False
+        
+        # Start from the line that contains the opening bracket
+        i = start_index
+        # The first_value is the rest-of-line after the field name.
+        # We need to scan from start_index onwards.
+        # On the first line, only the value portion (first_value) is relevant,
+        # but we want the raw line for multi-line reconstruction.
+        
+        while i < len(lines):
+            if i == start_index:
+                # Use the portion after the field name for scanning
+                scan_text = first_value
+            else:
+                scan_text = lines[i]
+            
+            # Scan character by character for bracket depth
+            j = 0
+            while j < len(scan_text):
+                ch = scan_text[j]
+                
+                # Handle quoted strings (skip their content)
+                if ch in ("'", '"') and not in_single_quote and not in_double_quote:
+                    # Check triple quote
+                    if j + 2 < len(scan_text) and scan_text[j:j+3] in ("'''", '"""'):
+                        triple = scan_text[j:j+3]
+                        end = scan_text.find(triple, j + 3)
+                        if end != -1:
+                            j = end + 3
+                            continue
+                    # Single/double quote
+                    if ch == "'":
+                        in_single_quote = True
+                    else:
+                        in_double_quote = True
+                    j += 1
+                    continue
+                
+                if in_single_quote:
+                    if ch == "'":
+                        in_single_quote = False
+                    j += 1
+                    continue
+                    
+                if in_double_quote:
+                    if ch == '"':
+                        in_double_quote = False
+                    j += 1
+                    continue
+                
+                if ch == open_char:
+                    depth += 1
+                elif ch == close_char:
+                    depth -= 1
+                    if depth == 0:
+                        # Closing bracket found
+                        if i == start_index:
+                            collected.append(first_value)
+                        else:
+                            collected.append(lines[i])
+                        value = '\n'.join(collected)
+                        lines_consumed = i - start_index + 1
+                        return value, lines_consumed, value_type
+                j += 1
+            
+            # Didn't close on this line; accumulate
+            if i == start_index:
+                collected.append(first_value)
+            else:
+                collected.append(lines[i])
+            i += 1
+        
+        # Reached end of file without finding closing bracket — return what we have
+        value = '\n'.join(collected)
+        return value, len(lines) - start_index, value_type
     
     def _parse_multiline_value(self, lines: List[str], start_index: int, field_name: str) -> Tuple[str, str, int]:
         """Parse a multiline value starting after the opening semicolon."""
@@ -1298,18 +1442,41 @@ def update_audit_creation_method(content: str, cif_format: str = None) -> str:
     field_line_index, is_multiline, found_field_name = _find_audit_field(lines, method_fields)
     
     if field_line_index >= 0:
-        # Check if CIVET already present in this field
+        # Check if CIVET already present in this field — if so, update to current version
+        civet_line_stripped = civet_signature.strip()
         in_field = False
         for i, line in enumerate(lines):
             if i == field_line_index:
                 # Check single-line value
                 if 'civet' in line.lower():
+                    # Replace inline CIVET reference with current version
+                    pattern = rf'^({re.escape(found_field_name)}\s+)(.+)$'
+                    match = re.match(pattern, line, re.IGNORECASE)
+                    if match:
+                        old_value = match.group(2).strip().strip("'\"")
+                        updated_value = re.sub(
+                            r'CIVET\s+v[\d.]+\s*\([^)]*\)',
+                            civet_line_stripped,
+                            old_value
+                        )
+                        if updated_value != old_value:
+                            lines[i] = f"{found_field_name} '{updated_value}'"
+                            return '\n'.join(lines)
                     return content
                 in_field = True
             elif in_field:
                 if line.strip() == ';' and i > field_line_index + 1:
                     break  # End of multiline
                 if 'civet' in line.lower():
+                    # Replace existing CIVET line with current signature
+                    updated_line = re.sub(
+                        r'CIVET\s+v[\d.]+\s*\([^)]*\)',
+                        civet_line_stripped,
+                        line
+                    )
+                    if updated_line != line:
+                        lines[i] = updated_line
+                        return '\n'.join(lines)
                     return content
                 if not is_multiline:
                     break  # Single line, stop after checking

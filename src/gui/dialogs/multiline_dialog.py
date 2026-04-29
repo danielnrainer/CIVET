@@ -2,12 +2,10 @@
 
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
 from PyQt6.QtCore import Qt
+from . import RESULT_ABORT, RESULT_STOP_SAVE
 
 
 class MultilineInputDialog(QDialog):
-    # Define result codes as class attributes
-    RESULT_ABORT = 2  # User wants to abort all changes
-    RESULT_STOP_SAVE = 3  # User wants to stop but save changes
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
     def __init__(self, text="", parent=None, context_text="", default_value=None, operation_type="edit"):
@@ -87,10 +85,10 @@ class MultilineInputDialog(QDialog):
         return self.textEdit.toPlainText()
         
     def abort_changes(self):
-        self.done(self.RESULT_ABORT)
+        self.done(RESULT_ABORT)
         
     def stop_and_save(self):
-        self.done(self.RESULT_STOP_SAVE)
+        self.done(RESULT_STOP_SAVE)
     
     def use_default(self):
         self.done(self.RESULT_USE_DEFAULT)

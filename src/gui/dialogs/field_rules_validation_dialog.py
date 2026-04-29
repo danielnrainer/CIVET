@@ -274,15 +274,15 @@ class FieldRulesValidationDialog(QDialog):
         
         self.format_button_group = QButtonGroup()
         
-        self.cif1_radio = QRadioButton("Legacy format (e.g., _cell_length_a)")
-        self.cif1_radio.setToolTip("Convert mixed formats to legacy style with underscores")
-        self.format_button_group.addButton(self.cif1_radio, 1)
-        format_layout.addWidget(self.cif1_radio)
+        self.legacy_radio = QRadioButton("Legacy format (e.g., _cell_length_a)")
+        self.legacy_radio.setToolTip("Convert mixed formats to legacy style with underscores")
+        self.format_button_group.addButton(self.legacy_radio, 1)
+        format_layout.addWidget(self.legacy_radio)
         
-        self.cif2_radio = QRadioButton("Modern format (e.g., _cell.length_a)")
-        self.cif2_radio.setToolTip("Convert mixed formats to modern style with dots")
-        self.format_button_group.addButton(self.cif2_radio, 2)
-        format_layout.addWidget(self.cif2_radio)
+        self.modern_radio = QRadioButton("Modern format (e.g., _cell.length_a)")
+        self.modern_radio.setToolTip("Convert mixed formats to modern style with dots")
+        self.format_button_group.addButton(self.modern_radio, 2)
+        format_layout.addWidget(self.modern_radio)
         
         format_layout.addStretch()
         header_layout.addWidget(format_selection_frame)
@@ -379,26 +379,26 @@ class FieldRulesValidationDialog(QDialog):
         layout.addWidget(buttons_group)
         
         # Connect radio button signals after UI is fully set up
-        self.cif1_radio.toggled.connect(self.on_format_changed)
-        self.cif2_radio.toggled.connect(self.on_format_changed)
+        self.legacy_radio.toggled.connect(self.on_format_changed)
+        self.modern_radio.toggled.connect(self.on_format_changed)
         
         # Set default format based on validation result or analyze rules content
         if hasattr(self.validation_result, 'target_format_used'):
             if self.validation_result.target_format_used == "legacy":
-                self.cif1_radio.setChecked(True)
+                self.legacy_radio.setChecked(True)
             else:
-                self.cif2_radio.setChecked(True)
+                self.modern_radio.setChecked(True)
         else:
             # Analyze the provided rules content to choose a sensible default
             try:
                 rules_format = CIFFormatAnalyzer.analyze_cif_format(self.field_rules_content)
                 if rules_format == "legacy":
-                    self.cif1_radio.setChecked(True)
+                    self.legacy_radio.setChecked(True)
                 else:
-                    self.cif2_radio.setChecked(True)
+                    self.modern_radio.setChecked(True)
             except Exception:
                 # Fallback if analysis fails
-                self.cif2_radio.setChecked(True)
+                self.modern_radio.setChecked(True)
         
         self.setLayout(layout)
         
@@ -642,15 +642,15 @@ class FieldRulesValidationDialog(QDialog):
         if (hasattr(self, 'validation_result') and hasattr(self, 'field_rules_content') and 
             hasattr(self, 'validator') and hasattr(self, 'issues_tree')):
             # Re-run validation with the new target format
-            target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
+            target_format = "modern" if self.modern_radio.isChecked() else "legacy"
             
             # TEMPORARY: Show warning when selecting modern format
             if target_format == "modern":
                 if not show_modern_format_warning(self, "field rules validation"):
                     # User chose to use legacy instead - switch back
-                    self.cif1_radio.blockSignals(True)
-                    self.cif1_radio.setChecked(True)
-                    self.cif1_radio.blockSignals(False)
+                    self.legacy_radio.blockSignals(True)
+                    self.legacy_radio.setChecked(True)
+                    self.legacy_radio.blockSignals(False)
                     return
             
             # Create a new validation result with the new target format
@@ -753,7 +753,7 @@ class FieldRulesValidationDialog(QDialog):
             
             if fixable_issues:
                 # Determine target format from radio buttons
-                target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
+                target_format = "modern" if self.modern_radio.isChecked() else "legacy"
                 
                 self.fixed_content, self.changes_made = self.validator.apply_automatic_fixes(
                     self.field_rules_content, fixable_issues, target_format=target_format
@@ -798,7 +798,7 @@ class FieldRulesValidationDialog(QDialog):
             current_content = self.manual_editor.toPlainText()
             
             # Determine target format from radio buttons
-            target_format = "modern" if self.cif2_radio.isChecked() else "legacy"
+            target_format = "modern" if self.modern_radio.isChecked() else "legacy"
             
             # Apply fixes with selected format
             fixed_content, changes_made = self.validator.apply_automatic_fixes(

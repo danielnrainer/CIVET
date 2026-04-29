@@ -36,6 +36,8 @@ class EditorSettingsDialog(QDialog):
         ('loop_keyword', 'loop_ keyword'),
         ('loop_field', 'Loop field names'),
         ('loop_data', 'Loop data values'),
+        ('list_bracket', 'List brackets'),
+        ('table_brace', 'Table braces'),
     ]
     
     def __init__(self, parent=None, on_settings_changed=None):

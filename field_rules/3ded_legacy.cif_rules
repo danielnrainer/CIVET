@@ -61,12 +61,13 @@ _diffrn_measurement_specimen_support  'continuous carbon coated copper TEM grid,
 
 # _exptl.special_details: holder make and T-control if applicable (lack of different CIF field)
 _exptl.special_details  'JEOL TEM holder with high-tilt retainer'
-_exptl.special_details  'Gatan Elsa cryo-transfer holder model 698. Temperature controller model 1905'
-_exptl.special_details  'SimpleOrigin Model 217 variable temperature dual grid cryo transfer holder. Temperature controller model 300'
-_exptl.special_details  'SimpleOrigin Model 216 variable temperature cryogenic inert gas/vacuum transfer holder. Temperature controller model 300'
+_exptl.special_details  'Gatan Elsa cryo-transfer holder, model 698. Temperature controller model 1905'
+_exptl.special_details  'Simple Origin variable temperature dual grid cryogenic transfer holder, model 217. Temperature controller model 300'
+_exptl.special_details  'Simple Origin variable temperature cryogenic inert gas/vacuum transfer holder, model 216. Temperature controller model 300'
 
 # _exptl_crystal_preparation: Sample preparation method
 _exptl_crystal_preparation  'sample ground between glass slides, grid dabbed in solid'
+_exptl_crystal_preparation  'grid shaken in sample vial'
 _exptl_crystal_preparation  'sample ground with mortar and pestle, grid dabbed in solid'
 _exptl_crystal_preparation  'suspension in ethanol, sonicate for 5 min, dropcast on grid, evaporate in air at rt'
 
@@ -80,7 +81,8 @@ _diffrn_source.ed_diffracting_area_selection  SAED  # options: SAED, probe
 _diffrn_measurement.rotation_mode  rotation  # options: rotation, stepwise
 
 # _refine.diffraction_theory: Theory used for structure refinement
-_refine.diffraction_theory  kinematical  # options: kinematical, dynamical
+_refine.diffraction_theory  kinematical
+_refine.diffraction_theory  dynamical
 
 # _refine.diffraction_theory_details: free text to f.ex. state refined parameters during dynamical refinement 
 _refine.diffraction_theory_details  ?

@@ -141,24 +141,39 @@ class DictionarySuggestionManager:
     
     def _extract_fields_excluding_text_blocks(self, cif_content: str) -> Set[str]:
         """
-        Extract field names from CIF content, excluding those within text blocks.
+        Extract field names from CIF content, excluding those within text blocks
+        and comment lines.
         
         Args:
             cif_content: CIF file content as string
             
         Returns:
-            Set of field names found outside text blocks
+            Set of field names found outside text blocks and comments
         """
-        # Remove text blocks (semicolon-delimited content) first
-        text_block_pattern = r';[^;]*?;'
-        content_without_text_blocks = re.sub(text_block_pattern, '', cif_content, flags=re.DOTALL)
+        fields = set()
+        in_text_block = False
+        field_pattern = re.compile(r'(_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*)')
         
-        # Extract all field names using regex
-        field_pattern = r'(_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*)'
-        field_matches = re.findall(field_pattern, content_without_text_blocks)
+        for line in cif_content.split('\n'):
+            stripped = line.strip()
+            
+            # Track semicolon text block boundaries (`;` at start of line)
+            if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
+                in_text_block = not in_text_block
+                continue
+            
+            if in_text_block:
+                continue
+            
+            # Skip comment lines
+            if stripped.startswith('#'):
+                continue
+            
+            # Extract field names from this line
+            for match in field_pattern.finditer(line):
+                fields.add(match.group(1))
         
-        # Return unique fields as a set
-        return set(field_matches)
+        return fields
     
     def detect_cif_format(self, cif_content: str) -> str:
         """
