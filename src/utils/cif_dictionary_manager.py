@@ -842,7 +842,38 @@ class CIFDictionaryManager:
         # As a fallback, directly search the dictionary file
         # This handles cases where fields exist but aren't in the parsed mappings
         return self._search_field_in_dictionary_file(field_name)
-    
+
+    def get_field_metadata(self, field_name: str):
+        """Return the FieldMetadata for *field_name*, searching all active parsers.
+
+        The lookup is case-insensitive and resolves aliases (legacy ↔ modern).
+        Returns None if the field is not found in any loaded dictionary.
+        """
+        from .cif_dictionary_parser import FieldMetadata  # avoid circular at module level
+        self._ensure_loaded()
+        key = field_name.lower().strip()
+
+        # Primary parser
+        def_id = self.parser._alias_to_definition.get(key)
+        if def_id:
+            meta = self.parser._field_metadata.get(def_id)
+            if meta:
+                return meta
+
+        # Additional / DDL1 parsers
+        for i, parser in enumerate(self._additional_parsers):
+            dict_idx = i + 1
+            if dict_idx < len(self._dictionary_infos) and not self._dictionary_infos[dict_idx].is_active:
+                continue
+            if hasattr(parser, '_alias_to_definition'):
+                def_id = parser._alias_to_definition.get(key)
+                if def_id and hasattr(parser, '_field_metadata'):
+                    meta = parser._field_metadata.get(def_id)
+                    if meta:
+                        return meta
+
+        return None
+
     def _search_field_in_dictionary_file(self, field_name: str) -> bool:
         """
         Search for a field name directly in the CIF core dictionary file.

@@ -18,6 +18,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes, and uses validation-aware highlighting.
+- **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **CIF Format → Validate Data Values...**
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
 
@@ -138,11 +139,24 @@ CIVET provides customizable editor preferences accessible via **Settings → Edi
 - **Syntax Highlighting**: Enable/disable CIF-specific syntax coloring
 - **Syntax Highlighting Colors**: Adjust the highlight colours used for valid, unknown, malformed, deprecated, loop, and value text directly in the dialog
 - **80-Character Ruler**: Visual guide for line length
-- **Dialog Behavior**: Choose whether validation/result dialogs keep the editor browseable in read-only mode or use classic modal locking; the validation results dialog can inherit or override the default
+- **Dialog Behavior**: Three interaction modes for result dialogs: *Allow editing while open* (non-blocking, default for Validate Data Values), *Browse editor (read-only) while open*, and *Classic modal (lock editor)*. Each dialog can inherit the global default or set its own mode.
 
 All settings are stored in `settings.json` and persist across sessions. User settings always take precedence over built-in defaults. Use **Reset to Defaults** to restore original settings.
 
 Advanced users can also customise syntax-highlighting colours manually in `settings.json` under `editor.syntax_highlighting_colors`.
+
+### Data Value Validation
+
+The **CIF Format → Validate Data Values...** dialog checks all field values in the current file against dictionary definitions:
+
+- **Type mismatches**: flags non-numeric values for `Real`/`Integer` fields
+- **Enum violations**: flags values not listed in `_enumeration_set.state`
+- **Loop count errors**: flags loops where the number of data values is not a multiple of the field count
+- Results are shown in a sortable table with severity colour-coding (error/warning/info)
+- **Refresh**: re-runs validation against the current editor content without closing the dialog, useful when editing to fix issues
+- **Go to Line**: navigates the editor to the flagged line (double-click also works)
+
+The dialog opens in non-blocking mode by default so you can edit while it is open. This can be changed under **Settings → Editor Settings → Dialog Behavior**.
 
 ### Data Name Validation Results
 

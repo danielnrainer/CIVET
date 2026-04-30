@@ -55,7 +55,8 @@ DEFAULT_SETTINGS = {
     },
     "dialogs": {
         "default_interaction_mode": "browse_readonly",
-        "data_name_validation_results_mode": "inherit_default"
+        "data_name_validation_results_mode": "inherit_default",
+        "cif_value_validation_mode": "allow_editing"
     }
 }
 

@@ -187,6 +187,16 @@ class EditorSettingsDialog(QDialog):
         dialog_mode_row.addWidget(self.validation_dialog_mode_combo)
         dialog_layout.addLayout(dialog_mode_row)
 
+        cif_value_mode_row = QHBoxLayout()
+        cif_value_mode_row.addWidget(QLabel("Validate Data Values Dialog:"))
+        self.cif_value_validation_mode_combo = QComboBox()
+        self.cif_value_validation_mode_combo.addItem("Allow editing while open", "allow_editing")
+        self.cif_value_validation_mode_combo.addItem("Use default", "inherit_default")
+        self.cif_value_validation_mode_combo.addItem("Browse editor (read-only) while open", "browse_readonly")
+        self.cif_value_validation_mode_combo.addItem("Classic modal (lock editor while open)", "modal_lock_editor")
+        cif_value_mode_row.addWidget(self.cif_value_validation_mode_combo)
+        dialog_layout.addLayout(cif_value_mode_row)
+
         dialog_help = QLabel(
             "Controls how result dialogs interact with the main editor. "
             "This setting is designed to be reused by additional dialogs in the future."
@@ -227,6 +237,7 @@ class EditorSettingsDialog(QDialog):
         self.ruler_checkbox.blockSignals(True)
         self.default_dialog_mode_combo.blockSignals(True)
         self.validation_dialog_mode_combo.blockSignals(True)
+        self.cif_value_validation_mode_combo.blockSignals(True)
         
         self.font_combo.setCurrentFont(QFont(self.editor_settings.get('font_family', 'Consolas')))
         self.font_size_spinbox.setValue(self.editor_settings.get('font_size', 10))
@@ -246,6 +257,12 @@ class EditorSettingsDialog(QDialog):
             mode_index = self.validation_dialog_mode_combo.findData('inherit_default')
         self.validation_dialog_mode_combo.setCurrentIndex(max(mode_index, 0))
 
+        cif_value_mode = self.dialog_settings.get('cif_value_validation_mode', 'allow_editing')
+        cif_value_index = self.cif_value_validation_mode_combo.findData(cif_value_mode)
+        if cif_value_index < 0:
+            cif_value_index = self.cif_value_validation_mode_combo.findData('allow_editing')
+        self.cif_value_validation_mode_combo.setCurrentIndex(max(cif_value_index, 0))
+
         for color_key in self.color_buttons:
             self._update_color_button(color_key)
         
@@ -257,6 +274,7 @@ class EditorSettingsDialog(QDialog):
         self.ruler_checkbox.blockSignals(False)
         self.default_dialog_mode_combo.blockSignals(False)
         self.validation_dialog_mode_combo.blockSignals(False)
+        self.cif_value_validation_mode_combo.blockSignals(False)
     
     def _update_settings_from_ui(self):
         """Update settings dictionary from UI components."""
@@ -267,6 +285,7 @@ class EditorSettingsDialog(QDialog):
         self.editor_settings['show_ruler'] = self.ruler_checkbox.isChecked()
         self.dialog_settings['default_interaction_mode'] = self.default_dialog_mode_combo.currentData()
         self.dialog_settings['data_name_validation_results_mode'] = self.validation_dialog_mode_combo.currentData()
+        self.dialog_settings['cif_value_validation_mode'] = self.cif_value_validation_mode_combo.currentData()
 
     def _update_color_button(self, color_key: str) -> None:
         """Refresh the label and preview for one color button."""
@@ -326,6 +345,7 @@ class EditorSettingsDialog(QDialog):
             set_setting('editor.syntax_highlighting_colors', self.editor_settings['syntax_highlighting_colors'])
             set_setting('dialogs.default_interaction_mode', self.dialog_settings['default_interaction_mode'])
             set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings['data_name_validation_results_mode'])
+            set_setting('dialogs.cif_value_validation_mode', self.dialog_settings['cif_value_validation_mode'])
             
             self.accept()
         except Exception as e:
@@ -361,6 +381,7 @@ class EditorSettingsDialog(QDialog):
                 set_setting('editor.syntax_highlighting_colors', self.editor_settings['syntax_highlighting_colors'])
                 set_setting('dialogs.default_interaction_mode', self.dialog_settings.get('default_interaction_mode', 'browse_readonly'))
                 set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings.get('data_name_validation_results_mode', 'inherit_default'))
+                set_setting('dialogs.cif_value_validation_mode', self.dialog_settings.get('cif_value_validation_mode', 'allow_editing'))
                 
                 # Apply to editor if callback provided
                 if self.on_settings_changed:

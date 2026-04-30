@@ -45,7 +45,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         "multiline": "#0000FF",
         "loop_keyword": "#FF6600",
         "loop_field": "#CC6600",
-        "loop_data": "#996600",
+        "loop_data_bg": "#E8E8E8",
         "list_bracket": "#8B008B",
         "table_brace": "#FC87FC",
     }
@@ -63,10 +63,13 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     STATE_SEMICOLON_MULTILINE = 1
     STATE_LOOP_FIELDS = 2
     STATE_LOOP_DATA = 3
-    STATE_TRIPLE_SINGLE_QUOTE = 4  # Inside ''' ... '''
-    STATE_TRIPLE_DOUBLE_QUOTE = 5  # Inside """ ... """
+    STATE_TRIPLE_SINGLE_QUOTE = 4  # Inside ''' ... ''' (outside loop)
+    STATE_TRIPLE_DOUBLE_QUOTE = 5  # Inside """ ... """ (outside loop)
     STATE_LIST_VALUE = 6           # Inside [...] spanning multiple lines
     STATE_TABLE_VALUE = 7          # Inside {...} spanning multiple lines
+    STATE_SEMICOLON_MULTILINE_IN_LOOP = 8   # Semicolon block inside loop data
+    STATE_TRIPLE_SINGLE_IN_LOOP = 9         # ''' ... ''' inside loop data
+    STATE_TRIPLE_DOUBLE_IN_LOOP = 10        # """ ... """ inside loop data
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -135,7 +138,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.loop_field_format.setForeground(QColor("#CC6600"))  # Darker orange for loop fields
         
         self.loop_data_format = QTextCharFormat()
-        self.loop_data_format.setForeground(QColor("#996600"))  # Even darker orange for loop data
+        self.loop_data_format.setBackground(QColor("#E8E8E8"))  # Light grey background for loop data
         
         # State for tracking multiline blocks and loops
         self.in_multiline = False
@@ -207,7 +210,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.multiline_format.setForeground(QColor(self.color_scheme["multiline"]))
         self.loop_keyword_format.setForeground(QColor(self.color_scheme["loop_keyword"]))
         self.loop_field_format.setForeground(QColor(self.color_scheme["loop_field"]))
-        self.loop_data_format.setForeground(QColor(self.color_scheme["loop_data"]))
+        self.loop_data_format.setBackground(QColor(self.color_scheme["loop_data_bg"]))
         self.list_bracket_format.setForeground(QColor(self.color_scheme["list_bracket"]))
         self.table_brace_format.setForeground(QColor(self.color_scheme["table_brace"]))
 
@@ -233,7 +236,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             f"<span style='color: {scheme['multiline']};'>multiline values</span><br>"
             f"<span style='color: {scheme['loop_keyword']}; font-weight: bold;'>loop_</span> keyword<br>"
             f"<span style='color: {scheme['loop_field']}; font-style: italic;'>Loop field names</span> when no validation category overrides them<br>"
-            f"<span style='color: {scheme['loop_data']};'>Loop data values</span><br><br>"
+            f"<span style='background-color: {scheme['loop_data_bg']}; padding: 2px 4px;'>Loop data values (background)</span><br>"
             "<b>Notes</b><br>"
             "Loop field names are also shown in italics as an extra visual cue.<br>"
             f"If validation-aware highlighting is unavailable, data names fall back to <span style='color: {scheme['field_default']};'>this default colour</span>.<br>"
@@ -308,6 +311,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             self.in_multiline = True
             self.in_loop = False
             self.in_loop_data = False
+        elif prev_state == self.STATE_SEMICOLON_MULTILINE_IN_LOOP:
+            self.in_multiline = True
+            self.in_loop = True
+            self.in_loop_data = True
         elif prev_state == self.STATE_LOOP_FIELDS:
             self.in_loop = True
             self.in_loop_data = False
@@ -323,6 +330,12 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         elif prev_state == self.STATE_TRIPLE_DOUBLE_QUOTE:
             # Inside a multi-line triple double-quoted string
             self._handle_multiline_triple_quote(text, '"""', self.STATE_TRIPLE_DOUBLE_QUOTE)
+            return
+        elif prev_state == self.STATE_TRIPLE_SINGLE_IN_LOOP:
+            self._handle_multiline_triple_quote(text, "'''", self.STATE_TRIPLE_SINGLE_IN_LOOP, in_loop=True)
+            return
+        elif prev_state == self.STATE_TRIPLE_DOUBLE_IN_LOOP:
+            self._handle_multiline_triple_quote(text, '"""', self.STATE_TRIPLE_DOUBLE_IN_LOOP, in_loop=True)
             return
         elif prev_state == self.STATE_LIST_VALUE:
             # Inside a multi-line CIF2 list [...]
@@ -340,19 +353,44 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             self.in_loop_data = False
         
         stripped_text = text.strip()
-        
+
+        # Pre-transition: if the current line is the first data value in a loop
+        # (we're still flagged as STATE_LOOP_FIELDS), advance in_loop_data NOW —
+        # before the semicolon / triple-quote / bracket early-returns — so those
+        # handlers select the correct in-loop block state.
+        if (self.in_loop and not self.in_loop_data and stripped_text
+                and not stripped_text.startswith('_')
+                and not stripped_text.startswith('#')
+                and stripped_text.lower() != 'loop_'
+                and not any(stripped_text.lower().startswith(h)
+                            for h in ('data_', 'save_', 'global_', 'stop_'))):
+            self.in_loop_data = True
+
         # Handle multiline semicolon values first
         if text.startswith(';'):
             self.setFormat(0, len(text), self.multiline_format)
             self.in_multiline = not self.in_multiline
             if self.in_multiline:
-                self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE)
+                if self.in_loop_data:
+                    self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
+                    self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE_IN_LOOP)
+                else:
+                    self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE)
             else:
-                self.setCurrentBlockState(self.STATE_NORMAL)
+                # Closing semicolon — return to appropriate state
+                if self.in_loop_data:
+                    self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
+                    self.setCurrentBlockState(self.STATE_LOOP_DATA)
+                else:
+                    self.setCurrentBlockState(self.STATE_NORMAL)
             return
         elif self.in_multiline:
             self.setFormat(0, len(text), self.multiline_format)
-            self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE)
+            if self.in_loop_data:
+                self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
+                self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE_IN_LOOP)
+            else:
+                self.setCurrentBlockState(self.STATE_SEMICOLON_MULTILINE)
             return
         
         # Check for triple-quoted strings that start on this line
@@ -425,22 +463,16 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                         self.in_loop_data = True
                     self.setCurrentBlockState(self.STATE_LOOP_DATA)
             else:
-                # Empty line in loop - this ends the loop if we're in data phase
+                # Empty line within a loop — blank lines are whitespace in the CIF grammar
+                # and do NOT terminate a loop.  Only structural markers (_field, loop_,
+                # data_/save_ headers) end a loop.
                 if self.in_loop_data:
-                    # Empty line after loop data ends the loop
-                    self.in_loop = False
-                    self.in_loop_data = False
-                    self.setCurrentBlockState(self.STATE_NORMAL)
+                    self.setCurrentBlockState(self.STATE_LOOP_DATA)
                 else:
-                    # Empty line in field definition phase - maintain loop state
                     self.setCurrentBlockState(self.STATE_LOOP_FIELDS)
         else:
             # Not in a loop
             self.setCurrentBlockState(self.STATE_NORMAL)
-        
-        # Apply background highlighting for loop data
-        if self.in_loop_data and stripped_text and not stripped_text.startswith('#'):
-            self.setFormat(0, len(text), self.loop_data_format)
         
         # Apply validation-aware field highlighting if validator is set
         if self._field_validator is not None:
@@ -457,6 +489,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                 self._apply_validated_loop_field_highlighting(text, stripped_text)
             else:
                 self.setFormat(0, len(text), self.loop_field_format)
+
+        # Apply background for all loop content (field names + data) LAST so it
+        # overlays without clobbering foreground colours.
+        if self.in_loop and stripped_text and not stripped_text.startswith('#'):
+            self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
     
     def _check_triple_quote_start(self, text: str) -> bool:
         """Check if line contains a triple-quoted string start.
@@ -484,25 +521,39 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                 else:
                     # Multi-line triple-quoted string starts here
                     self.setFormat(start_pos, len(text) - start_pos, self.multiline_format)
-                    self.setCurrentBlockState(state)
+                    if self.in_loop_data:
+                        in_loop_state = (self.STATE_TRIPLE_SINGLE_IN_LOOP
+                                         if quote_type == "'''" else self.STATE_TRIPLE_DOUBLE_IN_LOOP)
+                        self._apply_background_to_range(start_pos, len(text) - start_pos,
+                                                         QColor(self.color_scheme["loop_data_bg"]))
+                        self.setCurrentBlockState(in_loop_state)
+                    else:
+                        self.setCurrentBlockState(state)
                     return True
         return False
     
-    def _handle_multiline_triple_quote(self, text: str, quote_type: str, state: int):
+    def _handle_multiline_triple_quote(self, text: str, quote_type: str, state: int, in_loop: bool = False):
         """Handle a line that's inside a multi-line triple-quoted string.
-        
-        Applies multiline format and checks if the string ends on this line.
+
+        Applies multiline format (and grey background when in_loop) and checks if
+        the string ends on this line.  When in_loop, transitions back to
+        STATE_LOOP_DATA rather than STATE_NORMAL on close.
         """
+        bg = QColor(self.color_scheme["loop_data_bg"])
         end_pos = text.find(quote_type)
         if end_pos != -1:
             # String ends on this line
             self.setFormat(0, end_pos + 3, self.multiline_format)
-            self.setCurrentBlockState(self.STATE_NORMAL)
-            # Note: any content after the closing quotes on this line
-            # will not be highlighted correctly in this simple implementation
+            if in_loop:
+                self._apply_background_to_range(0, end_pos + 3, bg)
+                self.setCurrentBlockState(self.STATE_LOOP_DATA)
+            else:
+                self.setCurrentBlockState(self.STATE_NORMAL)
         else:
             # String continues
             self.setFormat(0, len(text), self.multiline_format)
+            if in_loop:
+                self._apply_background_to_range(0, len(text), bg)
             self.setCurrentBlockState(state)
 
     def _check_bracket_start(self, text: str) -> bool:
@@ -537,13 +588,15 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                 elif ch == close_ch:
                     depth -= 1
                     if depth == 0:
-                        # Closed on same line — inline highlight
+                        # Closed on same line — highlight brackets and background whole line
                         self.setFormat(pos, i - pos + 1, fmt)
+                        self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
                         return False  # Let normal processing continue
                 i += 1
             
-            # Multi-line bracket — highlight from opening bracket to end of line
-            self.setFormat(pos, len(text) - pos, fmt)
+            # Multi-line bracket — background whole line, mark opening bracket with fmt
+            self._apply_background_to_range(0, len(text), QColor(self.color_scheme["loop_data_bg"]))
+            self.setFormat(pos, 1, fmt)  # Opening bracket character gets the bracket colour
             self._bracket_depth = depth
             self.setCurrentBlockState(state)
             return True
@@ -553,9 +606,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     def _handle_multiline_bracket(self, text: str, open_ch: str, close_ch: str,
                                    state: int, fmt: QTextCharFormat):
         """Handle a continuation line inside a multi-line list or table.
-        
-        Applies bracket format and checks if the construct closes on this line.
+
+        Applies background highlighting to the content (same shade as loop data)
+        and the bracket format only to the closing bracket character if present.
         """
+        bg_color = QColor(self.color_scheme["loop_data_bg"])
         depth = self._bracket_depth
         i = 0
         while i < len(text):
@@ -569,15 +624,16 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             elif ch == close_ch:
                 depth -= 1
                 if depth == 0:
-                    # Closing bracket found
-                    self.setFormat(0, i + 1, fmt)
+                    # Closing bracket found — background the line, mark closing bracket
+                    self._apply_background_to_range(0, len(text), bg_color)
+                    self.setFormat(i, 1, fmt)
                     self._bracket_depth = 0
                     self.setCurrentBlockState(self.STATE_NORMAL)
                     return
             i += 1
-        
-        # Still open — highlight entire line and continue
-        self.setFormat(0, len(text), fmt)
+
+        # Still open — background the entire line and continue
+        self._apply_background_to_range(0, len(text), bg_color)
         self._bracket_depth = depth
         self.setCurrentBlockState(state)
 
@@ -598,15 +654,23 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
                 return i
         return -1
     
+    def _apply_background_to_range(self, start: int, length: int, bg_color: QColor):
+        """Apply a background colour to a character range, preserving existing foreground formats."""
+        for i in range(start, start + length):
+            fmt = self.format(i)
+            fmt.setBackground(bg_color)
+            self.setFormat(i, 1, fmt)
+
     def _apply_standard_rules(self, text: str, stripped_text: str):
         """Apply standard highlighting rules without validation (backwards compatible)."""
         for pattern, format in self.highlighting_rules:
+            # Skip field name pattern in loop data (values appear here, not definitions)
+            if self.in_loop_data and pattern.pattern() == r'^\s*_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*':
+                continue
             matches = pattern.globalMatch(text)
             while matches.hasNext():
                 match = matches.next()
-                # Don't override loop data formatting for basic patterns
-                if not (self.in_loop_data and pattern.pattern() in [r'^\s*_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*', r"'[^']*'"]):
-                    self.setFormat(match.capturedStart(), match.capturedLength(), format)
+                self.setFormat(match.capturedStart(), match.capturedLength(), format)
     
     def _apply_validated_field_highlighting(self, text: str, stripped_text: str):
         """Apply validation-aware highlighting to field names."""
@@ -618,9 +682,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             matches = pattern.globalMatch(text)
             while matches.hasNext():
                 match = matches.next()
-                # Don't override loop data formatting
-                if not (self.in_loop_data and pattern.pattern() == r"'[^']*'"):
-                    self.setFormat(match.capturedStart(), match.capturedLength(), format)
+                self.setFormat(match.capturedStart(), match.capturedLength(), format)
         
         # Now handle field names with validation
         # Don't apply field highlighting if we're in loop data mode

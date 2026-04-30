@@ -77,6 +77,7 @@ a = Analysis(
         'gui.dialogs.editor_settings_dialog',
         'gui.dialogs.about_dialog',
         'gui.dialogs.data_name_validation_dialog',
+        'gui.dialogs.cif_value_validation_dialog',
         'gui.dialogs.critical_issues_dialog',
         'gui.dialogs.recognised_prefixes_dialog',
         'version',
@@ -95,6 +96,7 @@ a = Analysis(
         'utils.user_field_rules',         # User field rules management
         'utils.registered_prefixes',      # CIF prefix registry
         'utils.data_name_validator',      # CIF data name validation
+        'utils.cif_data_validator',        # CIF data value validation (types, enums, loops)
         'utils.cif2_value_formatting',    # CIF2 value formatting
         'utils.format_compatibility_warning',  # Modern format warning system
         'utils.cif_ddl1_parser',          # DDL1 dictionary format parser

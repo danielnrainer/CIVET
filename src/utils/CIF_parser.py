@@ -61,6 +61,11 @@ class CIFLoop:
         self.field_names = field_names
         self.data_rows = data_rows
         self.line_number = line_number
+        # Set when the last row of the loop was padded because the total number
+        # of data values was not a multiple of the number of field names.
+        self.has_incomplete_last_row: bool = False
+        # Actual value count in the last row before padding (0 if complete).
+        self.incomplete_row_actual_count: int = 0
     
     def __repr__(self):
         return f"CIFLoop(fields={len(self.field_names)}, rows={len(self.data_rows)})"
@@ -332,7 +337,8 @@ class CIFParser:
         in_deprecated_section = False
         
         while i < len(lines):
-            line = lines[i].strip()
+            raw_line = lines[i]
+            line = raw_line.strip()
             
             # Preserve empty lines
             if not line:
@@ -418,29 +424,53 @@ class CIFParser:
         i = start_index + 1  # Skip the 'loop_' line
         field_names = []
         
-        # Parse field names
+        # Parse field names.
+        # Per CIF grammar (token-based): the loop header consists of all
+        # consecutive '_'-starting tokens.  The first non-'_' token ends the
+        # header phase, even if it appears on the *same line* as a field name.
+        # e.g.  `_diffrn_radiation_wavelength  0.71073`  → field name is only
+        # `_diffrn_radiation_wavelength`; `0.71073` starts the data section.
+        initial_data_values: List[str] = []  # inline values found after a field name
+
         while i < len(lines):
             line = lines[i].strip()
-            
+
             # Skip empty lines and comments
             if not line or line.startswith('#'):
                 i += 1
                 continue
-            
-            # Check if this is a field name
+
+            # Check if this line begins with a field name
             if line.startswith('_'):
-                field_names.append(line)
-                i += 1
+                # Only the first whitespace-separated token is the field name
+                space_pos = -1
+                for ci, ch in enumerate(line):
+                    if ch in (' ', '\t'):
+                        space_pos = ci
+                        break
+                if space_pos == -1:
+                    # Whole line is the field name, no inline value
+                    field_names.append(line)
+                    i += 1
+                else:
+                    # Field name with inline value(s) — header phase ends here
+                    field_name = line[:space_pos]
+                    field_names.append(field_name)
+                    rest = line[space_pos:].strip()
+                    if rest:
+                        initial_data_values.extend(self._parse_data_line(rest))
+                    i += 1
+                    break  # data section starts
             else:
                 # We've reached the data section
                 break
-        
+
         if not field_names:
             return None, i - start_index
-        
+
         # Parse data rows
         data_rows = []
-        current_row = []
+        current_row = list(initial_data_values)  # may be non-empty if inline values found
         
         while i < len(lines):
             line = lines[i].strip()
@@ -465,21 +495,36 @@ class CIFParser:
             # Advance by the number of lines consumed (including multiline blocks)
             i += multiline_consumed
             
-            # Check if we have a complete row
-            if len(current_row) >= len(field_names):
-                # Extract one complete row
+            # Drain ALL complete rows from the accumulated values before moving on.
+            # Using while (not if) ensures a line that carries multiple rows' worth of
+            # values doesn't leave extras silently in current_row.
+            while len(current_row) >= len(field_names):
                 row = current_row[:len(field_names)]
                 data_rows.append(row)
                 current_row = current_row[len(field_names):]
         
-        # Handle any remaining partial row
+        # Handle any remaining partial row.
+        # Drain complete rows first — this handles the case where initial_data_values
+        # (inline values found on the same line as a field name) filled a whole row
+        # but the data phase was never entered (e.g. the next line starts with '_').
+        while len(current_row) >= len(field_names):
+            row = current_row[:len(field_names)]
+            data_rows.append(row)
+            current_row = current_row[len(field_names):]
+
+        has_incomplete = False
+        incomplete_count = 0
         if current_row:
-            # Pad with empty values if needed
+            incomplete_count = len(current_row)
+            has_incomplete = True
+            # Pad with empty values so rows always have the right width
             while len(current_row) < len(field_names):
                 current_row.append('')
             data_rows.append(current_row)
         
         loop = CIFLoop(field_names, data_rows, start_index + 1)
+        loop.has_incomplete_last_row = has_incomplete
+        loop.incomplete_row_actual_count = incomplete_count
         return loop, i - start_index
     
     def _parse_data_line(self, line: str) -> List[str]:
@@ -540,30 +585,94 @@ class CIFParser:
         
         return values
 
+    def _has_unclosed_triple_quote(self, text: str) -> bool:
+        """Check if text contains an unclosed CIF2 triple-quoted string (\"\"\" or ''').
+
+        Used to detect whether a loop data line begins a triple-quoted string value
+        that spans multiple lines (per the CIF2-EBNF: triple-quoted-string content
+        may contain any allchars including line terminators).
+        """
+        i = 0
+        while i < len(text):
+            c = text[i]
+            if c in ('"', "'"):
+                if i + 2 < len(text) and text[i:i+3] in ('"""', "'''"):
+                    delim = text[i:i+3]
+                    end = text.find(delim, i + 3)
+                    if end == -1:
+                        return True  # Unclosed triple-quote found
+                    i = end + 3
+                    continue
+            i += 1
+        return False
+
     def _parse_loop_data_line(self, lines: List[str], start_index: int) -> Tuple[List[str], int]:
-        """Parse a line of loop data values, handling multiline semicolon blocks.
+        """Parse a line of loop data values, handling multiline semicolon blocks and
+        CIF2 multi-line triple-quoted strings.
         
         Returns:
             Tuple of (values, lines_consumed)
         """
-        line = lines[start_index].strip()
-        
-        # Special case: check if this line is just a semicolon (multiline block start)
+        raw_line = lines[start_index]
+        line = raw_line.strip()
+
+        # Multiline loop values can start as either:
+        # 1) a standalone ';' line, or
+        # 2) ';content...' on the same line (valid CIF syntax, CIF2-EBNF text-field).
+        if raw_line.startswith(';'):
+            first_line_content = raw_line[1:]
+            multiline_value, consumed = self._parse_multiline_in_loop(
+                lines,
+                start_index + 1,
+                first_line_content=first_line_content,
+            )
+            return [multiline_value], consumed + 1  # +1 for opening delimiter line
+
+        # Be lenient with leading whitespace before ';' even if not strictly CIF-compliant.
         if line == ';':
-            multiline_value, consumed = self._parse_multiline_in_loop(lines, start_index + 1, 0)
-            return [multiline_value], consumed + 1  # +1 for the semicolon line itself
-        
+            multiline_value, consumed = self._parse_multiline_in_loop(lines, start_index + 1)
+            return [multiline_value], consumed + 1  # +1 for opening delimiter line
+
+        # CIF2: triple-quoted strings (\"\"\" or ''') may span multiple lines.
+        # Collect continuation lines until all triple-quotes on this line are balanced.
+        if '"""' in line or "'''" in line:
+            collected = [line]
+            total_consumed = 1
+            while self._has_unclosed_triple_quote('\n'.join(collected)):
+                if start_index + total_consumed >= len(lines):
+                    break
+                cont_line = lines[start_index + total_consumed]
+                cont_stripped = cont_line.strip()
+                # Stop at structural tokens (would be a malformed CIF anyway)
+                if (cont_stripped.startswith('_') or
+                        cont_stripped.lower().startswith('loop_') or
+                        cont_stripped.lower().startswith('data_') or
+                        cont_stripped.lower().startswith('save_')):
+                    break
+                collected.append(cont_line.rstrip('\n\r'))
+                total_consumed += 1
+            if total_consumed > 1:
+                values = self._parse_data_line('\n'.join(collected))
+                return values, total_consumed
+
         # Otherwise, parse values from this line normally
         values = self._parse_data_line(line)
         return values, 1
 
-    def _parse_multiline_in_loop(self, lines: List[str], start_index: int, char_index: int) -> Tuple[str, int]:
+    def _parse_multiline_in_loop(
+        self,
+        lines: List[str],
+        start_index: int,
+        first_line_content: str = "",
+    ) -> Tuple[str, int]:
         """Parse a multiline value within loop data starting from after a semicolon.
         
         Returns:
             Tuple of (multiline_value, total_lines_consumed_after_semicolon)
         """
         value_lines = []
+        if first_line_content:
+            value_lines.append(first_line_content)
         i = start_index
         
         # Parse lines until closing semicolon
@@ -602,7 +711,30 @@ class CIFParser:
         # Check if value is on the same line
         if len(parts) > 1:
             value_part = parts[1].strip()
-            
+
+            # Check for CIF2 triple-quoted strings (""" or ''') before single-quote check
+            for triple_delim in ('"""', "'''"):
+                if value_part.startswith(triple_delim):
+                    after_open = value_part[3:]
+                    end_pos = after_open.find(triple_delim)
+                    if end_pos != -1:
+                        # Complete triple-quoted string on the same line
+                        return field_name, after_open[:end_pos], 1, CIFField.TYPE_REGULAR
+                    else:
+                        # Multi-line triple-quoted string: collect continuation lines
+                        value_parts = [after_open]
+                        j = start_index + 1
+                        while j < len(lines):
+                            seg = lines[j]
+                            end_pos = seg.find(triple_delim)
+                            if end_pos != -1:
+                                value_parts.append(seg[:end_pos])
+                                j += 1
+                                break
+                            value_parts.append(seg.rstrip('\n\r'))
+                            j += 1
+                        return field_name, '\n'.join(value_parts), j - start_index, CIFField.TYPE_REGULAR
+
             # Check if it's a quoted string
             if (value_part.startswith("'") and value_part.endswith("'")) or \
                (value_part.startswith('"') and value_part.endswith('"')):
@@ -661,6 +793,29 @@ class CIFParser:
 
             # Single line value on next line
             if next_line and not next_line.startswith('_'):
+                # Check for CIF2 triple-quoted strings before single-quote check
+                for triple_delim in ('"""', "'''"):
+                    if next_line.startswith(triple_delim):
+                        after_open = next_line[3:]
+                        end_pos = after_open.find(triple_delim)
+                        if end_pos != -1:
+                            # Complete triple-quoted string on next line
+                            return field_name, after_open[:end_pos], 2, CIFField.TYPE_REGULAR
+                        else:
+                            # Multi-line triple-quoted string
+                            value_parts = [after_open]
+                            j = start_index + 2  # +1 field line, +1 triple-quote open line
+                            while j < len(lines):
+                                seg = lines[j]
+                                end_pos = seg.find(triple_delim)
+                                if end_pos != -1:
+                                    value_parts.append(seg[:end_pos])
+                                    j += 1
+                                    break
+                                value_parts.append(seg.rstrip('\n\r'))
+                                j += 1
+                            return field_name, '\n'.join(value_parts), j - start_index, CIFField.TYPE_REGULAR
+
                 # Handle quoted values
                 if (next_line.startswith("'") and next_line.endswith("'")) or \
                    (next_line.startswith('"') and next_line.endswith('"')):

@@ -289,37 +289,133 @@ class CIFDictionaryParser:
         return None
     
     def _extract_enumeration_values(self, block_content: str) -> Optional[List[str]]:
+        """Extract enumeration *state* values from a DDLm field definition block.
+
+        Handles both single-column loops (``_enumeration_set.state`` only) and
+        multi-column loops (``_enumeration_set.state`` + ``_enumeration_set.detail``
+        and/or other columns).  Column position is detected dynamically so the
+        extraction is robust regardless of the number of columns or their order.
+
+        The old regex approach failed for two reasons:
+        1. The terminator ``[_a-zA-Z]`` fired on plain-word values (e.g. ``triclinic``),
+           stopping extraction after the very first value.
+        2. In two-column loops the second header line (``_enumeration_set.detail``)
+           was treated as a data value and returned as the only result.
         """
-        Extract enumeration values if present in the field definition.
-        
-        Args:
-            block_content: Content of the save block
-            
-        Returns:
-            List of allowed enumeration values or None if not an enumeration field
-        """
-        # Look for _enumeration.default or _enumeration_set.state patterns
-        # Pattern 1: Simple enumeration list in loop
-        loop_pattern = r'loop_\s*\n\s*_enumeration(?:_set)?\.(?:state|detail)\s*\n(.*?)(?=\n\s*[_a-zA-Z]|\n\s*save_|\Z)'
-        match = re.search(loop_pattern, block_content, re.DOTALL)
-        
-        if match:
-            enum_data = match.group(1).strip()
-            values = []
-            for line in enum_data.split('\n'):
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    # Extract quoted or unquoted values
-                    parts = line.split()
-                    if parts:
-                        value = parts[0]
-                        if value.startswith("'") and value.endswith("'"):
-                            value = value[1:-1]
-                        values.append(value)
+        lines = block_content.split('\n')
+        n = len(lines)
+        i = 0
+
+        _STOP_PREFIXES = ('save_', 'data_', 'global_', 'stop_')
+
+        while i < n:
+            stripped = lines[i].strip().lower()
+
+            # Look for the loop_ keyword (exact match, case-insensitive)
+            if stripped != 'loop_':
+                i += 1
+                continue
+
+            i += 1
+
+            # Collect all column headers that immediately follow loop_
+            headers: List[str] = []
+            while i < n:
+                h = lines[i].strip()
+                if h.startswith('_'):
+                    headers.append(h.lower())
+                    i += 1
+                elif not h or h.startswith('#'):
+                    i += 1  # skip blank lines / comments within header block
+                else:
+                    break   # first non-header line — data starts here
+
+            # Check whether this loop contains an enumeration state column
+            state_col_idx = None
+            for col_idx, h in enumerate(headers):
+                if re.match(r'_enumeration(?:_set)?\.state$', h):
+                    state_col_idx = col_idx
+                    break
+
+            if state_col_idx is None:
+                # Not an enumeration loop — keep scanning the block
+                continue
+
+            n_cols = max(len(headers), 1)
+
+            # Collect all data tokens from the loop data section.
+            # Semicolon-blocks (';' at column 0) are treated as a single token.
+            all_tokens: List[str] = []
+            while i < n:
+                raw_line = lines[i]
+                ln = raw_line.strip()
+                # Stop at CIF structural tokens
+                if (ln.startswith('_') or
+                        ln.lower() == 'loop_' or
+                        any(ln.lower().startswith(p) for p in _STOP_PREFIXES)):
+                    break
+                # Semicolon-block: opening ';' must be at column 0
+                if raw_line.startswith(';'):
+                    block_lines = [raw_line[1:]]  # content after opening ';' on same line
+                    i += 1
+                    while i < n:
+                        if lines[i].startswith(';'):
+                            i += 1  # consume closing ';' line
+                            break
+                        block_lines.append(lines[i])
+                        i += 1
+                    # Entire block is one token; we append but don't need its content
+                    all_tokens.append('\n'.join(block_lines).strip())
+                    continue
+                if ln and not ln.startswith('#'):
+                    all_tokens.extend(self._tokenize_cif_line(ln))
+                i += 1
+
+            # Extract the state column value from each row of tokens
+            values: List[str] = []
+            for row_start in range(state_col_idx, len(all_tokens), n_cols):
+                v = all_tokens[row_start]
+                if v:
+                    values.append(v)
+
             return values if values else None
-        
+
         return None
-                    
+
+    def _tokenize_cif_line(self, line: str) -> List[str]:
+        """Tokenise a single CIF data line into a list of string tokens.
+
+        Handles single-quoted and double-quoted strings as one token (quotes
+        are stripped).  Semicolon-block values are handled by the caller
+        before this method is invoked.
+        """
+        tokens: List[str] = []
+        i = 0
+        length = len(line)
+        while i < length:
+            # Skip whitespace
+            while i < length and line[i].isspace():
+                i += 1
+            if i >= length:
+                break
+            ch = line[i]
+            if ch in ("'", '"'):
+                # Quoted string — read until matching close-quote
+                i += 1
+                start = i
+                while i < length and line[i] != ch:
+                    i += 1
+                tokens.append(line[start:i])
+                if i < length:
+                    i += 1  # consume closing quote
+            else:
+                # Bare (unquoted) token
+                start = i
+                while i < length and not line[i].isspace():
+                    i += 1
+                tokens.append(line[start:i])
+        return tokens
+
     def _extract_aliases_with_deprecation(self, block_content: str) -> List[FieldAlias]:
         """Extract all alias definitions from a field block with deprecation information"""
         aliases = []

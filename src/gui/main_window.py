@@ -39,6 +39,7 @@ from .dialogs.editor_settings_dialog import EditorSettingsDialog
 from .dialogs.critical_issues_dialog import CriticalIssuesDialog
 from .dialogs.about_dialog import AboutDialog
 from .dialogs.recognised_prefixes_dialog import RecognisedPrefixesDialog
+from .dialogs.cif_value_validation_dialog import CIFValueValidationDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 from .format_handlers import FormatHandlersMixin
 from .field_checking import FieldCheckingMixin
@@ -438,6 +439,10 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         validate_names_action = action_menu.addAction("Validate Data Names...")
         validate_names_action.triggered.connect(self.validate_data_names)
         validate_names_action.setToolTip("Validate all data names against loaded dictionaries and registered prefixes")
+
+        validate_values_action = action_menu.addAction("Validate Data Values...")
+        validate_values_action.triggered.connect(self.validate_data_values)
+        validate_values_action.setToolTip("Check all CIF values against dictionary-defined types and enumerations, and detect loop structure errors")
 
         # CIF Format menu
         format_menu = menubar.addMenu("CIF Format")
@@ -1127,7 +1132,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             if mode == "inherit_default":
                 mode = default_mode
 
-        if mode not in {"browse_readonly", "modal_lock_editor"}:
+        if mode not in {"browse_readonly", "modal_lock_editor", "allow_editing"}:
             return "browse_readonly"
         return mode
 
@@ -1160,17 +1165,20 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
             return int(dialog.exec())
 
-        self._lock_editor_for_dialog()
+        if mode != "allow_editing":
+            self._lock_editor_for_dialog()
         dialog.setModal(False)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
 
         loop = QEventLoop(self)
         result_code = int(QDialog.DialogCode.Rejected)
+        locked = (mode != "allow_editing")
 
         def _on_dialog_finished(code: int) -> None:
             nonlocal result_code
             result_code = int(code)
-            self._unlock_editor_for_dialog()
+            if locked:
+                self._unlock_editor_for_dialog()
             if loop.isRunning():
                 loop.quit()
 
@@ -1536,7 +1544,66 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             print(f"Data name validation error: {error_details}")
             QMessageBox.critical(self, "Validation Error", 
                                f"Failed to validate data names:\n{str(e)}\n\nCheck console for details.")
-    
+
+    def validate_data_values(self):
+        """Validate all CIF data values against dictionary-defined types and enumerations."""
+        from utils.CIF_parser import CIFParser
+        from utils.cif_data_validator import CIFDataValidator
+
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "No CIF content to validate.")
+            return
+
+        try:
+            parser = CIFParser()
+            parser.parse_file(content)
+
+            validator = CIFDataValidator()
+            issues = validator.validate(parser, self.dict_manager)
+
+            dialog = CIFValueValidationDialog(issues, self)
+
+            def _goto(line_number: int):
+                """Move the text editor cursor to the given 1-based line."""
+                doc = self.text_editor.document()
+                block = doc.findBlockByLineNumber(line_number - 1)
+                if block.isValid():
+                    cursor = self.text_editor.textCursor()
+                    cursor.setPosition(block.position())
+                    self.text_editor.setTextCursor(cursor)
+                    self.text_editor.ensureCursorVisible()
+
+            dialog.navigate_to_line.connect(_goto)
+
+            def _refresh():
+                try:
+                    fresh_content = self.text_editor.toPlainText()
+                    fresh_parser = CIFParser()
+                    fresh_parser.parse_file(fresh_content)
+                    fresh_validator = CIFDataValidator()
+                    fresh_issues = fresh_validator.validate(fresh_parser, self.dict_manager)
+                    dialog.update_issues(fresh_issues)
+                except Exception as e:
+                    import traceback
+                    print(traceback.format_exc())
+                    QMessageBox.warning(dialog, "Refresh Failed", f"Validation failed:\n{str(e)}")
+
+            dialog.refresh_requested.connect(_refresh)
+
+            self._show_dialog_with_configured_interaction(
+                dialog,
+                "dialogs.cif_value_validation_mode",
+            )
+
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            QMessageBox.critical(
+                self, "Validation Error",
+                f"Failed to validate data values:\n{str(e)}\n\nCheck console for details.",
+            )
+
     def _apply_validation_actions(self, dialog: DataNameValidationDialog):
         """
         Apply the actions from the validation dialog.
