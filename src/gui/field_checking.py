@@ -636,67 +636,60 @@ class FieldCheckingMixin:
             content = self.text_editor.toPlainText()
             self.cif_parser.parse_file(content)
             
-            # For custom or user sets, handle DELETE/EDIT/APPEND operations first
+            # Process rules in file order (fully sequential).
+            # Action rules (DELETE/EDIT/APPEND/RENAME) are applied immediately when
+            # encountered and the editor is updated before moving to the next rule.
+            # CHECK/CALCULATE rules then run against the current (post-action) CIF
+            # state, so a RENAME followed by a CHECK for the old name will find the
+            # field missing and prompt to add it, and a CHECK for the new name will
+            # find the renamed value and show it for confirmation.
             is_custom_or_user = self.current_field_set == 'Custom' or self.current_field_set.startswith('User:')
-            if is_custom_or_user:
-                current_content = content
-                operations_applied = []
-                
-                for field_def in fields:
-                    if hasattr(field_def, 'action'):
-                        if field_def.action == 'DELETE':
-                            lines = current_content.splitlines()
-                            lines, deleted = self.field_checker._delete_field(lines, field_def.name)
-                            if deleted:
-                                operations_applied.append(f"DELETED: {field_def.name}")
-                                current_content = '\n'.join(lines)
-                        elif field_def.action == 'EDIT':
-                            lines = current_content.splitlines()
-                            lines, edited = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
-                            if edited:
-                                operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
-                                current_content = '\n'.join(lines)
-                        elif field_def.action == 'APPEND':
-                            lines = current_content.splitlines()
-                            lines, appended = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
-                            if appended:
-                                operations_applied.append(f"APPENDED to {field_def.name}")
-                                current_content = '\n'.join(lines)
-                        elif field_def.action == 'RENAME':
-                            lines = current_content.splitlines()
-                            lines, renamed = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
-                            if renamed:
-                                operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
-                                current_content = '\n'.join(lines)
-                
-                # Update content after DELETE/EDIT/APPEND/RENAME operations
-                if operations_applied:
-                    self.text_editor.setText(current_content)
-                    ops_summary = '\n'.join(operations_applied)
-                    QMessageBox.information(self, "Operations Applied", 
-                                          f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
-            
-            # Process CHECK and CALCULATE actions (standard field checking)
+            operations_applied = []
+
             for field_def in fields:
-                # Skip DELETE/EDIT/APPEND/RENAME actions as they're already processed
-                if hasattr(field_def, 'action') and field_def.action in ['DELETE', 'EDIT', 'APPEND', 'RENAME']:
+                action = getattr(field_def, 'action', 'CHECK')
+
+                # --- Action rules (custom/user sets only) ---
+                if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
+                    if not is_custom_or_user:
+                        continue  # Action rules are only applied for custom/user sets
+                    lines = self.text_editor.toPlainText().splitlines()
+                    done = False
+                    if action == 'DELETE':
+                        lines, done = self.field_checker._delete_field(lines, field_def.name)
+                        if done:
+                            operations_applied.append(f"DELETED: {field_def.name}")
+                    elif action == 'EDIT':
+                        lines, done = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
+                        if done:
+                            operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
+                    elif action == 'APPEND':
+                        lines, done = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
+                        if done:
+                            operations_applied.append(f"APPENDED to {field_def.name}")
+                    elif action == 'RENAME':
+                        lines, done = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
+                        if done:
+                            operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
+                    if done:
+                        self.text_editor.setText('\n'.join(lines))
                     continue
-                
-                # For CALCULATE action, compute the suggested value from expression
+
+                # --- CHECK / CALCULATE ---
                 suggested_value = field_def.default_value
                 description = field_def.description
                 suggestions = getattr(field_def, 'suggestions', None)
-                
-                if hasattr(field_def, 'action') and field_def.action == 'CALCULATE' and hasattr(field_def, 'expression'):
+
+                if action == 'CALCULATE' and hasattr(field_def, 'expression'):
                     # Re-parse CIF to get current values (content may have changed)
                     current_content = self.text_editor.toPlainText()
                     self.cif_parser.parse_file(current_content)
-                    
+
                     # Extract field references from expression
                     field_refs = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', field_def.expression)
                     field_values = {}
                     missing_fields = []
-                    
+
                     for ref in field_refs:
                         value = self.cif_parser.get_field_value(ref)
                         if value is not None:
@@ -709,7 +702,7 @@ class FieldCheckingMixin:
                                 missing_fields.append(f"{ref} (non-numeric: {value})")
                         else:
                             missing_fields.append(ref)
-                    
+
                     if missing_fields:
                         # Can't calculate - skip this field with warning
                         if config.get('show_warnings', True):
@@ -718,7 +711,7 @@ class FieldCheckingMixin:
                                 f"Missing or non-numeric fields: {', '.join(missing_fields)}\n\n"
                                 f"Expression: {field_def.expression}")
                         continue
-                    
+
                     # Evaluate the expression
                     calculated = safe_eval_expr(field_def.expression, field_values)
                     if calculated is not None:
@@ -727,14 +720,14 @@ class FieldCheckingMixin:
                             suggested_value = f"{calculated:.4e}"
                         else:
                             suggested_value = f"{calculated:.4f}".rstrip('0').rstrip('.')
-                        
+
                         # Add calculation info to description
                         current_val = self.cif_parser.get_field_value(field_def.name)
                         description = (f"{field_def.description}\n" if field_def.description else "") + \
                                      f"Calculated: {field_def.expression}"
                         if current_val:
                             description += f"\nCurrent value: {current_val}"
-                        
+
                         # Add current value as an option in suggestions
                         if current_val:
                             suggestions = [suggested_value]
@@ -746,7 +739,7 @@ class FieldCheckingMixin:
                                 f"Failed to evaluate expression for {field_def.name}:\n"
                                 f"{field_def.expression}")
                         continue
-                    
+
                 result = self.check_line_with_config(
                     field_def.name,
                     suggested_value,
@@ -755,7 +748,7 @@ class FieldCheckingMixin:
                     config,
                     suggestions
                 )
-                
+
                 if result == RESULT_ABORT:
                     self.text_editor.setText(initial_state)
                     self.update_window_title()
@@ -763,7 +756,13 @@ class FieldCheckingMixin:
                     return False
                 elif result == RESULT_STOP_SAVE:
                     break
-            
+
+            # Show summary of any silent operations that were applied
+            if operations_applied:
+                ops_summary = '\n'.join(operations_applied)
+                QMessageBox.information(self, "Operations Applied",
+                                      f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
+
             # Apply special 3DED handling if needed
             is_3ded = '3D_ED' in self.current_field_set or '3DED' in self.current_field_set
             if is_3ded:

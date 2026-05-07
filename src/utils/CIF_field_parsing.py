@@ -106,9 +106,9 @@ def load_cif_field_rules(filepath):
     try:
         all_fields = []
         descriptions = {}
-        field_map = {}
-        field_order = []
-        
+        check_agg = {}   # field_name -> CIFField for aggregating CHECK suggestions
+        append_agg = {}  # field_name -> CIFField for aggregating APPEND content
+
         # First pass: collect descriptions from comments
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
@@ -163,10 +163,8 @@ def load_cif_field_rules(filepath):
                         field = parts[0]
                         rename_to = parts[1]
                         description = descriptions.get(field, comment_desc) or comment_desc
-                        if field not in field_map:
-                            field_obj = CIFField(field, "", description, action, [], rename_to)
-                            field_map[field] = field_obj
-                            field_order.append(field)
+                        field_obj = CIFField(field, "", description, action, [], rename_to)
+                        all_fields.append(field_obj)
                     continue
                 elif line.upper().startswith('CALCULATE:'):
                     action = "CALCULATE"
@@ -178,10 +176,8 @@ def load_cif_field_rules(filepath):
                         expression = expr_part.strip()
                         if field.startswith('_') and expression:
                             description = descriptions.get(field, comment_desc) or comment_desc
-                            if field not in field_map:
-                                field_obj = CIFField(field, "", description, action, [], None, expression)
-                                field_map[field] = field_obj
-                                field_order.append(field)
+                            field_obj = CIFField(field, "", description, action, [], None, expression)
+                            all_fields.append(field_obj)
                     continue
                 
                 # For DELETE action, we only need the field name
@@ -189,10 +185,8 @@ def load_cif_field_rules(filepath):
                     if line.startswith('_'):
                         field = line
                         description = descriptions.get(field, comment_desc) or comment_desc
-                        if field not in field_map:
-                            field_obj = CIFField(field, "", description, action, [])
-                            field_map[field] = field_obj
-                            field_order.append(field)
+                        field_obj = CIFField(field, "", description, action, [])
+                        all_fields.append(field_obj)
                     continue
                 
                 # For CHECK and EDIT actions, we need field and value
@@ -217,17 +211,21 @@ def load_cif_field_rules(filepath):
                     options_text = description[options_idx:].strip()
                     description = f"{description[:options_idx].strip()}\n{options_text}"
                 
-                # Aggregate repeated fields into suggestions for dropdowns (not for EDIT/APPEND)
-                existing = field_map.get(field)
-                if existing and existing.action == "CHECK" and action == "CHECK":
+                # Aggregate repeated CHECK entries as suggestions for dropdowns;
+                # aggregate repeated APPEND entries by concatenation.
+                # All other action types (EDIT, RENAME, DELETE, CALCULATE) are kept
+                # as distinct ordered entries so rules are processed sequentially.
+                if action == "CHECK" and field in check_agg:
+                    existing = check_agg[field]
                     if value and value not in existing.suggestions:
                         existing.suggestions.append(value)
                     if not existing.default_value and value:
                         existing.default_value = value
                     if not existing.description and description:
                         existing.description = description
-                elif existing and existing.action == "APPEND" and action == "APPEND":
+                elif action == "APPEND" and field in append_agg:
                     # Aggregate multiple APPEND entries for the same field
+                    existing = append_agg[field]
                     if value:
                         # Concatenate with blank line separator
                         if existing.default_value:
@@ -237,12 +235,12 @@ def load_cif_field_rules(filepath):
                 else:
                     suggestions = [value] if value else []
                     field_obj = CIFField(field, value, description, action, suggestions)
-                    field_map[field] = field_obj
-                    field_order.append(field)
-                
-        # Preserve file order while returning aggregated fields
-        for field_name in field_order:
-            all_fields.append(field_map[field_name])
+                    all_fields.append(field_obj)
+                    if action == "CHECK":
+                        check_agg[field] = field_obj
+                    elif action == "APPEND":
+                        append_agg[field] = field_obj
+
         return all_fields
     except Exception as e:
         print(f"Error loading CIF field definitions: {e}")
@@ -353,23 +351,26 @@ class CIFFieldChecker:
     
     def _append_field(self, lines, field_name, append_text):
         """Append text to a multiline field's value in the CIF content.
-        
+
+        Skips the append if the text to add is already present in the existing
+        field value (case-insensitive, whitespace-normalised comparison), so
+        running the same rules file twice never duplicates content.
+
         Args:
             lines (list): List of lines in the CIF file
             field_name (str): Name of field to append to
             append_text (str): Text to append (will be added with blank line separator)
-            
+
         Returns:
             tuple: (modified_lines, was_appended)
         """
         modified_lines = []
         appended = False
-        in_multiline = False
         i = 0
-        
+
         while i < len(lines):
             line = lines[i]
-            
+
             # Check if this is the target field with semicolon delimiter
             if line.strip().startswith(field_name):
                 # Check if it's a multiline value starting with semicolon
@@ -378,31 +379,46 @@ class CIFFieldChecker:
                     modified_lines.append(line)
                     modified_lines.append(lines[i + 1])
                     i += 2
-                    in_multiline = True
-                    
-                    # Copy content until closing semicolon
+
+                    # Collect existing body content until closing semicolon
+                    body_lines = []
+                    closing_line = None
                     while i < len(lines):
                         if lines[i].strip() == ';':
-                            # Found closing semicolon - append new content before it
-                            modified_lines.append('')  # Blank line separator
-                            modified_lines.append(append_text)
-                            modified_lines.append(lines[i])  # Closing semicolon
-                            appended = True
-                            in_multiline = False
+                            closing_line = lines[i]
                             i += 1
                             break
                         else:
-                            modified_lines.append(lines[i])
+                            body_lines.append(lines[i])
                             i += 1
+
+                    # Check whether append_text is already present
+                    existing_body = '\n'.join(body_lines)
+                    already_present = (
+                        ' '.join(append_text.split()).lower()
+                        in ' '.join(existing_body.split()).lower()
+                    )
+
+                    # Write body back out
+                    modified_lines.extend(body_lines)
+
+                    if not already_present:
+                        # Insert the new content before the closing semicolon
+                        modified_lines.append('')  # Blank line separator
+                        modified_lines.append(append_text)
+                        appended = True
+
+                    if closing_line is not None:
+                        modified_lines.append(closing_line)
                     continue
                 else:
                     # Not a multiline field - just copy as-is
                     modified_lines.append(line)
             else:
                 modified_lines.append(line)
-            
+
             i += 1
-        
+
         return modified_lines, appended
 
     def _rename_field(self, lines, old_name, new_name):
