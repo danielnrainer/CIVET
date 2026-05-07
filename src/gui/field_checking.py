@@ -32,6 +32,15 @@ if TYPE_CHECKING:
     from .main_window import CIFEditor
 
 
+SOHNCKE_SPACE_GROUPS = {
+    1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79,
+    80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149,
+    150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178,
+    179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211,
+    212, 213, 214,
+}
+
+
 class FieldCheckingMixin:
     """Mixin providing field checking workflow methods for CIFEditor."""
 
@@ -763,10 +772,8 @@ class FieldCheckingMixin:
                 QMessageBox.information(self, "Operations Applied",
                                       f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
 
-            # Apply special 3DED handling if needed
-            is_3ded = '3D_ED' in self.current_field_set or '3DED' in self.current_field_set
-            if is_3ded:
-                self._apply_3ded_special_checks(config, initial_state)
+            if not self._apply_absolute_structure_checks(config, initial_state):
+                return False
             
             return True
             
@@ -776,12 +783,21 @@ class FieldCheckingMixin:
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
             return False
     
-    def _apply_3ded_special_checks(self, config, initial_state):
-        """Apply special 3DED checks for space groups and absolute configuration."""
-        sohncke_groups = [1, 3, 4, 5, 16, 17, 18, 19, 20, 21, 22, 23, 24, 75, 76, 77, 78, 79, 80, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 143, 144, 145, 146, 149, 150, 151, 152, 153, 154, 155, 168, 169, 170, 171, 172, 173, 177, 178, 179, 180, 181, 182, 195, 196, 197, 198, 199, 207, 208, 209, 210, 211, 212, 213, 214]
+    def _get_absolute_configuration_fields(self):
+        """Return absolute-configuration field names matching the current CIF notation."""
+        content = self.text_editor.toPlainText()
+        detected_version = self.dict_manager.detect_notation(content)
+
+        if detected_version == FieldNotation.MODERN:
+            return "_chemical.absolute_configuration", "_refine_ls.abs_structure_z-score"
+
+        return "_chemical_absolute_configuration", "_refine_ls.abs_structure_z-score"
+
+    def _get_space_group_number(self):
+        """Return the IT space-group number from the current CIF, if present."""
         SG_number = None
         lines = self.text_editor.toPlainText().splitlines()
-        
+
         # Find space group number
         for line in lines:
             if line.startswith("_space_group_IT_number"):
@@ -792,109 +808,179 @@ class FieldCheckingMixin:
                     except Exception:
                         pass
                 break
-        
-        # Check if we need absolute configuration handling
-        if SG_number is not None and SG_number in sohncke_groups:
-            # Detect field notation to use appropriate field names
-            content = self.text_editor.toPlainText()
-            detected_version = self.dict_manager.detect_notation(content)
-            
-            # Determine field names based on notation
-            if detected_version == FieldNotation.MODERN:
-                abs_config_field = "_chemical.absolute_configuration"
-                z_score_field = "_refine_ls.abs_structure_z-score"
-            else:
-                # Use legacy format for legacy, MIXED, and UNKNOWN
-                abs_config_field = "_chemical_absolute_configuration"
-                z_score_field = "_refine_ls.abs_structure_z-score"
-            
-            found = False
-            for line in lines:
-                if line.startswith(abs_config_field):
-                    found = True
-                    break
-            
-            if found:
-                result = self.check_line_with_config(
-                    abs_config_field, 
-                    default_value='dyn', 
-                    multiline=False, 
-                    description="Specify if/how absolute structure was determined.", 
-                    config=config
+
+        return SG_number
+
+    def _is_sohncke_space_group(self):
+        """Return True when the current CIF uses a Sohncke space group."""
+        space_group_number = self._get_space_group_number()
+        return space_group_number in SOHNCKE_SPACE_GROUPS
+
+    def _get_inline_field_value(self, field_name):
+        """Return the first inline value found for a field, stripped of quotes."""
+        lines = self.text_editor.toPlainText().splitlines()
+
+        for index, line in enumerate(lines):
+            if line.startswith(field_name):
+                return self.extract_field_value(lines, index, field_name).strip().strip("'\"")
+
+        return None
+
+    def _is_electron_diffraction_data(self):
+        """Detect electron-diffraction data from CIF content rather than rule-set choice."""
+        probe_fields = (
+            "_diffrn_radiation.probe",
+            "_diffrn_radiation_probe",
+        )
+        for field_name in probe_fields:
+            field_value = self._get_inline_field_value(field_name)
+            if field_value and field_value.lower() == "electron":
+                return True
+
+        method_fields = (
+            "_diffrn_measurement.method",
+            "_diffrn_measurement_method",
+        )
+        for field_name in method_fields:
+            field_value = self._get_inline_field_value(field_name)
+            if field_value and "electron diffraction" in field_value.lower():
+                return True
+
+        return False
+
+    def _get_radiation_probe(self):
+        """Return the radiation probe field name and value, if present."""
+        probe_fields = (
+            "_diffrn_radiation.probe",
+            "_diffrn_radiation_probe",
+        )
+        for field_name in probe_fields:
+            field_value = self._get_inline_field_value(field_name)
+            if field_value:
+                return field_name, field_value
+
+        return None, None
+
+    def _apply_absolute_configuration_check(self, config, initial_state):
+        """Ensure absolute configuration is checked for Sohncke space groups."""
+        if not self._is_sohncke_space_group():
+            return None
+
+        abs_config_field, _ = self._get_absolute_configuration_fields()
+        lines = self.text_editor.toPlainText().splitlines()
+
+        found = False
+        for line in lines:
+            if line.startswith(abs_config_field):
+                found = True
+                break
+
+        if found:
+            result = self.check_line_with_config(
+                abs_config_field,
+                default_value='dyn',
+                multiline=False,
+                description="Specify if/how absolute structure was determined.",
+                config=config
+            )
+            if result == RESULT_ABORT:
+                self.text_editor.setText(initial_state)
+                self.update_window_title()
+                QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                return False
+            if result == RESULT_STOP_SAVE:
+                return None
+        else:
+            result = self.add_missing_line_with_config(
+                abs_config_field,
+                lines,
+                default_value='dyn',
+                multiline=False,
+                description="Specify if/how absolute structure was determined.",
+                config=config
+            )
+            if result == RESULT_ABORT:
+                self.text_editor.setText(initial_state)
+                self.update_window_title()
+                QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                return False
+            if result == RESULT_STOP_SAVE:
+                return None
+
+        lines = self.text_editor.toPlainText().splitlines()
+        for line in lines:
+            if line.startswith(abs_config_field):
+                parts = line.split()
+                if len(parts) > 1:
+                    return parts[1].strip("'\"")
+                break
+
+        return None
+
+    def _apply_abs_structure_z_score_check(self, config, initial_state):
+        """Check the z-score field for electron-diffraction dynamical refinement."""
+        _, z_score_field = self._get_absolute_configuration_fields()
+        lines = self.text_editor.toPlainText().splitlines()
+        found_z_score = False
+        for line in lines:
+            if line.startswith(z_score_field):
+                found_z_score = True
+                break
+
+        if found_z_score:
+            result = self.check_line_with_config(
+                z_score_field,
+                default_value='',
+                multiline=False,
+                description="Z-score for absolute structure determination from dynamical refinement.",
+                config=config
+            )
+            if result == RESULT_ABORT:
+                self.text_editor.setText(initial_state)
+                self.update_window_title()
+                QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                return False
+            if result == RESULT_STOP_SAVE:
+                return True
+        else:
+            result = self.add_missing_line_with_config(
+                z_score_field,
+                lines,
+                default_value='',
+                multiline=False,
+                description="Z-score for absolute structure determination from dynamical refinement.",
+                config=config
+            )
+            if result == RESULT_ABORT:
+                self.text_editor.setText(initial_state)
+                self.update_window_title()
+                QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                return False
+            if result == RESULT_STOP_SAVE:
+                return True
+
+        return True
+
+    def _apply_absolute_structure_checks(self, config, initial_state):
+        """Apply Sohncke and electron-diffraction-specific absolute-structure checks."""
+        absolute_config_value = self._apply_absolute_configuration_check(config, initial_state)
+
+        if absolute_config_value is False:
+            return False
+
+        if absolute_config_value == 'dyn':
+            probe_field, probe_value = self._get_radiation_probe()
+            if (probe_value and probe_value.lower() != 'electron'
+                    and config.get('show_warnings', True)):
+                QMessageBox.warning(
+                    self,
+                    "Absolute Structure Warning",
+                    f"{probe_field} is set to '{probe_value}', but absolute configuration is set to 'dyn'.\n\n"
+                    "This combination is inconsistent: 'dyn' should only be used for electron-diffraction data."
                 )
-                if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
-                    self.update_window_title()
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return False
-                elif result == RESULT_STOP_SAVE:
-                    return True
-            else:
-                result = self.add_missing_line_with_config(
-                    abs_config_field, 
-                    lines, 
-                    default_value='dyn', 
-                    multiline=False, 
-                    description="Specify if/how absolute structure was determined.", 
-                    config=config
-                )
-                if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
-                    self.update_window_title()
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                    return False
-                elif result == RESULT_STOP_SAVE:
-                    return True
-            
-            # Check for z-score if configuration is 'dyn'
-            lines = self.text_editor.toPlainText().splitlines()  # Re-get lines after potential changes
-            chemical_absolute_config_value = None
-            for line in lines:
-                if line.startswith(abs_config_field):
-                    parts = line.split()
-                    if len(parts) > 1:
-                        chemical_absolute_config_value = parts[1].strip("'\"")
-                        break
-            
-            if chemical_absolute_config_value == 'dyn':
-                # Check if z-score field exists
-                found_z_score = False
-                for line in lines:
-                    if line.startswith(z_score_field):
-                        found_z_score = True
-                        break
-                
-                if found_z_score:
-                    result = self.check_line_with_config(
-                        z_score_field, 
-                        default_value='', 
-                        multiline=False, 
-                        description="Z-score for absolute structure determination from dynamical refinement.", 
-                        config=config
-                    )
-                    if result == RESULT_ABORT:
-                        self.text_editor.setText(initial_state)
-                        self.update_window_title()
-                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                        return False
-                    elif result == RESULT_STOP_SAVE:
-                        return True
-                else:
-                    result = self.add_missing_line_with_config(
-                        z_score_field, 
-                        lines, 
-                        default_value='', 
-                        multiline=False, 
-                        description="Z-score for absolute structure determination from dynamical refinement.", 
-                        config=config
-                    )
-                    if result == RESULT_ABORT:
-                        self.text_editor.setText(initial_state)
-                        self.update_window_title()
-                        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
-                        return False
-                    elif result == RESULT_STOP_SAVE:
-                        return True
+
+        if absolute_config_value == 'dyn' and self._is_electron_diffraction_data():
+            return self._apply_abs_structure_z_score_check(config, initial_state)
         
         return True
 
