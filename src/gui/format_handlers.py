@@ -623,3 +623,134 @@ class FormatHandlersMixin:
         except Exception as e:
             QMessageBox.critical(self, "Compliance Error",
                                f"Failed to ensure CIF 1.1 compliance:\n{str(e)}")
+
+    def check_syntax_compliance(self):
+        """Show the CIF Syntax Compliance dialog for the current editor content."""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please open a CIF file first.")
+            return
+
+        from utils.cif_syntax_compliance import check_compliance
+        from .dialogs.cif_syntax_compliance_dialog import CIFSyntaxComplianceDialog
+        from .dialogs.non_ascii_conversion_dialog import NonAsciiConversionDialog
+        from utils.cif_char_encoding import (
+            detect_non_ascii_chars, convert_unicode_to_cif11,
+            convert_cif11_to_unicode, CIF11_UNICODE_TO_BACKSLASH,
+        )
+
+        results = check_compliance(content)
+        dialog = CIFSyntaxComplianceDialog(results['cif1'], results['cif2'], self)
+
+        def _goto(line_number: int):
+            doc = self.text_editor.document()
+            block = doc.findBlockByLineNumber(line_number - 1)
+            if block.isValid():
+                cursor = self.text_editor.textCursor()
+                cursor.setPosition(block.position())
+                self.text_editor.setTextCursor(cursor)
+                self.text_editor.ensureCursorVisible()
+
+        def _refresh():
+            fresh = self.text_editor.toPlainText()
+            res = check_compliance(fresh)
+            dialog.update_issues(res['cif1'], res['cif2'])
+
+        def _fix_all(spec: str):
+            """Apply auto-fixable issues scoped to *spec* ('cif1', 'cif2', or 'all')."""
+            from utils.cif2_value_formatting import fix_cif2_compliance_issues
+            current = self.text_editor.toPlainText()
+            changed = False
+
+            # Fix CIF2 special-char quoting (CIF2-scoped only)
+            if spec in ('cif2', 'all'):
+                fixed, fixes = fix_cif2_compliance_issues(current)
+                if fixes:
+                    current = fixed
+                    changed = True
+
+            # Add/fix version headers based on scope
+            res = check_compliance(current)
+            issues_in_scope = []
+            if spec in ('cif1', 'all'):
+                issues_in_scope += res['cif1']
+            if spec in ('cif2', 'all'):
+                issues_in_scope += res['cif2']
+
+            for issue in issues_in_scope:
+                if not issue.auto_fixable:
+                    continue
+                if issue.issue_type == 'missing_version_header':
+                    if issue.spec == 'CIF2':
+                        if not current.lstrip().startswith('#\\#CIF_2.0'):
+                            current = '#\\#CIF_2.0\n' + current
+                            changed = True
+                    else:  # CIF1.1
+                        if not current.lstrip().startswith('#\\#CIF_'):
+                            current = '#\\#CIF_1.1\n' + current
+                            changed = True
+                elif issue.issue_type == 'wrong_version_header':
+                    lines = current.split('\n')
+                    for idx, line in enumerate(lines[:5]):
+                        if line.strip().startswith('#\\#CIF_2.0'):
+                            lines[idx] = '#\\#CIF_1.1'
+                            changed = True
+                            break
+                    current = '\n'.join(lines)
+
+            if changed:
+                self.text_editor.setText(current)
+                self.modified = True
+
+            # Refresh dialog
+            fresh_res = check_compliance(self.text_editor.toPlainText())
+            dialog.update_issues(fresh_res['cif1'], fresh_res['cif2'])
+
+            if not changed:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    dialog, "No Changes",
+                    "No auto-fixable issues were found or could be applied."
+                )
+
+        def _show_non_ascii():
+            current = self.text_editor.toPlainText()
+            occurrences = detect_non_ascii_chars(current)
+            if not occurrences:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    dialog, "No Non-ASCII Characters",
+                    "No non-ASCII characters were found in the current content."
+                )
+                return
+            na_dialog = NonAsciiConversionDialog(occurrences, 'unicode_to_cif11', dialog)
+
+            def _apply(direction: str, chars: list):
+                cur = self.text_editor.toPlainText()
+                if direction == 'unicode_to_cif11':
+                    for ch in chars:
+                        code = CIF11_UNICODE_TO_BACKSLASH.get(ch)
+                        if code:
+                            cur = cur.replace(ch, code)
+                else:
+                    from utils.cif_char_encoding import CIF11_BACKSLASH_TO_UNICODE
+                    for ch in chars:
+                        code = CIF11_UNICODE_TO_BACKSLASH.get(ch)
+                        if code:
+                            cur = cur.replace(code, ch)
+                self.text_editor.setText(cur)
+                self.modified = True
+                fresh_res = check_compliance(self.text_editor.toPlainText())
+                dialog.update_issues(fresh_res['cif1'], fresh_res['cif2'])
+
+            na_dialog.conversion_requested.connect(_apply)
+            na_dialog.exec()
+
+        dialog.navigate_to_line.connect(_goto)
+        dialog.refresh_requested.connect(_refresh)
+        dialog.fix_all_requested.connect(_fix_all)
+        dialog.non_ascii_conversion_requested.connect(_show_non_ascii)
+
+        self._show_dialog_with_configured_interaction(
+            dialog, "dialogs.syntax_compliance_mode"
+        )

@@ -14,7 +14,7 @@ Key CIF2 requirements:
 """
 
 import re
-from typing import Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 # Characters that require quoting in CIF2 whitespace-delimited values
@@ -232,19 +232,20 @@ def validate_cif2_content(content: str) -> list:
     
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-        
+
         # Track semicolon-delimited multiline values
-        if stripped.startswith(';'):
+        # Semicolon delimiter must be at column 0 (use line, not stripped)
+        if line.startswith(';'):
             in_semicolon_block = not in_semicolon_block
             continue
-        
+
         if in_semicolon_block:
             continue
-        
+
         # Skip empty lines, comments, and CIF keywords
         if not stripped or stripped.startswith('#') or stripped.startswith('data_') or stripped.startswith('loop_'):
             continue
-        
+
         # Check for field definitions
         if stripped.startswith('_'):
             parts = stripped.split(None, 1)
@@ -287,15 +288,16 @@ def fix_cif2_compliance_issues(content: str) -> tuple:
     lines = content.split('\n')
     
     in_semicolon_block = False
-    
+
     for i, line in enumerate(lines):
         stripped = line.strip()
-        
+
         # Track semicolon-delimited multiline values
-        if stripped.startswith(';'):
+        # Semicolon delimiter must be at column 0 (use line, not stripped)
+        if line.startswith(';'):
             in_semicolon_block = not in_semicolon_block
             continue
-        
+
         if in_semicolon_block:
             continue
         
@@ -353,5 +355,7 @@ def _is_value_quoted(value: str) -> bool:
         return True
     if (value.startswith('"') and value.endswith('"')):
         return True
-    
+
     return False
+
+

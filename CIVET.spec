@@ -64,7 +64,6 @@ a = Analysis(
         'gui.editor',
         'gui.editor.text_editor',
         'gui.editor.syntax_highlighter',
-        'gui.widgets',
         'gui.dialogs',
         'gui.dialogs.input_dialog',
         'gui.dialogs.multiline_dialog', 
@@ -89,7 +88,7 @@ a = Analysis(
         'utils.cif_dictionary_manager',
         'utils.cif_format_converter',
         'utils.cif_dictionary_parser',
-        'utils.cif_deprecation_manager',
+        'utils.cif_char_encoding',
         'utils.dictionary_suggestion_manager',
         'utils.field_rules_validator',
         'utils.user_config',              # Unified configuration management

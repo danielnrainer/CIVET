@@ -308,7 +308,7 @@ class FieldCheckingMixin:
         # Parse the CIF content using the new parser
         self.cif_parser.parse_file(content)
         
-        # Detect field notation to determine the correct field name
+        # Detect data name notation to determine the correct data name
         detected_version = self.dict_manager.detect_notation(content)
         
         # Determine the appropriate field name based on notation

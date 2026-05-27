@@ -390,17 +390,22 @@ class CIFFormatConverter:
     def check_cif1_compliance(self, content: str) -> List[str]:
         """
         Check whether CIF content can be represented as valid CIF 1.1.
-        
+
+        Delegates to :mod:`cif_syntax_compliance` for complete checks
+        including non-ASCII characters and CIF2-only constructs.
+
         Returns:
-            List of compliance issues found.  Empty list means CIF1-compliant.
+            List of compliance issue descriptions.  Empty list means CIF1-compliant.
         """
-        issues = []
-        
-        cif2_constructs = self.detect_cif2_constructs(content)
-        for construct in cif2_constructs:
-            issues.append(f"CIF2-only construct found: {construct}")
-        
-        return issues
+        from .cif_syntax_compliance import CIF1ComplianceChecker
+        checker = CIF1ComplianceChecker()
+        issues = checker.check(content)
+        # Only return errors (not warnings/info) as compliance blockers
+        return [
+            str(issue)
+            for issue in issues
+            if issue.severity == 'error'
+        ]
 
     def ensure_cif1_compliant(self, content: str) -> Tuple[str, List[str]]:
         """
@@ -421,7 +426,7 @@ class CIFFormatConverter:
         issues = self.check_cif1_compliance(content)
         if issues:
             raise ValueError(
-                "Cannot ensure CIF 1.1 compliance — CIF2-only constructs present:\n" +
+                "Cannot ensure CIF 1.1 compliance — compliance issues present:\n" +
                 "\n".join(f"  • {issue}" for issue in issues)
             )
         
@@ -695,41 +700,48 @@ class CIFFormatConverter:
         in_text_block = False
         in_triple_single = False
         in_triple_double = False
-        
+
         for line in cif_content.split('\n'):
             stripped = line.strip()
-            
-            # Track semicolon text blocks
-            if stripped.startswith(';') and not in_triple_single and not in_triple_double:
+
+            # Track semicolon text blocks: semicolon must be at
+            # column 0 (use `line`, not `stripped`).
+            if line.startswith(';') and not in_triple_single and not in_triple_double:
                 in_text_block = not in_text_block
                 continue
             if in_text_block:
                 continue
-            
-            # Track triple-quoted strings
-            if '"""' in stripped or "'''" in stripped:
-                if '"""' in stripped:
+
+            # Track triple-quoted strings — Bug C fix: count occurrences per
+            # line so that open+close on the same line leaves state unchanged.
+            if '"""' in stripped:
+                count = stripped.count('"""')
+                if count % 2 == 1:
                     in_triple_double = not in_triple_double
-                if "'''" in stripped:
+            if "'''" in stripped:
+                count = stripped.count("'''")
+                if count % 2 == 1:
                     in_triple_single = not in_triple_single
             if in_triple_single or in_triple_double:
                 continue
-            
+
             # Skip comment lines
             if stripped.startswith('#'):
                 continue
-            
+
             # Determine the value portion of this line.
+            # Strip inline comments from value_part before checks.
             value_part = None
             if stripped.startswith('_'):
                 # Field line: value comes after the field name
                 parts = stripped.split(None, 1)
                 if len(parts) == 2:
-                    value_part = parts[1].strip()
+                    raw_vp = parts[1].strip()
+                    value_part = CIFFormatConverter._strip_inline_comment(raw_vp)
             elif not stripped.startswith('loop_') and not stripped.startswith('data_') and stripped:
                 # Continuation / loop-data line — entire line is value(s)
-                value_part = stripped
-            
+                value_part = CIFFormatConverter._strip_inline_comment(stripped)
+
             if value_part is not None:
                 vp = value_part.lstrip()
                 if vp.startswith('[') and 'list values [...]' not in found:
@@ -737,12 +749,29 @@ class CIFFormatConverter:
                         found.append('list values [...]')
                 elif vp.startswith('{') and 'table values {...}' not in found:
                     found.append('table values {...}')
-            
+
             # Check for triple-quoted strings (opening)
             if ('"""' in stripped or "'''" in stripped) and 'triple-quoted strings' not in found:
                 found.append('triple-quoted strings')
-        
+
         return found
+
+    @staticmethod
+    def _strip_inline_comment(value_part: str) -> str:
+        """Strip a trailing ``# comment`` from a value-part string.
+
+        Only strips when ``#`` is preceded by whitespace (i.e. not part of
+        a quoted or unquoted value token).  Leaves quoted strings intact.
+        """
+        if not value_part:
+            return value_part
+        stripped = value_part.lstrip()
+        if stripped.startswith("'") or stripped.startswith('"'):
+            return value_part   # Quoted string — leave as-is
+        m = re.search(r'\s#', value_part)
+        if m:
+            return value_part[: m.start()].rstrip()
+        return value_part
 
     @staticmethod
     def _looks_like_cif2_list(value: str) -> bool:

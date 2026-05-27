@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
-                           QButtonGroup, QComboBox)
+                           QButtonGroup, QComboBox, QFormLayout)
 from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
@@ -284,11 +284,11 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         self.status_bar = self.statusBar()
         self.path_label = QLabel()
         self.cursor_label = QLabel()
-        # self.cif_version_label = QLabel("CIF Version: Unknown")  # FUTURE: re-enable when needed
         self.modified_label = QLabel()
         self.dictionary_label = QLabel("Dictionary: Default")
+        self._compliance_label = QLabel()
         self.status_bar.addPermanentWidget(self.path_label)
-        # self.status_bar.addPermanentWidget(self.cif_version_label)  # FUTURE: re-enable when needed
+        self.status_bar.addPermanentWidget(self._compliance_label)
         self.status_bar.addPermanentWidget(self.modified_label)
         self.status_bar.addPermanentWidget(self.dictionary_label)
         self.status_bar.addPermanentWidget(self.cursor_label)
@@ -378,9 +378,35 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         custom_layout.addWidget(self.custom_file_label)
         custom_layout.addStretch()
         field_selection_layout.addLayout(custom_layout)
-        
-        main_layout.addWidget(field_selection_group)
-        
+
+        # ── CIF File Status panel ────────────────────────────────────────
+        status_group = QGroupBox("CIF File Status")
+        status_form = QFormLayout(status_group)
+        status_form.setContentsMargins(8, 6, 8, 6)
+        status_form.setSpacing(6)
+
+        self._status_syntax_label = QLabel("\u2013")
+        self._status_syntax_label.setStyleSheet("color: gray;")
+        status_form.addRow("Syntax:", self._status_syntax_label)
+
+        self._status_notation_label = QLabel("\u2013")
+        self._status_notation_label.setStyleSheet("color: gray;")
+        status_form.addRow("Notation:", self._status_notation_label)
+
+        self._status_names_label = QLabel("\u2013 Not run")
+        self._status_names_label.setStyleSheet("color: gray;")
+        status_form.addRow("Data names:", self._status_names_label)
+
+        self._status_values_label = QLabel("\u2013 Not run")
+        self._status_values_label.setStyleSheet("color: gray;")
+        status_form.addRow("Data values:", self._status_values_label)
+
+        # Place field selection and status panels side by side
+        bottom_panels = QHBoxLayout()
+        bottom_panels.addWidget(field_selection_group, stretch=3)
+        bottom_panels.addWidget(status_group, stretch=1)
+        main_layout.addLayout(bottom_panels)
+
         # Create button layout
         button_layout = QHBoxLayout()
         
@@ -474,6 +500,14 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         
         ensure_cif1_action = syntax_menu.addAction("Ensure CIF 1.1 Compliance")
         ensure_cif1_action.triggered.connect(self.ensure_cif1_compliance)
+
+        syntax_menu.addSeparator()
+
+        check_compliance_action = syntax_menu.addAction("Check Syntax Compliance…")
+        check_compliance_action.triggered.connect(self.check_syntax_compliance)
+        check_compliance_action.setToolTip(
+            "Show CIF 1.1 and CIF 2.0 compliance issues for the current file"
+        )
         
         format_menu.addSeparator()
         
@@ -869,9 +903,9 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.modified = False
             self.cif_text_editor.set_modified(False)
             
-            # FUTURE: Re-enable when CIF version display is re-enabled
-            # self.detect_and_update_cif_version(content)
-
+            self._update_compliance_status(content)
+            self._update_status_panel_names(None)
+            self._update_status_panel_values(None)
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.update_window_title(filepath)
@@ -905,6 +939,9 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.text_editor.setText(content)
             self.modified = False
             self.cif_text_editor.set_modified(False)
+            self._update_compliance_status(content)
+            self._update_status_panel_names(None)
+            self._update_status_panel_values(None)
             self.update_status_bar()
             self.update_window_title(self.current_file)
         except Exception as e:
@@ -981,6 +1018,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.current_file = filepath
             self.modified = False
             self.cif_text_editor.set_modified(False)
+            self._update_compliance_status(content)
             self.update_status_bar()
             QMessageBox.information(self, "Success", 
                                   f"File saved successfully:\n{filepath}")
@@ -1193,7 +1231,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         """Reformat CIF file to handle long lines and properly format values, preserving semicolon blocks."""
         # Ask for user confirmation before reformatting
         reply = QMessageBox.question(self, "Confirm Reformatting",
-                                   "This will reformat the entire CIF file to handle long lines and proper formatting.\n\n"
+                                   "This will reformat the entire CIF file to a maximum of 80 characters per line and proper formatting.\n\n"
                                    "This may change existing formatting that you have intentionally applied.\n\n"
                                    "Do you want to proceed with reformatting?",
                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1240,16 +1278,18 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         self.modified = True
         self.update_status_bar()
 
-        # FUTURE: Re-enable when CIF version display is re-enabled
-        # Schedule CIF version detection (delayed to avoid constant updates)
-        # if hasattr(self, 'version_detect_timer'):
-        #     self.version_detect_timer.stop()
-        # else:
-        #     self.version_detect_timer = QTimer()
-        #     self.version_detect_timer.setSingleShot(True)
-        #     self.version_detect_timer.timeout.connect(lambda: self.detect_and_update_cif_version())
-        #
-        # self.version_detect_timer.start(1000)  # 1 second delay
+        # Schedule a compliance status refresh with a short debounce delay so we
+        # don't re-check on every single keystroke.
+        if not hasattr(self, '_compliance_update_timer'):
+            self._compliance_update_timer = QTimer()
+            self._compliance_update_timer.setSingleShot(True)
+            self._compliance_update_timer.timeout.connect(self._refresh_compliance_status)
+        self._compliance_update_timer.start(750)  # 750 ms debounce
+
+    def _refresh_compliance_status(self):
+        """Called by the debounce timer to update the compliance status label."""
+        content = self.text_editor.toPlainText()
+        self._update_compliance_status(content)
     
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
@@ -1337,24 +1377,126 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
     
     def update_cif_version_display(self):
         """Update the CIF version display in the status bar"""
-        # FUTURE: Re-enable when CIF version display is re-enabled (restore cif_version_label widget too)
-        # notation_text = {
-        #     FieldNotation.LEGACY: "Notation: Legacy",
-        #     FieldNotation.MODERN: "Notation: Modern",
-        #     FieldNotation.MIXED: "Notation: Mixed",
-        #     FieldNotation.UNKNOWN: "Notation: Unknown"
-        # }
-        # color = {
-        #     FieldNotation.LEGACY: "green",
-        #     FieldNotation.MODERN: "blue",
-        #     FieldNotation.MIXED: "orange",
-        #     FieldNotation.UNKNOWN: "red"
-        # }
-        # text = notation_text.get(self.current_cif_version, "Notation: Unknown")
-        # self.cif_version_label.setText(text)
-        # self.cif_version_label.setStyleSheet(f"color: {color.get(self.current_cif_version, 'black')}")
         pass
-    
+
+    def _update_compliance_status(self, content: str) -> None:
+        """Run a quick compliance check and update the status-bar label and status panel.
+
+        Priority (highest to lowest):
+            Green  — CIF 2.0 compliant (no errors from the CIF2 checker)
+            Blue   — CIF 1.1 compliant (no errors from the CIF1.1 checker,
+                     but CIF2 checker has errors)
+            Amber  — neither checker is error-free, but issues are only
+                     warning/info severity (rare with current checkers)
+            Red    — not compliant with either; at least one error-severity
+                     issue present
+
+        CIF 2.0 compliance is treated as the preferred/optimal state.
+        """
+        def _panel(attr: str, text: str, style: str) -> None:
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setText(text)
+                w.setStyleSheet(style)
+
+        if not content.strip():
+            self._compliance_label.setText("")
+            _panel('_status_syntax_label',   "\u2013", "color: gray;")
+            _panel('_status_notation_label', "\u2013", "color: gray;")
+            return
+        try:
+            from utils.cif_syntax_compliance import check_compliance
+            results = check_compliance(content)
+            cif2_errors = [i for i in results['cif2'] if i.severity == 'error']
+            cif1_errors = [i for i in results['cif1'] if i.severity == 'error']
+
+            if not cif2_errors:
+                self._compliance_label.setText("CIF 2.0 \u2714")
+                self._compliance_label.setStyleSheet("color: green; font-weight: bold;")
+                _panel('_status_syntax_label', "\u2714 CIF 2.0",
+                       "color: green; font-weight: bold;")
+            elif not cif1_errors:
+                self._compliance_label.setText("CIF 1.1 \u2714")
+                self._compliance_label.setStyleSheet("color: blue; font-weight: bold;")
+                _panel('_status_syntax_label', "\u2714 CIF 1.1",
+                       "color: blue; font-weight: bold;")
+            else:
+                all_issues = results['cif1'] + results['cif2']
+                has_error_sev = any(i.severity == 'error' for i in all_issues)
+                n = len(all_issues)
+                if has_error_sev:
+                    self._compliance_label.setText(f"\u2716 {n} compliance error(s)")
+                    self._compliance_label.setStyleSheet("color: red; font-weight: bold;")
+                    _panel('_status_syntax_label', "\u2717 Not compliant",
+                           "color: red; font-weight: bold;")
+                else:
+                    self._compliance_label.setText(f"\u26a0 {n} warning(s)")
+                    self._compliance_label.setStyleSheet(
+                        "color: darkorange; font-weight: bold;"
+                    )
+                    _panel('_status_syntax_label', f"\u26a0 Warnings ({n})",
+                           "color: darkorange; font-weight: bold;")
+
+            # Notation row
+            notation = self.dict_manager.detect_notation(content)
+            if notation == FieldNotation.MODERN:
+                _panel('_status_notation_label', "\u2714 Modern (dot)",
+                       "color: green; font-weight: bold;")
+            elif notation == FieldNotation.LEGACY:
+                _panel('_status_notation_label', "Legacy (underscore)",
+                       "color: blue; font-weight: bold;")
+            elif notation == FieldNotation.MIXED:
+                _panel('_status_notation_label', "\u26a0 Mixed",
+                       "color: darkorange; font-weight: bold;")
+            else:
+                _panel('_status_notation_label', "\u2013", "color: gray;")
+        except Exception:
+            self._compliance_label.setText("")
+
+    def _update_status_panel_names(self, report) -> None:
+        """Update the 'Data names' row in the status panel.
+
+        Pass *report* (a ValidationReport) after running data-name validation,
+        or None to reset the row to 'Not run'.
+        """
+        w = getattr(self, '_status_names_label', None)
+        if w is None:
+            return
+        if report is None:
+            w.setText("\u2013 Not run")
+            w.setStyleSheet("color: gray;")
+            return
+        n_issues = (len(report.unknown_fields)
+                    + len(report.deprecated_fields)
+                    + len(report.malformed_fields))
+        if n_issues == 0:
+            w.setText(f"\u2714 Validated ({report.total_fields} field(s))")
+            w.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            w.setText(f"\u2717 {n_issues} issue(s)")
+            w.setStyleSheet("color: red; font-weight: bold;")
+
+    def _update_status_panel_values(self, issues) -> None:
+        """Update the 'Data values' row in the status panel.
+
+        Pass a list of ValidationIssue objects after running data-value
+        validation, or None to reset the row to 'Not run'.
+        """
+        w = getattr(self, '_status_values_label', None)
+        if w is None:
+            return
+        if issues is None:
+            w.setText("\u2013 Not run")
+            w.setStyleSheet("color: gray;")
+            return
+        n = len(issues)
+        if n == 0:
+            w.setText("\u2714 Validated")
+            w.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            w.setText(f"\u2717 {n} issue(s)")
+            w.setStyleSheet("color: red; font-weight: bold;")
+
     def load_custom_dictionary(self):
         """Load a custom CIF dictionary file."""
         try:
@@ -1513,7 +1655,8 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             # Clear validator cache and run validation
             self.data_name_validator.clear_cache()
             report = self.data_name_validator.validate_cif_content(content)
-            
+            self._update_status_panel_names(report)
+
             # Show dialog
             dialog = DataNameValidationDialog(report, self.data_name_validator, self)
             
@@ -1533,10 +1676,17 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                 dialog,
                 "dialogs.data_name_validation_results_mode"
             )
-            
+
             # If any changes were applied during the session, do final cleanup
             if dialog.has_changes_applied():
                 self.data_name_validator.clear_cache()
+
+            # Re-validate on close to reflect any edits made while dialog was open
+            self.data_name_validator.clear_cache()
+            close_content = self.text_editor.toPlainText()
+            if close_content.strip():
+                close_report = self.data_name_validator.validate_cif_content(close_content)
+                self._update_status_panel_names(close_report)
                 
         except Exception as e:
             import traceback
@@ -1561,6 +1711,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
 
             validator = CIFDataValidator()
             issues = validator.validate(parser, self.dict_manager)
+            self._update_status_panel_values(issues)
 
             dialog = CIFValueValidationDialog(issues, self)
 
@@ -1595,6 +1746,18 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                 dialog,
                 "dialogs.cif_value_validation_mode",
             )
+
+            # Re-validate on close to reflect any edits made while dialog was open
+            try:
+                close_content = self.text_editor.toPlainText()
+                if close_content.strip():
+                    close_parser = CIFParser()
+                    close_parser.parse_file(close_content)
+                    close_validator = CIFDataValidator()
+                    close_issues = close_validator.validate(close_parser, self.dict_manager)
+                    self._update_status_panel_values(close_issues)
+            except Exception:
+                pass
 
         except Exception as e:
             import traceback

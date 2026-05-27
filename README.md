@@ -18,7 +18,8 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes, and uses validation-aware highlighting.
-- **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **CIF Format → Validate Data Values...**
+- **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
+- **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes.
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
 
@@ -87,7 +88,7 @@ APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  #
 CALCULATE: _diffrn.flux_density = _diffrn.flux_density / (_diffrn.total_exposure_time * 60) 
 ```
 
-Built-in sets: **3DED** (electron diffraction)
+Built-in sets include packaged `.cif_rules` files from `field_rules/` (for example 3DED modern and 3DED legacy).
 
 ### User Custom Field Rules (AppData)
 CIVET supports persistent user-created field rules stored in your system's application data directory:
@@ -147,7 +148,7 @@ Advanced users can also customise syntax-highlighting colours manually in `setti
 
 ### Data Value Validation
 
-The **CIF Format → Validate Data Values...** dialog checks all field values in the current file against dictionary definitions:
+The **Actions → Validate Data Values...** dialog checks all field values in the current file against dictionary definitions:
 
 - **Type mismatches**: flags non-numeric values for `Real`/`Integer` fields
 - **Enum violations**: flags values not listed in `_enumeration_set.state`

@@ -712,8 +712,8 @@ class CIFDictionaryManager:
         if constructs:
             return CIFSyntaxVersion.CIF2
         
-        # No header, no CIF2 constructs — assume CIF 1.1
-        return CIFSyntaxVersion.CIF1
+        # No header, no CIF2 constructs — syntax version is indeterminate
+        return CIFSyntaxVersion.UNKNOWN
 
     def detect_cif_version(self, content: str) -> FieldNotation:
         """
