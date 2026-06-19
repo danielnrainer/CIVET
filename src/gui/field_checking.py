@@ -292,6 +292,7 @@ class FieldCheckingMixin:
         # Generate updated CIF content and update the text editor
         updated_content = self.cif_parser.generate_cif_content()
         self.text_editor.setText(updated_content)
+        self._check_duplicate_data_names("adding deprecated successor data names", block_on_conflicts=False)
         
         QMessageBox.information(
             self, 

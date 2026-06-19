@@ -80,6 +80,46 @@ class CIFFormatConverter:
                 '_geom_angle',
                 '_cell_measurement_temperature'
             }
+
+    def _append_unknown_fields_warning(self, changes: List[str], unknown_fields: List[str]) -> None:
+        """Append a concise unknown-fields warning to conversion change logs."""
+        if not unknown_fields:
+            return
+
+        unique_fields = sorted(set(unknown_fields))
+        preview_limit = 5
+        preview_fields = unique_fields[:preview_limit]
+        remaining = len(unique_fields) - len(preview_fields)
+
+        warning = (
+            f"Warning: {len(unique_fields)} unknown data name(s) were kept unchanged. "
+            f"Examples: {', '.join(preview_fields)}"
+        )
+        if remaining > 0:
+            warning += f", and {remaining} more."
+
+        warning += "\nUse Actions -> Validate Data Names... to review these fields."
+        changes.append(warning)
+
+    def _append_no_legacy_alias_warning(self, changes: List[str], fields_without_legacy_alias: List[str]) -> None:
+        """Report known modern data names that must remain modern because no legacy alias exists."""
+        if not fields_without_legacy_alias:
+            return
+
+        unique_fields = sorted(set(fields_without_legacy_alias))
+        preview_limit = 5
+        preview_fields = unique_fields[:preview_limit]
+        remaining = len(unique_fields) - len(preview_fields)
+
+        warning = (
+            f"Warning: {len(unique_fields)} known modern data name(s) have no legacy alias and were kept unchanged. "
+            f"Examples: {', '.join(preview_fields)}"
+        )
+        if remaining > 0:
+            warning += f", and {remaining} more."
+
+        warning += "\nThis is expected and intended behaviour and the CIF remains valid."
+        changes.append(warning)
     
     def convert_to_modern_notation(self, cif_content: str, remove_duplicates: bool = True) -> Tuple[str, List[str]]:
         """
@@ -150,7 +190,7 @@ class CIFFormatConverter:
                 converted_line = self._convert_line_to_modern(line, unknown_fields)
             
             if converted_line != original_line:
-                changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
+                changes.append(f"Line {i+1}: {original_line.split()[0]} → {converted_line.split()[0]}")
             
             converted_lines.append(converted_line)
         
@@ -169,8 +209,7 @@ class CIFFormatConverter:
         converted_content, compat_changes = self._add_checkcif_legacy_notation(converted_content)
         changes.extend(compat_changes)
         
-        if unknown_fields:
-            changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
+        self._append_unknown_fields_warning(changes, unknown_fields)
         
         return converted_content, changes
 
@@ -227,6 +266,7 @@ class CIFFormatConverter:
         converted_lines = []
         changes = []
         unknown_fields = []
+        fields_without_legacy_alias = []
         
         in_loop = False
         loop_field_count = 0
@@ -253,29 +293,45 @@ class CIFFormatConverter:
                 converted_line = line
             elif in_loop and stripped.startswith('_'):
                 loop_field_count += 1
-                converted_line = self._convert_line_to_legacy(line, unknown_fields)
+                converted_line = self._convert_line_to_legacy(
+                    line,
+                    unknown_fields,
+                    fields_without_legacy_alias,
+                )
             elif in_loop and stripped and not stripped.startswith('_') and not stripped.startswith('#'):
                 if loop_field_count > 0:
                     converted_line = line
                 else:
-                    converted_line = self._convert_line_to_legacy(line, unknown_fields)
+                    converted_line = self._convert_line_to_legacy(
+                        line,
+                        unknown_fields,
+                        fields_without_legacy_alias,
+                    )
             elif in_loop and (stripped == '' or stripped.startswith('data_') or stripped == 'loop_'):
                 in_loop = False
                 loop_field_count = 0
                 if stripped.startswith('_'):
-                    converted_line = self._convert_line_to_legacy(line, unknown_fields)
+                    converted_line = self._convert_line_to_legacy(
+                        line,
+                        unknown_fields,
+                        fields_without_legacy_alias,
+                    )
                 else:
                     converted_line = line
             else:
-                converted_line = self._convert_line_to_legacy(line, unknown_fields)
+                converted_line = self._convert_line_to_legacy(
+                    line,
+                    unknown_fields,
+                    fields_without_legacy_alias,
+                )
             
             if converted_line != original_line:
-                changes.append(f"Line {i+1}: {original_line.strip()} → {converted_line.strip()}")
+                changes.append(f"Line {i+1}: {original_line.split()[0]} → {converted_line.split()[0]}")
             
             converted_lines.append(converted_line)
         
-        if unknown_fields:
-            changes.append(f"WARNING: {len(unknown_fields)} unknown field(s): {', '.join(set(unknown_fields))}")
+        self._append_unknown_fields_warning(changes, unknown_fields)
+        self._append_no_legacy_alias_warning(changes, fields_without_legacy_alias)
         
         # Warn about CIF2-only constructs
         converted_content = '\n'.join(converted_lines)
@@ -329,9 +385,9 @@ class CIFFormatConverter:
             Tuple of (fixed_content, list_of_changes_made)
         """
         if target_version == FieldNotation.MODERN:
-            return self.convert_to_modern(cif_content)
+            return self.convert_to_modern_notation(cif_content)
         elif target_version == FieldNotation.LEGACY:
-            return self.convert_to_legacy(cif_content)
+            return self.convert_to_legacy_notation(cif_content)
         else:
             raise ValueError(f"Cannot convert to {target_version}")
 
@@ -444,7 +500,7 @@ class CIFFormatConverter:
         
         return '\n'.join(lines), changes
     
-    def _convert_line_to_modern(self, line: str, unknown_fields: List[str] = None) -> str:
+    def _convert_line_to_modern(self, line: str, unknown_fields: Optional[List[str]] = None) -> str:
         """
         Convert a single line to modern format.
         
@@ -481,7 +537,12 @@ class CIFFormatConverter:
         
         return line
     
-    def _convert_line_to_legacy(self, line: str, unknown_fields: List[str] = None) -> str:
+    def _convert_line_to_legacy(
+        self,
+        line: str,
+        unknown_fields: Optional[List[str]] = None,
+        fields_without_legacy_alias: Optional[List[str]] = None,
+    ) -> str:
         """
         Convert a single line to legacy format.
         
@@ -505,8 +566,24 @@ class CIFFormatConverter:
         indent, field_name, rest = field_match.groups()
         
         # Check if field is known in dictionary
-        if unknown_fields is not None and not self.dict_manager.is_known_field(field_name):
+        is_known_field = self.dict_manager.is_known_field(field_name)
+        if unknown_fields is not None and not is_known_field:
             unknown_fields.append(field_name)
+
+        # Keep already-valid, non-deprecated legacy aliases unchanged.
+        if is_known_field and '.' not in field_name and not self.dict_manager.is_field_deprecated(field_name):
+            return line
+
+        # Some known modern fields have no legacy alias in active dictionaries.
+        # Keep them unchanged and report them separately.
+        if (
+            fields_without_legacy_alias is not None
+            and is_known_field
+            and '.' in field_name
+            and self.dict_manager.map_to_legacy(field_name) is None
+        ):
+            fields_without_legacy_alias.append(field_name)
+            return line
         
         # Convert field name using dictionary lookup
         converted_field = self._convert_field_to_legacy(field_name)

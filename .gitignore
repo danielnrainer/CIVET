@@ -25,7 +25,6 @@ Thumbs.db
 *.temp
 build/
 dist/
-*.txt
 .gitignore
 
 .github/

@@ -43,9 +43,10 @@ from .dialogs.cif_value_validation_dialog import CIFValueValidationDialog
 from .editor import CIFSyntaxHighlighter, CIFTextEditor
 from .format_handlers import FormatHandlersMixin
 from .field_checking import FieldCheckingMixin
+from .data_name_integrity import DataNameIntegrityMixin
 
 
-class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
+class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_file = None
@@ -90,6 +91,10 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         
         # Set up syntax highlighter field validator callback
         def _field_validator_callback(field_name: str) -> str:
+            if '.' in field_name and self.dict_manager.is_known_field(field_name):
+                canonical = self.dict_manager.map_to_modern(field_name) or field_name
+                if self.dict_manager.map_to_legacy(canonical) is None:
+                    return "modern_only"
             result = self.data_name_validator.validate_field(field_name)
             return result.category.value
         self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
@@ -478,8 +483,8 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         
         format_menu.addSeparator()
         
-        # Field notation conversion
-        notation_menu = format_menu.addMenu("Field Notation")
+        # Data name notation conversion
+        notation_menu = format_menu.addMenu("Data Name Notation")
         
         convert_to_legacy_action = notation_menu.addAction("Convert to Legacy Notation")
         convert_to_legacy_action.triggered.connect(self.convert_to_legacy)
@@ -903,9 +908,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.modified = False
             self.cif_text_editor.set_modified(False)
             
-            self._update_compliance_status(content)
-            self._update_status_panel_names(None)
-            self._update_status_panel_values(None)
+            self._refresh_compliance_status()
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.update_window_title(filepath)
@@ -939,9 +942,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.text_editor.setText(content)
             self.modified = False
             self.cif_text_editor.set_modified(False)
-            self._update_compliance_status(content)
-            self._update_status_panel_names(None)
-            self._update_status_panel_values(None)
+            self._refresh_compliance_status()
             self.update_status_bar()
             self.update_window_title(self.current_file)
         except Exception as e:
@@ -999,6 +1000,13 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                     )
                     # Update the editor with fixed content
                     self.text_editor.setText(content)
+
+            # Saving must not proceed with duplicate/alias conflicts.
+            if not self._check_duplicate_data_names("saving", block_on_conflicts=True):
+                return
+
+            # Content may have changed during conflict resolution.
+            content = self.text_editor.toPlainText().strip()
             
             # Preserve existing header; add CIF2 header only if CIF2 constructs detected and no header present
             syntax_ver = self.dict_manager.detect_syntax_version(content)
@@ -1018,7 +1026,7 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.current_file = filepath
             self.modified = False
             self.cif_text_editor.set_modified(False)
-            self._update_compliance_status(content)
+            self._refresh_compliance_status()
             self.update_status_bar()
             QMessageBox.information(self, "Success", 
                                   f"File saved successfully:\n{filepath}")
@@ -1287,9 +1295,41 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
         self._compliance_update_timer.start(750)  # 750 ms debounce
 
     def _refresh_compliance_status(self):
-        """Called by the debounce timer to update the compliance status label."""
+        """Refresh syntax, notation, data-name, and data-value status indicators."""
         content = self.text_editor.toPlainText()
         self._update_compliance_status(content)
+
+        if not content.strip():
+            self._update_status_panel_names(None)
+            self._update_status_panel_values(None)
+            return
+
+        # Keep status indicators current without requiring explicit validation actions.
+        try:
+            self.data_name_validator.clear_cache()
+            names_report = self.data_name_validator.validate_cif_content(content)
+            self._update_status_panel_names(names_report)
+        except Exception:
+            self._update_status_panel_names(None)
+            w = getattr(self, '_status_names_label', None)
+            if w is not None:
+                w.setText("⚠ Error")
+                w.setStyleSheet("color: darkorange; font-weight: bold;")
+
+        try:
+            from utils.CIF_parser import CIFParser
+            from utils.cif_data_validator import CIFDataValidator
+
+            parser = CIFParser()
+            parser.parse_file(content)
+            issues = CIFDataValidator().validate(parser, self.dict_manager)
+            self._update_status_panel_values(issues)
+        except Exception:
+            self._update_status_panel_values(None)
+            w = getattr(self, '_status_values_label', None)
+            if w is not None:
+                w.setText("⚠ Error")
+                w.setStyleSheet("color: darkorange; font-weight: bold;")
     
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
@@ -1399,6 +1439,40 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                 w.setText(text)
                 w.setStyleSheet(style)
 
+        def _has_only_modern_only_fields(cif_content: str) -> bool:
+            """Return True when the file is mixed only because of modern-only fields."""
+            if not cif_content.strip():
+                return False
+
+            in_text_block = False
+            modern_fields = 0
+            convertible_modern_fields = 0
+            field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
+
+            for line in cif_content.split('\n'):
+                stripped = line.strip()
+
+                if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
+                    in_text_block = not in_text_block
+                    continue
+
+                if in_text_block or stripped.startswith('#'):
+                    continue
+
+                match = field_pattern.match(line)
+                if not match:
+                    continue
+
+                field_name = match.group(2)
+                if '.' not in field_name:
+                    continue
+
+                modern_fields += 1
+                if self.dict_manager.map_to_legacy(field_name) is not None:
+                    convertible_modern_fields += 1
+
+            return modern_fields > 0 and convertible_modern_fields == 0
+
         if not content.strip():
             self._compliance_label.setText("")
             _panel('_status_syntax_label',   "\u2013", "color: gray;")
@@ -1446,8 +1520,12 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                 _panel('_status_notation_label', "Legacy (underscore)",
                        "color: blue; font-weight: bold;")
             elif notation == FieldNotation.MIXED:
-                _panel('_status_notation_label', "\u26a0 Mixed",
-                       "color: darkorange; font-weight: bold;")
+                if _has_only_modern_only_fields(content):
+                    _panel('_status_notation_label', "Legacy (except un-aliased modern fields)",
+                           "color: steelblue; font-weight: bold;")
+                else:
+                    _panel('_status_notation_label', "\u26a0 Mixed",
+                           "color: darkorange; font-weight: bold;")
             else:
                 _panel('_status_notation_label', "\u2013", "color: gray;")
         except Exception:
@@ -1533,6 +1611,9 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             self.data_name_validator = DataNameValidator(self.dict_manager)
             # Re-setup the syntax highlighter callback
             def _field_validator_callback(field_name: str) -> str:
+                if '.' in field_name and self.dict_manager.is_known_field(field_name):
+                    if self.dict_manager.map_to_legacy(field_name) is None:
+                        return "modern_only"
                 result = self.data_name_validator.validate_field(field_name)
                 return result.category.value
             self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
@@ -1815,14 +1896,21 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
             new_lines = []
             in_multiline = False
             skip_until_semicolon = False
+            awaiting_semicolon_block = False  # True after skipping a field name with no inline value
             
             for line in lines:
                 # Handle semicolon-delimited multiline values
                 stripped = line.strip()
                 if stripped.startswith(';'):
                     if skip_until_semicolon:
-                        # This is the closing semicolon of a deleted field
+                        # This is the closing semicolon of a deleted field's multiline value
                         skip_until_semicolon = False
+                        continue
+                    if awaiting_semicolon_block:
+                        # This is the opening semicolon of the deleted field's multiline value;
+                        # skip it and then skip everything until the closing semicolon
+                        awaiting_semicolon_block = False
+                        skip_until_semicolon = True
                         continue
                     in_multiline = not in_multiline
                     new_lines.append(line)
@@ -1831,6 +1919,12 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                 if skip_until_semicolon:
                     # Skip lines that are part of a deleted multiline field
                     continue
+                
+                if awaiting_semicolon_block:
+                    # We skipped a field name expecting a semicolon block, but this line
+                    # isn't a semicolon — unexpected in valid CIF; stop waiting and
+                    # process this line normally
+                    awaiting_semicolon_block = False
                 
                 if in_multiline:
                     new_lines.append(line)
@@ -1846,11 +1940,12 @@ class CIFEditor(FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
                         modified = True
                         # Check if this is a multiline value
                         if len(parts) == 1:
-                            # Value might be on next line - check for semicolon
-                            # We'll handle this by skipping until next non-value line
+                            # Field name only — the semicolon block is on the next line(s);
+                            # set awaiting_semicolon_block so the opening ';' is also skipped
+                            awaiting_semicolon_block = True
                             continue
                         elif parts[1].strip().startswith(';'):
-                            # Multiline value starting with semicolon
+                            # Inline semicolon after field name (e.g. _field ;\nvalue\n;)
                             skip_until_semicolon = True
                             continue
                         else:

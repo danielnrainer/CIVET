@@ -36,6 +36,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     DEFAULT_COLOR_SCHEME = {
         "field_default": "#800080",
         "valid": "#008000",
+        "modern_only": "#0057B8",
         "registered_local": "#008B8B",
         "user_allowed": "#008B8B",
         "unknown": "#FF0000",
@@ -52,6 +53,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     
     # Validation result constants
     VALID = "valid"
+    MODERN_ONLY = "modern_only"
     REGISTERED = "registered"
     USER_ALLOWED = "user_allowed"
     UNKNOWN = "unknown"
@@ -164,6 +166,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         # Valid format - known dictionary field
         self.valid_format = QTextCharFormat()
         self.valid_format.setForeground(QColor("#008000"))  # Green
+
+        # Modern-only format - known field with no legacy alias
+        self.modern_only_format = QTextCharFormat()
+        self.modern_only_format.setForeground(QColor("#0057B8"))  # Strong blue
+        self.modern_only_format.setFontUnderline(True)
         
         # Registered local format - for fields with registered IUCr prefixes
         self.registered_local_format = QTextCharFormat()
@@ -201,6 +208,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
 
         self.field_format.setForeground(QColor(self.color_scheme["field_default"]))
         self.valid_format.setForeground(QColor(self.color_scheme["valid"]))
+        self.modern_only_format.setForeground(QColor(self.color_scheme["modern_only"]))
         self.registered_local_format.setForeground(QColor(self.color_scheme["registered_local"]))
         self.user_allowed_format.setForeground(QColor(self.color_scheme["user_allowed"]))
         self.unknown_format.setForeground(QColor(self.color_scheme["unknown"]))
@@ -226,6 +234,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             "CIVET uses colours and text styles to help you read CIF files and spot potential issues quickly.<br><br>"
             "<b>Data names</b><br>"
             f"<span style='color: {scheme['valid']};'>Known valid field</span>: present in a loaded dictionary<br>"
+            f"<span style='color: {scheme['modern_only']}; text-decoration: underline;'>Modern-only field</span>: known field with no legacy alias; remains in dot notation during legacy conversion<br>"
             f"<span style='color: {scheme['registered_local']};'>Recognised local or IUCr prefix</span>: prefix is known, even if the field is not in the core dictionary set<br>"
             f"<span style='color: {scheme['user_allowed']}; font-style: italic;'>User-allowed field or prefix</span>: accepted by your local configuration<br>"
             f"<span style='color: {scheme['unknown']};'>Unknown field name</span>: not recognised by loaded dictionaries or allowed prefixes<br>"
@@ -240,7 +249,7 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             "<b>Notes</b><br>"
             "Loop field names are also shown in italics as an extra visual cue.<br>"
             f"If validation-aware highlighting is unavailable, data names fall back to <span style='color: {scheme['field_default']};'>this default colour</span>.<br>"
-            "You can customise these colours manually in settings.json under <code>editor.syntax_highlighting_colors</code>."
+            "You can customise these colours via Settings -> Editor Settings or alternatively in the settings.json under <code>editor.syntax_highlighting_colors</code>."
         )
     
     def set_field_validator(self, validator_callback: Optional[Callable[[str], str]]):
@@ -287,6 +296,8 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             
             if category == self.VALID:
                 return self.valid_format
+            elif category == self.MODERN_ONLY:
+                return self.modern_only_format
             elif category == self.REGISTERED:
                 return self.registered_local_format
             elif category == self.USER_ALLOWED:

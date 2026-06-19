@@ -6,8 +6,9 @@ Settings are persisted to the user's configuration directory.
 """
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
-                            QCheckBox, QPushButton, QFontComboBox, QGroupBox,
-                            QMessageBox, QComboBox, QColorDialog, QGridLayout)
+                            QCheckBox, QPushButton, QFontComboBox, QMessageBox,
+                            QComboBox, QColorDialog, QGridLayout, QScrollArea,
+                            QWidget)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 import sys
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from utils.user_config import (
     load_settings, set_setting, DEFAULT_SETTINGS, get_settings_path
 )
+from gui.collapsible_box import CollapsibleBox
 
 
 class EditorSettingsDialog(QDialog):
@@ -26,6 +28,7 @@ class EditorSettingsDialog(QDialog):
     COLOR_LABELS = [
         ('field_default', 'Fallback data names'),
         ('valid', 'Valid fields'),
+        ('modern_only', 'Modern-only fields (no legacy alias)'),
         ('registered_local', 'Registered local-prefix fields'),
         ('user_allowed', 'User-allowed fields'),
         ('unknown', 'Unknown fields'),
@@ -50,7 +53,8 @@ class EditorSettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Editor Settings")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(400)
+        self.resize(500, 400)
         self.on_settings_changed = on_settings_changed
         
         # Load current settings
@@ -81,11 +85,20 @@ class EditorSettingsDialog(QDialog):
     def init_ui(self):
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
-        
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(10)
+
         # Font settings group
-        font_group = QGroupBox("Font")
+        font_box = CollapsibleBox("Font")
         font_layout = QVBoxLayout()
-        
+
         # Font family
         font_family_layout = QHBoxLayout()
         font_family_layout.addWidget(QLabel("Font:"))
@@ -93,7 +106,7 @@ class EditorSettingsDialog(QDialog):
         self.font_combo.setCurrentFont(QFont(self.editor_settings.get('font_family', 'Consolas')))
         font_family_layout.addWidget(self.font_combo)
         font_layout.addLayout(font_family_layout)
-        
+
         # Font size
         font_size_layout = QHBoxLayout()
         font_size_layout.addWidget(QLabel("Font Size:"))
@@ -105,37 +118,37 @@ class EditorSettingsDialog(QDialog):
         font_size_layout.addWidget(self.font_size_spinbox)
         font_size_layout.addStretch()
         font_layout.addLayout(font_size_layout)
-        
-        font_group.setLayout(font_layout)
-        layout.addWidget(font_group)
-        
+
+        font_box.content_layout.addLayout(font_layout)
+        content_layout.addWidget(font_box)
+
         # Display settings group
-        display_group = QGroupBox("Display")
+        display_box = CollapsibleBox("Display")
         display_layout = QVBoxLayout()
-        
+
         self.line_numbers_checkbox = QCheckBox("Show Line Numbers")
         self.line_numbers_checkbox.setChecked(
             self.editor_settings.get('line_numbers_enabled', True)
         )
         display_layout.addWidget(self.line_numbers_checkbox)
-        
+
         self.syntax_highlighting_checkbox = QCheckBox("Enable Syntax Highlighting")
         self.syntax_highlighting_checkbox.setChecked(
             self.editor_settings.get('syntax_highlighting_enabled', True)
         )
         display_layout.addWidget(self.syntax_highlighting_checkbox)
-        
+
         self.ruler_checkbox = QCheckBox("Show 80-Character Ruler")
         self.ruler_checkbox.setChecked(
             self.editor_settings.get('show_ruler', True)
         )
         display_layout.addWidget(self.ruler_checkbox)
-        
-        display_group.setLayout(display_layout)
-        layout.addWidget(display_group)
+
+        display_box.content_layout.addLayout(display_layout)
+        content_layout.addWidget(display_box)
 
         # Syntax highlighting colors group
-        colors_group = QGroupBox("Syntax Highlighting Colors")
+        colors_box = CollapsibleBox("Syntax Highlighting Colors")
         colors_layout = QVBoxLayout()
 
         colors_help = QLabel(
@@ -163,11 +176,11 @@ class EditorSettingsDialog(QDialog):
             colors_grid.addWidget(reset_button, row, 2)
 
         colors_layout.addLayout(colors_grid)
-        colors_group.setLayout(colors_layout)
-        layout.addWidget(colors_group)
+        colors_box.content_layout.addLayout(colors_layout)
+        content_layout.addWidget(colors_box)
 
         # Dialog behavior settings group
-        dialog_group = QGroupBox("Dialog Behavior")
+        dialog_box = CollapsibleBox("Dialog Behavior")
         dialog_layout = QVBoxLayout()
 
         default_mode_row = QHBoxLayout()
@@ -199,13 +212,17 @@ class EditorSettingsDialog(QDialog):
 
         dialog_help = QLabel(
             "Controls how result dialogs interact with the main editor. "
-            "This setting is designed to be reused by additional dialogs in the future."
+            # "This setting is designed to be reused by additional dialogs in the future."
         )
         dialog_help.setWordWrap(True)
         dialog_layout.addWidget(dialog_help)
 
-        dialog_group.setLayout(dialog_layout)
-        layout.addWidget(dialog_group)
+        dialog_box.content_layout.addLayout(dialog_layout)
+        content_layout.addWidget(dialog_box)
+
+        content_layout.addStretch()
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
         
         # Buttons
         button_layout = QHBoxLayout()

@@ -340,7 +340,7 @@ class DictionaryInfo:
 
 
 class FieldNotation(Enum):
-    """Field notation style enumeration — how data names are written.
+    """Data name notation style enumeration — how data names are written.
     
     Both notations are valid in both CIF 1.1 and CIF 2.0 files.
     """
@@ -351,7 +351,7 @@ class FieldNotation(Enum):
 
 
 class CIFSyntaxVersion(Enum):
-    """CIF file format version — the syntax specification, not the field notation.
+    """CIF file format version — the syntax specification, not the data name notation.
     
     CIF 1.1: ASCII-oriented, basic quoting
     CIF 2.0: UTF-8, triple-quoted strings, lists [...], tables {...}, requires header
@@ -375,7 +375,7 @@ class FieldInfo:
     aliases: List[str]
     deprecated: bool = False
     cif_version: str = "1.1"  # Minimum version required
-    examples: List[str] = None
+    examples: Optional[List[str]] = None
     
     def __post_init__(self):
         if self.examples is None:
@@ -401,11 +401,11 @@ class CIFDictionaryManager:
             
         self.parser = CIFDictionaryParser(cif_core_path)
         self._loaded = False
-        self._legacy_to_modern: Optional[Dict[str, str]] = None
-        self._modern_to_legacy: Optional[Dict[str, List[str]]] = None
+        self._legacy_to_modern: Dict[str, str] = {}
+        self._modern_to_legacy: Dict[str, List[str]] = {}
         
         # Multi-dictionary support with enhanced tracking
-        self._additional_parsers: List[CIFDictionaryParser] = []
+        self._additional_parsers: List[Any] = []
         self._dictionary_infos: List[DictionaryInfo] = []
         # Map dictionary info index to parser (0 = primary, 1+ = additional)
         # This allows us to track inactive dictionaries that don't have parsers loaded
@@ -626,7 +626,7 @@ class CIFDictionaryManager:
         
     def detect_notation(self, content: str) -> FieldNotation:
         """
-        Detect the field notation style from CIF content.
+        Detect the data name notation style from CIF content.
         
         Analyzes field name patterns (dots vs underscores only).
         Does NOT look at the version header — notation and syntax version
@@ -717,7 +717,7 @@ class CIFDictionaryManager:
 
     def detect_cif_version(self, content: str) -> FieldNotation:
         """
-        Detect field notation from file content.
+        Detect data name notation from file content.
         
         .. deprecated::
             Use :meth:`detect_notation` instead.  This method conflated
@@ -774,15 +774,38 @@ class CIFDictionaryManager:
             Primary legacy field name (without dots) or None if not found
         """
         self._ensure_loaded()
-        aliases = self._modern_to_legacy.get(field_name.lower(), [])
-        
-        # Find the first alias without dots (legacy format)
+
+        # Resolve aliases to their canonical definition first so modern dot aliases
+        # (e.g. _diffrn_detector.type) are treated like valid modern fields.
+        canonical = self.parser._alias_to_definition.get(field_name.lower(), field_name)
+        metadata = self.get_field_metadata(field_name) or self.get_field_metadata(canonical)
+
+        # Prefer non-deprecated legacy aliases from metadata (preserves case).
+        if metadata:
+            non_deprecated_legacy_aliases = [
+                alias.name
+                for alias in metadata.aliases
+                if alias.name and '.' not in alias.name and not alias.is_deprecated
+            ]
+
+            # If the input is already a non-deprecated legacy alias, keep it unchanged.
+            if '.' not in field_name:
+                for alias_name in non_deprecated_legacy_aliases:
+                    if alias_name.lower() == field_name.lower():
+                        return field_name
+
+            if non_deprecated_legacy_aliases:
+                return non_deprecated_legacy_aliases[0]
+
+        aliases = self._modern_to_legacy.get(canonical.lower(), [])
+
+        # Fallback: still avoid deprecated aliases when possible.
         for alias in aliases:
-            if '.' not in alias:
+            if '.' not in alias and not self.is_field_deprecated(alias):
                 return alias
-                
-        # If no underscore-only alias found, return the first one
-        return aliases[0] if aliases else None
+
+        # No true legacy alias exists for this modern field.
+        return None
     
     def is_known_field(self, field_name: str) -> bool:
         """
@@ -908,9 +931,9 @@ class CIFDictionaryManager:
             # If file search fails, return False
             return False
                 
-    def get_canonical_name(self, field_name: str) -> str:
+    def _get_canonical_name_from_mappings(self, field_name: str) -> str:
         """
-        Get the canonical name for a field (for backward compatibility).
+        Get the canonical name for a field using loaded mapping tables.
         
         Args:
             field_name: Field name to look up
@@ -1396,7 +1419,7 @@ class CIFDictionaryManager:
         fixes_sorted = sorted(fixes, key=lambda x: x['line_number'], reverse=True)
         
         for fix in fixes_sorted:
-            line_idx = fix['line_number'] - 1  # Convert to 0-indexed
+            line_idx = int(fix['line_number']) - 1  # Convert to 0-indexed
             if 0 <= line_idx < len(lines):
                 original_line = lines[line_idx]
                 # Replace the malformed field name with the correct one
@@ -1562,7 +1585,7 @@ class CIFDictionaryManager:
         return None
     
     @staticmethod
-    def _determine_dict_source_and_status(url_or_path: str, content: str = None) -> Tuple[Optional[str], Optional[str]]:
+    def _determine_dict_source_and_status(url_or_path: str, content: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
         """
         Determine the source and status of a dictionary based on URL/path and content.
         
@@ -1961,7 +1984,7 @@ class CIFDictionaryManager:
         
         return True
     
-    def _extract_dictionary_description(self, file_path: str, content: str = None) -> str:
+    def _extract_dictionary_description(self, file_path: str, content: Optional[str] = None) -> str:
         """
         Extract description from dictionary file.
         
@@ -2255,6 +2278,8 @@ class CIFDictionaryManager:
                         content = ''
                         for chunk in response.iter_content(chunk_size=10240, decode_unicode=True):
                             if chunk:
+                                if isinstance(chunk, (bytes, bytearray, memoryview)):
+                                    chunk = bytes(chunk).decode('utf-8', errors='replace')
                                 content += chunk
                             if len(content) > 10240:
                                 break
@@ -2605,7 +2630,8 @@ class CIFDictionaryManager:
                 # Keep the CIF1 form (find it from aliases)
                 cif1_candidates = [f for f in alias_list if f in self._legacy_to_modern]
                 if cif1_candidates:
-                    preferred_field = cif1_candidates[0]  # Take first CIF1 form found
+                    non_deprecated_cif1 = [f for f in cif1_candidates if not self.is_field_deprecated(f)]
+                    preferred_field = non_deprecated_cif1[0] if non_deprecated_cif1 else cif1_candidates[0]
                     fields_to_remove = [f for f in alias_list if f != preferred_field]
                 else:
                     # No CIF1 form found, keep canonical
@@ -2785,13 +2811,15 @@ class CIFDictionaryManager:
         self._ensure_loaded()
         
         if target_format.upper() == 'MODERN':
-            # Convert CIF1 to CIF2
-            if field_name in self._legacy_to_modern:
-                return self._legacy_to_modern[field_name]
+            # Convert CIF1 to CIF2 using the dictionary's preferred modern alias.
+            converted = self.map_to_modern(field_name)
+            if converted:
+                return converted
         else:
-            # Convert CIF2 to CIF1  
-            if field_name in self._modern_to_legacy:
-                return self._modern_to_legacy[field_name]
+            # Convert CIF2 to CIF1 using the preferred non-deprecated legacy alias.
+            converted = self.map_to_legacy(field_name)
+            if converted:
+                return converted
         
         return field_name  # No conversion needed
     
@@ -3036,14 +3064,12 @@ class CIFDictionaryManager:
         elif target_format.upper() == 'LEGACY':
             # Convert all modern fields to CIF1 (use first CIF1 alternative)
             for field in found_fields:
-                if field in self._modern_to_legacy:
-                    cif1_alternatives = self._modern_to_legacy[field]
-                    if cif1_alternatives:
-                        legacy_field = cif1_alternatives[0]  # Use first alternative
-                        old_content = converted_content
-                        converted_content = self._replace_field_text_block_aware(converted_content, field, legacy_field)
-                        if old_content != converted_content:
-                            all_changes.append(f"Converted '{field}' to '{legacy_field}'")
+                legacy_field = self.map_to_legacy(field)
+                if legacy_field and legacy_field != field:
+                    old_content = converted_content
+                    converted_content = self._replace_field_text_block_aware(converted_content, field, legacy_field)
+                    if old_content != converted_content:
+                        all_changes.append(f"Converted '{field}' to '{legacy_field}'")
         
         # 2. Convert field references within text blocks  
         text_block_content, text_block_changes = self._convert_fields_within_text_blocks(converted_content, target_format)
@@ -3058,7 +3084,9 @@ class CIFDictionaryManager:
         
         Args:
             cif_content: CIF file content as string
-            resolutions: Dict mapping canonical_field -> (chosen_field_name, chosen_value)
+            resolutions: Dict mapping canonical_field ->
+                (chosen_field_name, chosen_value) or
+                (chosen_field_name, chosen_value, keep_aliases)
             
         Returns:
             Tuple of (resolved_cif_content, list_of_changes_made)
@@ -3069,9 +3097,13 @@ class CIFDictionaryManager:
         # Get current conflicts to know which fields to remove
         current_conflicts = self.detect_field_aliases_in_cif(cif_content)
         
-        for canonical_field, (chosen_field, chosen_value) in resolutions.items():
+        for canonical_field, resolution_data in resolutions.items():
             if canonical_field not in current_conflicts:
                 continue
+
+            chosen_field = resolution_data[0]
+            chosen_value = resolution_data[1] if len(resolution_data) > 1 else ""
+            keep_aliases = bool(resolution_data[2]) if len(resolution_data) > 2 else False
                 
             alias_list = current_conflicts[canonical_field]
             
@@ -3081,20 +3113,21 @@ class CIFDictionaryManager:
             if field_in_loop:
                 # Handle loop fields differently - rename instead of remove/add
                 resolved_content, loop_changes = self._resolve_loop_field_conflict(
-                    resolved_content, alias_list, chosen_field
+                    resolved_content, alias_list, chosen_field, keep_aliases
                 )
                 changes.extend(loop_changes)
             else:
                 # Handle simple fields - replace in-place instead of remove and add
                 resolved_content, field_changes = self._resolve_simple_field_conflict(
-                    resolved_content, alias_list, chosen_field, chosen_value
+                    resolved_content, alias_list, chosen_field, chosen_value, keep_aliases
                 )
                 changes.extend(field_changes)
         
         return resolved_content, changes
     
     def _resolve_simple_field_conflict(self, cif_content: str, alias_list: List[str], 
-                                       chosen_field: str, chosen_value: str) -> Tuple[str, List[str]]:
+                                       chosen_field: str, chosen_value: str,
+                                       keep_aliases: bool = False) -> Tuple[str, List[str]]:
         """
         Resolve conflicts for simple (non-loop) fields by replacing in-place.
         
@@ -3109,6 +3142,7 @@ class CIFDictionaryManager:
             alias_list: List of conflicting field names (aliases)
             chosen_field: The field name to use for resolution
             chosen_value: The value to use
+            keep_aliases: If True, keep one occurrence of each alias and sync values
             
         Returns:
             Tuple of (resolved_content, list_of_changes)
@@ -3117,6 +3151,7 @@ class CIFDictionaryManager:
         lines = cif_content.split('\n')
         result_lines = []
         first_occurrence_replaced = False
+        seen_aliases = set()
         fields_to_remove = set(alias_list)  # Track which fields to remove
         in_text_block = False
         
@@ -3155,21 +3190,36 @@ class CIFDictionaryManager:
             for alias in fields_to_remove:
                 if line_stripped.startswith(alias + ' ') or line_stripped == alias:
                     found_conflict = True
-                    
+
+                    # Keep aliases mode: preserve one occurrence per alias and sync values.
+                    if keep_aliases:
+                        if alias not in seen_aliases:
+                            indent = line[:len(line) - len(line.lstrip())]
+                            result_lines.append(f"{indent}{alias} {formatted_value}")
+                            seen_aliases.add(alias)
+                            changes.append(f"Synchronized alias '{alias}' to value '{formatted_value}'")
+                        else:
+                            changes.append(f"Removed duplicate field '{alias}'")
+
+                        # Skip multiline value if present
+                        if i + 1 < len(lines) and not lines[i + 1].strip().startswith('_'):
+                            i += 1
+                        break
+
                     if not first_occurrence_replaced:
                         # Replace the first occurrence in-place
                         indent = line[:len(line) - len(line.lstrip())]
                         result_lines.append(f"{indent}{chosen_field} {formatted_value}")
                         first_occurrence_replaced = True
                         changes.append(f"Replaced '{alias}' with '{chosen_field}' (value: '{formatted_value}')")
-                        
+
                         # Skip multiline value if present
                         if i + 1 < len(lines) and not lines[i + 1].strip().startswith('_'):
                             i += 1  # Skip the value line
                     else:
                         # Remove subsequent occurrences
                         changes.append(f"Removed duplicate field '{alias}'")
-                        
+
                         # Skip multiline value if present
                         if i + 1 < len(lines) and not lines[i + 1].strip().startswith('_'):
                             i += 1  # Skip the value line
@@ -3207,7 +3257,8 @@ class CIFDictionaryManager:
         
         return False
     
-    def _resolve_loop_field_conflict(self, cif_content: str, alias_list: List[str], chosen_field: str) -> Tuple[str, List[str]]:
+    def _resolve_loop_field_conflict(self, cif_content: str, alias_list: List[str], chosen_field: str,
+                                     keep_aliases: bool = False) -> Tuple[str, List[str]]:
         """
         Resolve conflicts for fields that are in loops by renaming and removing duplicates.
         
@@ -3215,6 +3266,11 @@ class CIFDictionaryManager:
         protection is not needed for this method.
         """
         changes = []
+        if keep_aliases:
+            changes.append(
+                "Loop alias conflicts were normalized to a single chosen field; "
+                "keeping multiple loop aliases is not supported."
+            )
         lines = cif_content.split('\n')
         result_lines = []
         i = 0

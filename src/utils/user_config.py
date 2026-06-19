@@ -35,6 +35,7 @@ DEFAULT_SETTINGS = {
         "syntax_highlighting_colors": {
             "field_default": "#800080",
             "valid": "#008000",
+            "modern_only": "#0057B8",
             "registered_local": "#008B8B",
             "user_allowed": "#008B8B",
             "unknown": "#FF0000",

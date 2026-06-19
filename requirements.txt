@@ -1,15 +1,18 @@
-# CIVET (CIF Validation and Editing Tool) Application Requirements
-# For development and building standalone executable
+# CIVET runtime and build requirements
+# Runtime dependencies for launching CIVET from source.
+# Build tooling for packaging is included below for convenience.
 
-# GUI Framework - Core requirement for the application
+# GUI framework - core runtime requirement
 PyQt6>=6.4.0
 
-# HTTP library for downloading CIF dictionaries from URLs
+# HTTP client for dictionary downloads and update checks
 requests>=2.28.0
 
-# Build tools for creating standalone executable (development only)
+# Build tooling (used when creating standalone executables)
 pyinstaller>=5.13.0
 
-# Note: All other dependencies are part of Python standard library:
+# Development and test tooling is listed in requirements-dev.txt.
+
+# Note: all other dependencies are part of the Python standard library:
 # - os, sys, re, json, tempfile, urllib.parse
 # - typing, dataclasses, enum, datetime, pathlib

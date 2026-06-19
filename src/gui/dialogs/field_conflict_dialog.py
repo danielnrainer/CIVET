@@ -7,7 +7,7 @@ to keep and what value to use for each conflict.
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QTextEdit, QComboBox, QLineEdit, QGroupBox,
-                           QScrollArea, QWidget, QFormLayout, QMessageBox)
+                           QScrollArea, QWidget, QFormLayout, QMessageBox, QCheckBox)
 from PyQt6.QtCore import Qt
 from typing import Dict, List, Tuple, Optional
 
@@ -19,6 +19,7 @@ class ConflictResolutionWidget(QWidget):
         super().__init__(parent)
         self.canonical_field = canonical_field
         self.aliases_and_values = aliases_and_values
+        self.alias_value_map = {alias: value for alias, value in aliases_and_values}
         self.dict_manager = dict_manager
         self.cif_format = cif_format  # 'legacy' or 'modern'
         
@@ -47,14 +48,15 @@ class ConflictResolutionWidget(QWidget):
         
         # Field name combo
         self.field_combo = QComboBox()
+        self._add_field_option = self.field_combo.addItem
         
         # Add aliases, but mark deprecated ones
         for alias, _ in self.aliases_and_values:
             if self.dict_manager and self.dict_manager.is_field_deprecated(alias):
                 # Still add deprecated fields but mark them clearly
-                self.field_combo.addItem(f"{alias} (DEPRECATED - not recommended)")
+                self.field_combo.addItem(f"{alias} (DEPRECATED - not recommended)", alias)
             else:
-                self.field_combo.addItem(alias)
+                self.field_combo.addItem(alias, alias)
         
         # Determine the appropriate format option based on CIF format
         if self.cif_format.lower() == 'legacy':
@@ -65,15 +67,15 @@ class ConflictResolutionWidget(QWidget):
             
             if legacy_equiv and legacy_equiv != self.canonical_field:
                 # Add legacy form as preferred option
-                self.field_combo.addItem(f"{legacy_equiv} (legacy format - recommended)")
+                self.field_combo.addItem(f"{legacy_equiv} (legacy format - recommended)", legacy_equiv)
                 self.field_combo.setCurrentText(f"{legacy_equiv} (legacy format - recommended)")
             else:
                 # No specific legacy form, use canonical
-                self.field_combo.addItem(f"{self.canonical_field} (recommended)")
+                self.field_combo.addItem(f"{self.canonical_field} (recommended)", self.canonical_field)
                 self.field_combo.setCurrentText(f"{self.canonical_field} (recommended)")
         else:
             # For modern CIFs, use the canonical (modern) field
-            self.field_combo.addItem(f"{self.canonical_field} (modern format - recommended)")
+            self.field_combo.addItem(f"{self.canonical_field} (modern format - recommended)", self.canonical_field)
             self.field_combo.setCurrentText(f"{self.canonical_field} (modern format - recommended)")
         
         form_layout.addRow("Field name to use:", self.field_combo)
@@ -97,36 +99,42 @@ class ConflictResolutionWidget(QWidget):
             if value.strip():
                 self.value_edit.setText(value.strip())
                 break
+
+        self.field_combo.currentIndexChanged.connect(self._on_field_changed)
         
         form_layout.addRow("Value:", self.value_edit)
+
+        # Conflict strategy: remove aliases (default) or keep and synchronize values.
+        self.keep_aliases_checkbox = QCheckBox("Keep aliases and synchronize all alias values")
+        self.keep_aliases_checkbox.setChecked(False)
+        self.keep_aliases_checkbox.setToolTip(
+            "When enabled, one occurrence of each alias is retained and all are set to the same value."
+        )
+        form_layout.addRow("Resolution strategy:", self.keep_aliases_checkbox)
         
         layout.addLayout(form_layout)
         layout.addSpacing(20)
         
         self.setLayout(layout)
-    
-    def get_resolution(self) -> Tuple[str, str]:
-        """Get the user's resolution for this conflict"""
-        field_text = self.field_combo.currentText()
 
-        # Handle the format options
-        if "(modern format - recommended)" in field_text or "(modern format)" in field_text:
-            field_name = self.canonical_field
-        elif "(legacy format - recommended)" in field_text:
-            # Extract the field name from legacy marker
-            field_name = field_text.split(" (legacy format - recommended)")[0]
-        elif "(recommended)" in field_text:
-            # Extract the field name from recommended marker
-            field_name = field_text.split(" (recommended)")[0]
-        elif "(DEPRECATED - not recommended)" in field_text:
-            # Extract the field name from deprecated marker
-            field_name = field_text.split(" (DEPRECATED - not recommended)")[0]
-        else:
-            field_name = field_text
+    def _on_field_changed(self):
+        """Keep the editable value aligned with the selected field when possible."""
+        current_field = self.field_combo.currentData()
+        if not isinstance(current_field, str):
+            return
+
+        mapped_value = self.alias_value_map.get(current_field)
+        if mapped_value and mapped_value.strip() and mapped_value not in ("(in loop - data preserved)", "(multiline value)"):
+            self.value_edit.setText(mapped_value.strip())
+    
+    def get_resolution(self) -> Tuple[str, str, bool]:
+        """Get the user's resolution for this conflict"""
+        field_name = self.field_combo.currentData() or self.field_combo.currentText()
             
         value = self.value_edit.text().strip()
+        keep_aliases = self.keep_aliases_checkbox.isChecked()
         
-        return field_name, value
+        return field_name, value, keep_aliases
 
 
 class FieldConflictDialog(QDialog):
@@ -311,12 +319,12 @@ class FieldConflictDialog(QDialog):
                               f"All conflicts have been auto-resolved using {format_name} format and the first available values. " +
                               "You can still modify the selections before applying.")
     
-    def get_resolutions(self) -> Dict[str, Tuple[str, str]]:
+    def get_resolutions(self) -> Dict[str, Tuple[str, str, bool]]:
         """Get all user resolutions"""
         resolutions = {}
         
         for i, (canonical_field, _) in enumerate(self.conflicts.items()):
-            field_name, value = self.resolution_widgets[i].get_resolution()
-            resolutions[canonical_field] = (field_name, value)
+            field_name, value, keep_aliases = self.resolution_widgets[i].get_resolution()
+            resolutions[canonical_field] = (field_name, value, keep_aliases)
         
         return resolutions

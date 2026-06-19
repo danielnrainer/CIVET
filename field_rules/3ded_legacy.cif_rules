@@ -62,7 +62,7 @@ _diffrn_measurement_specimen_support  'continuous carbon coated copper TEM grid,
 # _exptl.special_details: holder make and T-control if applicable (lack of different CIF field)
 _exptl.special_details  'JEOL TEM holder with high-tilt retainer'
 _exptl.special_details  'Gatan Elsa cryo-transfer holder, model 698. Temperature controller model 1905'
-_exptl.special_details  'Simple Origin variable temperature dual grid cryogenic transfer holder, model 217. Temperature controller model 300'
+_exptl.special_details  'Simple Origin variable temperature dual grid cryogenic transfer holder, model 215. Temperature controller model 300'
 _exptl.special_details  'Simple Origin variable temperature cryogenic inert gas/vacuum transfer holder, model 216. Temperature controller model 300'
 
 # _exptl_crystal_preparation: Sample preparation method

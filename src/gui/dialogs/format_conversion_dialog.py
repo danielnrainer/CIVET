@@ -65,9 +65,9 @@ class FormatConversionDialog(QDialog):
         
         # Version detection info
         version_text = {
-            FieldNotation.LEGACY: "Legacy field notation detected",
-            FieldNotation.MIXED: "Mixed field notation detected",
-            FieldNotation.UNKNOWN: "Unknown field notation detected"
+            FieldNotation.LEGACY: "Legacy data name notation detected",
+            FieldNotation.MIXED: "Mixed data name notation detected",
+            FieldNotation.UNKNOWN: "Unknown data name notation detected"
         }
         
         detection_label = QLabel(f"📋 {version_text.get(self.detected_version, 'Unknown format')}")
@@ -235,10 +235,12 @@ class FormatConversionDialog(QDialog):
                 self.convert_btn.setText("✅ Already Modern Format")
             
             # Update content preview (show first 50 lines to avoid overwhelming UI)
-            preview_lines = self.converted_content.split('\n')[:50]
+            converted_lines = self.converted_content.split('\n')
+            preview_lines = converted_lines[:50]
             preview_content = '\n'.join(preview_lines)
-            if len(self.converted_content.split('\n')) > 50:
-                preview_content += f"\n\n... ({len(self.converted_content.split('\n')) - 50} more lines)"
+            remaining_lines = len(converted_lines) - 50
+            if remaining_lines > 0:
+                preview_content += f"\n\n... ({remaining_lines} more lines)"
             
             self.preview_text.setPlainText(preview_content)
             

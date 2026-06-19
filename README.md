@@ -18,6 +18,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes, and uses validation-aware highlighting.
+- **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
 - **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes.
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
@@ -166,6 +167,7 @@ The validation results dialog now combines several related checks in one place:
 - **Malformed Fields**: Detects names that are structurally wrong but can be mapped to a known field and offers one-click correction.
 - **Unknown Fields**: Flags names not recognised by loaded dictionaries or registered prefixes.
 - **Deprecated Fields**: Offers a **+ Successor** action that adds the appropriate successor name while keeping the deprecated field. In legacy or mixed CIF files, CIVET prefers a legacy successor name when one exists; otherwise it falls back to the modern name.
+- **Conflict Resolution Controls**: The conflict dialog now supports keeping aliases while synchronizing all alias values when that strategy is preferred.
 - **Details Tooltips**: Hover over the Details column to read the full text when the column is truncated.
 
 Malformed-field fixes are now handled through the validation dialog itself rather than through a separate pre-check option.
@@ -175,6 +177,7 @@ Malformed-field fixes are now handled through the validation dialog itself rathe
 When dictionary-aware validation highlighting is enabled, CIVET distinguishes field categories directly in the editor:
 
 - **Valid fields**: green
+- **Modern-only fields**: strong blue with underline (known modern names that have no legacy notation alias)
 - **Registered local-prefix fields**: cyan/teal
 - **User-allowed fields**: cyan/teal italics
 - **Unknown fields**: red
@@ -184,6 +187,16 @@ When dictionary-aware validation highlighting is enabled, CIVET distinguishes fi
 Without validation-aware categorisation, data names use a default purple fallback. Quoted values and multiline values are blue, `loop_` is bold orange, loop field names inherit their category styling and are italicised, and loop data values use a darker orange.
 
 If you are new to the colour scheme, use **Help → Syntax Highlighting Guide...** in the application for a quick explanation of what each colour and text style means. The guide reflects the currently active colours, including any custom values you set in `settings.json`.
+
+Advanced users can also customise syntax-highlighting colours manually in `settings.json` under `editor.syntax_highlighting_colors`, including `modern_only`.
+
+### Data-Name Integrity Checks
+
+To prevent conflicting aliases and duplicate data names from being written accidentally, CIVET now enforces data-name integrity in key workflows:
+
+- **Save** blocks when unresolved duplicate/alias-value conflicts remain.
+- Conversion and automated fix operations prompt to resolve conflicts when detected.
+- Auto-resolution keeps a single recommended field by default; manual resolution can preserve aliases and synchronize values.
 
 ### Editing Convenience
 

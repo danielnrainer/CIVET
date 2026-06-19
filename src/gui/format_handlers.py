@@ -8,9 +8,9 @@ is designed to be used as a base class for CIFEditor.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional, cast
 
-from PyQt6.QtWidgets import QMessageBox, QDialog
+from PyQt6.QtWidgets import QMessageBox, QDialog, QWidget, QTextEdit
 
 from utils.cif_dictionary_manager import CIFVersion, FieldNotation, CIFSyntaxVersion
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
@@ -19,9 +19,20 @@ from .dialogs.field_conflict_dialog import FieldConflictDialog
 
 if TYPE_CHECKING:
     from .main_window import CIFEditor
+    from utils.CIF_parser import CIFParser
+    from utils.cif_dictionary_manager import CIFDictionaryManager
+    from utils.cif_format_converter import CIFFormatConverter
 
 
-class FormatHandlersMixin:
+if TYPE_CHECKING:
+    _FormatHandlersWidgetBase = QWidget
+else:
+    class _FormatHandlersWidgetBase:
+        """Runtime no-op base; QWidget only needed for static typing."""
+        pass
+
+
+class FormatHandlersMixin(_FormatHandlersWidgetBase):
     """Mixin providing CIF format handling methods for CIFEditor.
 
     Expects the host class to provide:
@@ -34,6 +45,27 @@ class FormatHandlersMixin:
         - self.update_cif_version_display()
         - self._show_dialog_with_configured_interaction(dialog)
     """
+
+    # Host-provided attributes/methods for static type checkers.
+    text_editor: QTextEdit
+    dict_manager: 'CIFDictionaryManager'
+    format_converter: 'CIFFormatConverter'
+    cif_parser: 'CIFParser'
+    modified: bool
+    current_cif_version: CIFVersion
+
+    def update_cif_version_display(self) -> None:
+        raise NotImplementedError()
+
+    def _show_dialog_with_configured_interaction(
+        self,
+        dialog: QDialog,
+        mode_setting_key: str = "dialogs.default_interaction_mode",
+    ) -> int:
+        raise NotImplementedError()
+
+    def _check_duplicate_data_names(self, operation_name: str, block_on_conflicts: bool = False) -> bool:
+        raise NotImplementedError()
 
     def _ensure_cif2_header(self, content: str) -> str:
         """Ensure CIF2 header is present at the start of content.
@@ -59,7 +91,7 @@ class FormatHandlersMixin:
     _ensure_modern_header = _ensure_cif2_header
 
     def detect_and_update_cif_version(self, content=None):
-        """Detect field notation and update the status display"""
+        """Detect data name notation and update the status display"""
         if content is None:
             content = self.text_editor.toPlainText()
         
@@ -92,7 +124,7 @@ class FormatHandlersMixin:
         }
         
         message = (
-            f"Field notation: {notation_text.get(notation, 'Unknown')}\n"
+            f"Data name notation: {notation_text.get(notation, 'Unknown')}\n"
             f"Syntax version: {syntax_text.get(syntax_version, 'Unknown')}"
         )
         
@@ -100,6 +132,33 @@ class FormatHandlersMixin:
             message += "\n\nConsider using 'Fix Mixed Notation' to resolve."
         
         QMessageBox.information(self, "CIF Format Detection", message)
+
+    def _format_conversion_change_summary(self, changes: List[str], max_main_changes: int = 5) -> str:
+        """Create a readable summary that preserves warnings even for long change lists."""
+        if not changes:
+            return "No changes were reported."
+
+        warning_lines = [c for c in changes if c.strip().startswith("Warning:")]
+        normal_lines = [c for c in changes if not c.strip().startswith("Warning:")]
+
+        summary_lines = [f"Changes made:"]
+
+        if normal_lines:
+            shown = normal_lines[:max_main_changes]
+            summary_lines.extend(shown)
+            remaining = len(normal_lines) - len(shown)
+            if remaining > 0:
+                summary_lines.append(f"... and {remaining} more change(s)")
+
+        if warning_lines:
+            summary_lines.append("")
+            summary_lines.append("---------\n")
+            for i in warning_lines:
+                summary_lines.append(i)
+                summary_lines.append("")  # Add spacing between warnings
+            # summary_lines.extend(warning_lines)
+
+        return "\n".join(summary_lines)
 
     def convert_to_legacy(self):
         """Convert current CIF field names to legacy notation"""
@@ -115,25 +174,10 @@ class FormatHandlersMixin:
                 self.modified = True
                 self.current_cif_version = FieldNotation.LEGACY
                 self.update_cif_version_display()
-                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
-                if len(changes) > 5:
-                    change_summary += f"\n... and {len(changes)-5} more"
+                self._check_duplicate_data_names("legacy notation conversion", block_on_conflicts=False)
+                change_summary = self._format_conversion_change_summary(changes)
                 QMessageBox.information(self, "Conversion Complete", 
                                       f"Field names converted to legacy notation.\n\n{change_summary}")
-                
-                # If file has CIF2 header, offer to ensure CIF 1.1 compliance
-                syntax_ver = self.dict_manager.detect_syntax_version(converted_content)
-                if syntax_ver == CIFSyntaxVersion.CIF2:
-                    reply = QMessageBox.question(
-                        self, "CIF 1.1 Compliance",
-                        "This file still has a CIF 2.0 header.\n\n"
-                        "Would you also like to ensure CIF 1.1 compliance?\n"
-                        "(This will replace the CIF 2.0 header with CIF 1.1.)",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No
-                    )
-                    if reply == QMessageBox.StandardButton.Yes:
-                        self.ensure_cif1_compliance()
             else:
                 QMessageBox.information(self, "No Changes", 
                                       "File is already in legacy notation or no conversion was needed.")
@@ -159,9 +203,8 @@ class FormatHandlersMixin:
                 self.modified = True
                 self.current_cif_version = FieldNotation.MODERN
                 self.update_cif_version_display()
-                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
-                if len(changes) > 5:
-                    change_summary += f"\n... and {len(changes)-5} more"
+                self._check_duplicate_data_names("modern notation conversion", block_on_conflicts=False)
+                change_summary = self._format_conversion_change_summary(changes)
                 QMessageBox.information(self, "Conversion Complete", 
                                       f"Field names converted to modern notation.\n\n{change_summary}")
             else:
@@ -172,7 +215,7 @@ class FormatHandlersMixin:
                                f"Failed to convert to modern notation:\n{str(e)}")
 
     def fix_mixed_format(self):
-        """Fix mixed field notation by converting to consistent notation"""
+        """Fix mixed data name notation by converting to consistent notation"""
         content = self.text_editor.toPlainText()
         if not content.strip():
             QMessageBox.information(self, "No Content", "Please open a CIF file first.")
@@ -182,12 +225,12 @@ class FormatHandlersMixin:
         notation = self.dict_manager.detect_notation(content)
         if notation != FieldNotation.MIXED:
             QMessageBox.information(self, "No Mixed Notation", 
-                                  "File does not appear to have mixed field notation.")
+                                  "File does not appear to have mixed data name notation.")
             return
         
         # Ask user which notation to convert to
         reply = QMessageBox.question(self, "Choose Target Notation",
-                                   "Convert mixed field notation to:\n\n" +
+                                   "Convert mixed data name notation to:\n\n" +
                                    "Yes: Modern notation (dot syntax, recommended)\n" +
                                    "No: Legacy notation (underscore syntax, for compatibility)\n" +
                                    "Cancel: Abort conversion",
@@ -215,9 +258,8 @@ class FormatHandlersMixin:
                 self.modified = True
                 self.current_cif_version = target_notation
                 self.update_cif_version_display()
-                change_summary = f"Made {len(changes)} changes:\n" + "\n".join(changes[:5])
-                if len(changes) > 5:
-                    change_summary += f"\n... and {len(changes)-5} more"
+                self._check_duplicate_data_names("mixed-notation fix", block_on_conflicts=False)
+                change_summary = self._format_conversion_change_summary(changes)
                 QMessageBox.information(self, "Notation Fixed", 
                                       f"Mixed notation successfully resolved to {notation_name}.\n\n{change_summary}")
             else:
@@ -305,7 +347,7 @@ class FormatHandlersMixin:
             QMessageBox.critical(self, "Conflict Resolution Error", 
                                f"Failed to resolve field alias conflicts:\n{str(e)}")
 
-    def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str, cif_format: str = 'modern') -> Dict[str, Tuple[str, str]]:
+    def _auto_resolve_conflicts(self, conflicts: Dict[str, List[str]], cif_content: str, cif_format: str = 'modern') -> Dict[str, Tuple[str, str, bool]]:
         """Auto-resolve conflicts using the appropriate format and first available values"""
         resolutions = {}
         
@@ -340,7 +382,8 @@ class FormatHandlersMixin:
             if not chosen_value:
                 chosen_value = "?"
             
-            resolutions[canonical_field] = (chosen_field, chosen_value)
+            # Auto-resolve keeps the recommended single field by default.
+            resolutions[canonical_field] = (chosen_field, chosen_value, False)
         
         return resolutions
 
@@ -399,6 +442,7 @@ class FormatHandlersMixin:
                 if changes:
                     self.text_editor.setText(fixed_content)
                     self.modified = True
+                    self._check_duplicate_data_names("malformed data-name correction", block_on_conflicts=False)
                     
                     change_summary = f"Fixed {len(changes)} malformed field name(s):\n\n"
                     change_summary += "\n".join(f"• {change}" for change in changes[:10])
@@ -497,6 +541,7 @@ class FormatHandlersMixin:
                 if changes_made:
                     self.text_editor.setText(updated_content)
                     self.modified = True
+                    self._check_duplicate_data_names("deprecated data-name replacement", block_on_conflicts=False)
                     
                     change_summary = f"Successfully updated {len(changes_made)} deprecated field(s):\n\n"
                     for change in changes_made:
@@ -549,6 +594,7 @@ class FormatHandlersMixin:
             # Update the editor
             self.text_editor.setText(updated_content)
             self.modified = True
+            self._check_duplicate_data_names("adding legacy compatibility data names", block_on_conflicts=False)
             
             # Show results
             if "Added" in report:
@@ -644,6 +690,8 @@ class FormatHandlersMixin:
 
         def _goto(line_number: int):
             doc = self.text_editor.document()
+            if doc is None:
+                return
             block = doc.findBlockByLineNumber(line_number - 1)
             if block.isValid():
                 cursor = self.text_editor.textCursor()
@@ -715,7 +763,10 @@ class FormatHandlersMixin:
 
         def _show_non_ascii():
             current = self.text_editor.toPlainText()
-            occurrences = detect_non_ascii_chars(current)
+            occurrences = cast(
+                List[Tuple[str, Optional[str], int, bool]],
+                detect_non_ascii_chars(current),
+            )
             if not occurrences:
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.information(

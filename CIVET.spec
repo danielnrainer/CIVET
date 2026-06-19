@@ -54,6 +54,7 @@ a = Analysis(
     ],
     hiddenimports=[
         # PyQt6 core modules - Essential for GUI functionality
+        'PyQt6.sip',
         'PyQt6.QtWidgets',
         'PyQt6.QtCore',
         'PyQt6.QtGui',
@@ -61,10 +62,14 @@ a = Analysis(
         # Application modules - Main application structure
         'gui',
         'gui.main_window',
+        'gui.collapsible_box',
+        'gui.data_name_integrity',
         'gui.editor',
         'gui.editor.text_editor',
         'gui.editor.syntax_highlighter',
         'gui.dialogs',
+        'gui.dialogs.cif_syntax_compliance_dialog',
+        'gui.dialogs.non_ascii_conversion_dialog',
         'gui.dialogs.input_dialog',
         'gui.dialogs.multiline_dialog', 
         'gui.dialogs.config_dialog',
@@ -89,6 +94,8 @@ a = Analysis(
         'utils.cif_format_converter',
         'utils.cif_dictionary_parser',
         'utils.cif_char_encoding',
+        'utils.cif_syntax_compliance',
+        'utils.cif_data_name_integrity',
         'utils.dictionary_suggestion_manager',
         'utils.field_rules_validator',
         'utils.user_config',              # Unified configuration management
