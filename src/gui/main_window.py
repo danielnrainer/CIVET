@@ -1867,6 +1867,9 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         
         # Get deprecated updates (old_name -> new_name) - now we ADD modern alongside deprecated
         deprecated_updates = dialog.get_deprecated_updates()
+
+        # Get deprecated replacements (old_name -> new_name) - replace old name directly
+        deprecated_replacements = dialog.get_deprecated_replacements()
         
         # Get format corrections (old_name -> corrected_name)
         format_corrections = dialog.get_format_corrections()
@@ -1885,13 +1888,74 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 if parts:
                     existing_fields.add(parts[0].lower())
         
-        # Filter deprecated_updates to only add successor fields that don't already exist
+        # Filter deprecated_updates to only add successor fields that don't already exist.
+        # Compare using notation/alias-equivalent names as well as exact spelling.
         deprecated_to_add = {}
+        present_or_planned_fields = set(existing_fields)
+
+        def _equivalent_names(field_name: str) -> set[str]:
+            """Return known equivalent data-name spellings for duplicate checks."""
+            names = {field_name.lower()}
+
+            # Direct notation mappings.
+            modern_name = self.dict_manager.map_to_modern(field_name)
+            if modern_name:
+                names.add(modern_name.lower())
+                legacy_from_modern = self.dict_manager.map_to_legacy(modern_name)
+                if legacy_from_modern:
+                    names.add(legacy_from_modern.lower())
+
+            legacy_name = self.dict_manager.map_to_legacy(field_name)
+            if legacy_name:
+                names.add(legacy_name.lower())
+                modern_from_legacy = self.dict_manager.map_to_modern(legacy_name)
+                if modern_from_legacy:
+                    names.add(modern_from_legacy.lower())
+
+            # Metadata aliases (includes dictionary-declared equivalents).
+            metadata = self.dict_manager.get_field_metadata(field_name)
+            if metadata:
+                definition_id = getattr(metadata, 'definition_id', None)
+                if definition_id:
+                    names.add(definition_id.lower())
+                for alias in getattr(metadata, 'aliases', []):
+                    alias_name = getattr(alias, 'name', None)
+                    if alias_name:
+                        names.add(alias_name.lower())
+
+            return names
+
         for old_name, new_name in deprecated_updates.items():
-            if new_name.lower() not in existing_fields:
+            old_name_lower = old_name.lower()
+            successor_equivalents = _equivalent_names(new_name)
+            already_present = any(
+                eq_name in present_or_planned_fields and eq_name != old_name_lower
+                for eq_name in successor_equivalents
+            )
+            if not already_present:
                 deprecated_to_add[old_name] = new_name
+                present_or_planned_fields.update(successor_equivalents)
+
+        # Determine which deprecated replacements are true renames vs safe removals
+        # (when successor already exists under any equivalent alias).
+        deprecated_to_replace = {}
+        deprecated_replace_to_delete = set()
+        for old_name, new_name in deprecated_replacements.items():
+            old_name_lower = old_name.lower()
+            successor_equivalents = _equivalent_names(new_name)
+            successor_already_present = any(
+                eq_name in present_or_planned_fields and eq_name != old_name_lower
+                for eq_name in successor_equivalents
+            )
+            if successor_already_present:
+                deprecated_replace_to_delete.add(old_name_lower)
+            else:
+                deprecated_to_replace[old_name_lower] = new_name
+                present_or_planned_fields.update(successor_equivalents)
+
+        effective_fields_to_delete = set(fields_to_delete) | deprecated_replace_to_delete
         
-        if fields_to_delete or deprecated_to_add or format_corrections:
+        if effective_fields_to_delete or deprecated_to_add or deprecated_to_replace or format_corrections:
             lines = content.split('\n')
             new_lines = []
             in_multiline = False
@@ -1936,7 +2000,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     field_name = parts[0].lower() if parts else ''
                     
                     # Check if field should be deleted
-                    if field_name in fields_to_delete:
+                    if field_name in effective_fields_to_delete:
                         modified = True
                         # Check if this is a multiline value
                         if len(parts) == 1:
@@ -1951,6 +2015,18 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                         else:
                             # Single line value, skip this line
                             continue
+
+                    # Check if deprecated field should be replaced directly
+                    if field_name in deprecated_to_replace:
+                        new_name = deprecated_to_replace[field_name]
+                        if len(parts) > 1:
+                            # Field has value on same line
+                            new_lines.append(f"{new_name} {parts[1]}")
+                        else:
+                            # Field name only (value on next line)
+                            new_lines.append(new_name)
+                        modified = True
+                        continue
                     
                     # Check if we should add modern equivalent after deprecated field
                     if field_name in deprecated_to_add:
@@ -1991,6 +2067,12 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 changes_summary = []
                 if fields_to_delete:
                     changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
+                if deprecated_to_replace:
+                    changes_summary.append(f"Replaced {len(deprecated_to_replace)} deprecated field name(s)")
+                if deprecated_replace_to_delete:
+                    changes_summary.append(
+                        f"Removed {len(deprecated_replace_to_delete)} deprecated field(s) because successor already existed"
+                    )
                 if deprecated_to_add:
                     changes_summary.append(f"Added successors for {len(deprecated_to_add)} deprecated field(s)")
                 # format_corrections now includes both embedded prefix fixes and malformed fixes

@@ -51,6 +51,7 @@ class FieldAction(Enum):
     IGNORE_SESSION = "ignore_session"  # Ignore for this session only
     CORRECT_FORMAT = "correct_format"  # Apply suggested format correction
     DEPRECATION_UPDATE = "deprecation_update"  # Add modern equivalent alongside deprecated field
+    DEPRECATION_REPLACE = "deprecation_replace"  # Replace deprecated field name with successor
     FIX_MALFORMED = "fix_malformed"    # Rename malformed field to correct name
 
 
@@ -64,6 +65,7 @@ class FieldValidationResult:
     suggested_dictionary: str = ""     # If unknown, suggest a dict
     modern_equivalent: str = ""        # If deprecated, the modern (dot-notation) replacement
     successor_name: str = ""           # Format-aware successor (legacy or modern, depending on file)
+    successor_already_exists: bool = False  # True when successor (or alias-equivalent) is already present
     prefix: str = ""                   # Extracted prefix if applicable
     suggested_format: str = ""         # Suggested correct format (for embedded local prefixes)
     embedded_prefix: str = ""          # If local prefix is embedded in category extension
@@ -144,6 +146,8 @@ class DataNameValidator:
                 description=cached.description,
                 suggested_dictionary=cached.suggested_dictionary,
                 modern_equivalent=cached.modern_equivalent,
+                successor_name=cached.successor_name,
+                successor_already_exists=cached.successor_already_exists,
                 prefix=cached.prefix
             )
         
@@ -314,10 +318,11 @@ class DataNameValidator:
         """
         report = ValidationReport()
         seen_fields: Set[str] = set()
+        parsed_fields: List[tuple[str, int]] = []
         
         # Detect file format once so we can choose the right successor name
-        cif_format = self.dict_manager.detect_cif_format(content)  # "LEGACY"/"MODERN"/"MIXED"
-        prefer_legacy = cif_format in ("LEGACY", "MIXED")
+        cif_format = self.dict_manager.detect_cif_format(content)  # "legacy"/"modern"/"mixed"
+        prefer_legacy = str(cif_format).upper() in ("LEGACY", "MIXED")
         
         # Parse CIF content to extract field names and line numbers
         lines = content.split('\n')
@@ -346,34 +351,76 @@ class DataNameValidator:
                     if field_name_lower in seen_fields:
                         continue
                     seen_fields.add(field_name_lower)
-                    
-                    # Validate the field
-                    result = self.validate_field(field_name, line_num)
-                    report.total_fields += 1
-                    
-                    # Add to appropriate category list
-                    if result.category == FieldCategory.VALID:
-                        report.valid_fields.append(result)
-                    elif result.category == FieldCategory.REGISTERED_LOCAL:
-                        report.registered_local_fields.append(result)
-                    elif result.category == FieldCategory.USER_ALLOWED:
-                        report.user_allowed_fields.append(result)
-                    elif result.category == FieldCategory.UNKNOWN:
-                        report.unknown_fields.append(result)
-                    elif result.category == FieldCategory.DEPRECATED:
-                        # Compute format-aware successor name
-                        if result.modern_equivalent:
-                            successor = result.modern_equivalent
-                            if prefer_legacy:
-                                legacy = self.dict_manager.map_to_legacy(result.modern_equivalent)
-                                if legacy:
-                                    successor = legacy
-                            result.successor_name = successor
-                        report.deprecated_fields.append(result)
-                    elif result.category == FieldCategory.MALFORMED:
-                        report.malformed_fields.append(result)
+                    parsed_fields.append((field_name, line_num))
+
+        all_field_names = {field_name.lower() for field_name, _ in parsed_fields}
+
+        for field_name, line_num in parsed_fields:
+            # Validate the field
+            result = self.validate_field(field_name, line_num)
+            report.total_fields += 1
+
+            # Add to appropriate category list
+            if result.category == FieldCategory.VALID:
+                report.valid_fields.append(result)
+            elif result.category == FieldCategory.REGISTERED_LOCAL:
+                report.registered_local_fields.append(result)
+            elif result.category == FieldCategory.USER_ALLOWED:
+                report.user_allowed_fields.append(result)
+            elif result.category == FieldCategory.UNKNOWN:
+                report.unknown_fields.append(result)
+            elif result.category == FieldCategory.DEPRECATED:
+                # Compute format-aware successor name
+                if result.modern_equivalent:
+                    successor = result.modern_equivalent
+                    if prefer_legacy:
+                        legacy = self.dict_manager.map_to_legacy(result.modern_equivalent)
+                        if legacy:
+                            successor = legacy
+                    result.successor_name = successor
+
+                    successor_equivalents = self._get_equivalent_field_names(successor)
+                    current_field = field_name.lower()
+                    result.successor_already_exists = any(
+                        equivalent in all_field_names and equivalent != current_field
+                        for equivalent in successor_equivalents
+                    )
+
+                report.deprecated_fields.append(result)
+            elif result.category == FieldCategory.MALFORMED:
+                report.malformed_fields.append(result)
         
         return report
+
+    def _get_equivalent_field_names(self, field_name: str) -> Set[str]:
+        """Return known equivalent names (legacy/modern/aliases) for duplicate checks."""
+        names: Set[str] = {field_name.lower()}
+
+        modern_name = self.dict_manager.map_to_modern(field_name)
+        if modern_name:
+            names.add(modern_name.lower())
+            legacy_from_modern = self.dict_manager.map_to_legacy(modern_name)
+            if legacy_from_modern:
+                names.add(legacy_from_modern.lower())
+
+        legacy_name = self.dict_manager.map_to_legacy(field_name)
+        if legacy_name:
+            names.add(legacy_name.lower())
+            modern_from_legacy = self.dict_manager.map_to_modern(legacy_name)
+            if modern_from_legacy:
+                names.add(modern_from_legacy.lower())
+
+        metadata = self.dict_manager.get_field_metadata(field_name)
+        if metadata:
+            definition_id = getattr(metadata, 'definition_id', None)
+            if definition_id:
+                names.add(definition_id.lower())
+            for alias in getattr(metadata, 'aliases', []):
+                alias_name = getattr(alias, 'name', None)
+                if alias_name:
+                    names.add(alias_name.lower())
+
+        return names
     
     def _extract_field_name(self, line: str) -> Optional[str]:
         """

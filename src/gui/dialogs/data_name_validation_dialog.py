@@ -309,6 +309,7 @@ class DataNameValidationDialog(QDialog):
         self._pending_actions: Dict[str, FieldAction] = {}
         self._fields_to_delete: Set[str] = set()
         self._deprecated_updates: Dict[str, str] = {}  # old_name -> new_name
+        self._deprecated_replacements: Dict[str, str] = {}  # old_name -> successor_name
         self._format_corrections: Dict[str, str] = {}  # old_name -> corrected_name
         self._malformed_fixes: Dict[str, str] = {}  # old_name -> correct_name
         self._prefixes_to_allow: Set[str] = set()
@@ -736,16 +737,42 @@ class DataNameValidationDialog(QDialog):
             if successor:
                 add_successor_btn = QPushButton("+ Successor")
                 add_successor_btn.setMaximumWidth(BUTTON_WIDTH)
-                add_successor_btn.setStyleSheet("color: #27ae60;")  # Green
-                add_successor_btn.setToolTip(
-                    f"Add successor '{successor}'\n"
-                    f"alongside deprecated '{field_name}'\n"
-                    f"(both fields will have the same value)"
-                )
-                add_successor_btn.clicked.connect(
-                    lambda checked, fn=field_name, sn=successor: self._on_update_deprecated(fn, sn)
-                )
+                if field_result.successor_already_exists:
+                    add_successor_btn.setEnabled(False)
+                    add_successor_btn.setStyleSheet("color: #7f8c8d;")  # Grey
+                    add_successor_btn.setToolTip(
+                        f"Successor '{successor}' already exists in this CIF\n"
+                        "No successor data name needs to be added"
+                    )
+                else:
+                    add_successor_btn.setStyleSheet("color: #27ae60;")  # Green
+                    add_successor_btn.setToolTip(
+                        f"Add successor '{successor}'\n"
+                        f"alongside deprecated '{field_name}'\n"
+                        f"(both fields will have the same value)"
+                    )
+                    add_successor_btn.clicked.connect(
+                        lambda checked, fn=field_name, sn=successor: self._on_update_deprecated(fn, sn)
+                    )
                 layout.addWidget(add_successor_btn)
+
+                replace_btn = QPushButton("⇄ Replace")
+                replace_btn.setMaximumWidth(BUTTON_WIDTH)
+                replace_btn.setStyleSheet("color: #2980b9;")  # Blue
+                if field_result.successor_already_exists:
+                    replace_btn.setToolTip(
+                        f"Successor '{successor}' already exists in this CIF\n"
+                        f"Deprecated '{field_name}' will be removed"
+                    )
+                else:
+                    replace_btn.setToolTip(
+                        f"Replace deprecated '{field_name}'\n"
+                        f"with successor '{successor}'"
+                    )
+                replace_btn.clicked.connect(
+                    lambda checked, fn=field_name, sn=successor: self._on_replace_deprecated(fn, sn)
+                )
+                layout.addWidget(replace_btn)
             
             # Skip button
             skip_btn = QPushButton("⊘ Skip")
@@ -880,11 +907,38 @@ class DataNameValidationDialog(QDialog):
             field_name: The deprecated field name (will be kept)
             successor_name: The successor field to add (legacy or modern form)
         """
-        self._deprecated_updates[field_name.lower()] = successor_name
-        self._pending_actions[field_name.lower()] = FieldAction.DEPRECATION_UPDATE
+        field_name_lower = field_name.lower()
+        self._deprecated_updates[field_name_lower] = successor_name
+        self._deprecated_replacements.pop(field_name_lower, None)
+        self._pending_actions[field_name_lower] = FieldAction.DEPRECATION_UPDATE
         
         # Update UI to show pending action
         self._mark_field_as_handled(field_name, f"Will add {successor_name}", color="#27ae60")
+        self._update_apply_button()
+
+    def _on_replace_deprecated(self, field_name: str, successor_name: str) -> None:
+        """
+        Mark deprecated field to be replaced directly with its successor.
+
+        If the successor already exists in the CIF, the deprecated field will
+        be removed to avoid creating duplicates.
+
+        Args:
+            field_name: Deprecated field name
+            successor_name: Successor field name
+        """
+        field_name_lower = field_name.lower()
+        self._deprecated_replacements[field_name_lower] = successor_name
+        self._deprecated_updates.pop(field_name_lower, None)
+        self._pending_actions[field_name_lower] = FieldAction.DEPRECATION_REPLACE
+
+        field_result = self._find_field_result(field_name)
+        if field_result and field_result.successor_already_exists:
+            status = f"Will remove (successor {successor_name} exists)"
+        else:
+            status = f"Will replace with {successor_name}"
+
+        self._mark_field_as_handled(field_name, status, color="#2980b9")
         self._update_apply_button()
     
     def _on_skip_deprecated(self, field_name: str) -> None:
@@ -949,6 +1003,7 @@ class DataNameValidationDialog(QDialog):
         self._pending_actions.pop(field_name_lower, None)
         self._fields_to_delete.discard(field_name_lower)
         self._deprecated_updates.pop(field_name_lower, None)
+        self._deprecated_replacements.pop(field_name_lower, None)
         self._format_corrections.pop(field_name_lower, None)
         self._malformed_fixes.pop(field_name_lower, None)
         self._fields_to_allow.discard(field_name_lower)
@@ -1055,6 +1110,7 @@ class DataNameValidationDialog(QDialog):
             self._pending_actions or
             self._fields_to_delete or
             self._deprecated_updates or
+            self._deprecated_replacements or
             self._format_corrections or
             self._malformed_fixes or
             self._prefixes_to_allow or
@@ -1129,6 +1185,7 @@ class DataNameValidationDialog(QDialog):
         self._pending_actions.clear()
         self._fields_to_delete.clear()
         self._deprecated_updates.clear()
+        self._deprecated_replacements.clear()
         self._format_corrections.clear()
         self._malformed_fixes.clear()
         self._prefixes_to_allow.clear()
@@ -1258,6 +1315,15 @@ class DataNameValidationDialog(QDialog):
             Dict mapping old field names to new field names
         """
         return self._deprecated_updates.copy()
+
+    def get_deprecated_replacements(self) -> Dict[str, str]:
+        """
+        Get deprecated field replacement mappings.
+
+        Returns:
+            Dict mapping deprecated field names to successor field names
+        """
+        return self._deprecated_replacements.copy()
     
     def get_format_corrections(self) -> Dict[str, str]:
         """

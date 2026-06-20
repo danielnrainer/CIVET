@@ -17,7 +17,7 @@ import json
 import requests
 import sys
 import tempfile
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Mapping, Optional, Set, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
@@ -3078,7 +3078,11 @@ class CIFDictionaryManager:
         
         return converted_content, all_changes
     
-    def apply_field_conflict_resolutions(self, cif_content: str, resolutions: Dict[str, Tuple[str, str]]) -> Tuple[str, List[str]]:
+    def apply_field_conflict_resolutions(
+        self,
+        cif_content: str,
+        resolutions: Mapping[str, Tuple[str, str] | Tuple[str, str, bool]],
+    ) -> Tuple[str, List[str]]:
         """
         Apply user-specified resolutions for field conflicts.
         
