@@ -382,6 +382,23 @@ class FieldInfo:
             self.examples = []
 
 
+@dataclass
+class DictionarySearchResult:
+    """Single search hit from a loaded dictionary."""
+    dictionary_name: str
+    dictionary_title: Optional[str]
+    field_name: str
+    category_id: Optional[str]
+    description: Optional[str]
+    type_contents: Optional[str]
+    units: Optional[str]
+    aliases: List[str]
+    matched_aliases: List[str]
+    matched_via_alias: bool
+    enumeration_values: List[str]
+    examples: List[str]
+
+
 class CIFDictionaryManager:
     """
     Lazy-loading CIF dictionary manager for efficient field lookup and alias resolution.
@@ -2180,6 +2197,134 @@ class CIFDictionaryManager:
             print(f"Error getting detailed dictionary info: {e}")
             # Return at least basic info about the primary dictionary
             return [self._dictionary_infos[0]] if self._dictionary_infos else []
+
+    def search_dictionary_fields(
+        self,
+        query: str,
+        dictionary_name: Optional[str] = None,
+        dictionary_names: Optional[List[str]] = None,
+        max_results: int = 500,
+        include_description: bool = True,
+    ) -> List[DictionarySearchResult]:
+        """Search loaded dictionaries for matching field names/categories/definitions.
+
+        Args:
+            query: Search text to match against field name, aliases, category, and definition.
+            dictionary_name: Optional dictionary display name to scope search; None searches all.
+            dictionary_names: Optional list of dictionary display names to scope search.
+                When provided, this takes precedence over dictionary_name.
+            max_results: Maximum number of search hits to return.
+            include_description: Whether to match search text in definition/description text.
+
+        Returns:
+            List of DictionarySearchResult entries sorted by field name.
+        """
+        self._ensure_loaded()
+
+        search_text = query.strip().lower()
+        if not search_text:
+            return []
+
+        target_dicts: Optional[Set[str]] = None
+        if dictionary_names:
+            selected = {name.strip().lower() for name in dictionary_names if name and name.strip()}
+            target_dicts = selected or None
+        elif dictionary_name:
+            target_dicts = {dictionary_name.strip().lower()}
+
+        results: List[DictionarySearchResult] = []
+        seen_keys: Set[Tuple[str, str]] = set()
+
+        for info, parser in self._iter_dictionary_parsers(include_inactive=True):
+            if target_dicts and info.name.lower() not in target_dicts:
+                continue
+
+            metadata_map = getattr(parser, '_field_metadata', {}) or {}
+            for metadata in metadata_map.values():
+                field_name = getattr(metadata, 'definition_id', None)
+                if not field_name:
+                    continue
+
+                alias_names: List[str] = []
+                for alias in getattr(metadata, 'aliases', []) or []:
+                    alias_name = getattr(alias, 'name', alias)
+                    if not alias_name:
+                        continue
+                    alias_text = str(alias_name)
+                    if alias_text.lower() == field_name.lower():
+                        continue
+                    alias_names.append(alias_text)
+
+                # Keep aliases unique while preserving dictionary order.
+                alias_names = list(dict.fromkeys(alias_names))
+
+                searchable_parts = [
+                    field_name,
+                    getattr(metadata, 'category_id', None),
+                    *alias_names,
+                ]
+
+                if include_description:
+                    searchable_parts.append(getattr(metadata, 'description', None))
+
+                if not any(part and search_text in part.lower() for part in searchable_parts):
+                    continue
+
+                key = (info.name.lower(), field_name.lower())
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+
+                matched_aliases = [
+                    alias_name
+                    for alias_name in alias_names
+                    if search_text in alias_name.lower()
+                ]
+
+                enum_values = list(getattr(metadata, 'enumeration_values', None) or [])
+                examples = list(getattr(metadata, 'examples', None) or [])
+
+                results.append(
+                    DictionarySearchResult(
+                        dictionary_name=info.name,
+                        dictionary_title=info.dict_title,
+                        field_name=field_name,
+                        category_id=getattr(metadata, 'category_id', None),
+                        description=getattr(metadata, 'description', None),
+                        type_contents=getattr(metadata, 'type_contents', None),
+                        units=getattr(metadata, 'units', None),
+                        aliases=alias_names,
+                        matched_aliases=matched_aliases,
+                        matched_via_alias=bool(matched_aliases),
+                        enumeration_values=enum_values,
+                        examples=examples,
+                    )
+                )
+
+        results.sort(key=lambda item: (item.field_name.lower(), item.dictionary_name.lower()))
+        return results[:max_results]
+
+    def _iter_dictionary_parsers(self, include_inactive: bool = False):
+        """Yield ``(DictionaryInfo, parser)`` for loaded dictionaries."""
+        # Primary dictionary parser (index 0)
+        if self._dictionary_infos:
+            primary_info = self._dictionary_infos[0]
+            if include_inactive or primary_info.is_active:
+                self.parser.parse_dictionary()
+                yield primary_info, self.parser
+
+        # Additional dictionary parsers (index i+1)
+        for i, parser in enumerate(self._additional_parsers):
+            info_index = i + 1
+            if info_index >= len(self._dictionary_infos):
+                continue
+
+            dict_info = self._dictionary_infos[info_index]
+            if not include_inactive and not dict_info.is_active:
+                continue
+
+            parser.parse_dictionary()
+            yield dict_info, parser
     
     def check_for_updates(self, timeout: int = 10) -> Dict[str, Dict[str, Any]]:
         """

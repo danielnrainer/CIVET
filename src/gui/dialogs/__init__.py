@@ -12,6 +12,7 @@ from .data_name_validation_dialog import DataNameValidationDialog
 from .recognised_prefixes_dialog import RecognisedPrefixesDialog
 from .cif_syntax_compliance_dialog import CIFSyntaxComplianceDialog
 from .non_ascii_conversion_dialog import NonAsciiConversionDialog
+from .dictionary_search_dialog import DictionarySearchDialog
 
 __all__ = [
     'CIFInputDialog',
@@ -22,6 +23,7 @@ __all__ = [
     'RecognisedPrefixesDialog',
     'CIFSyntaxComplianceDialog',
     'NonAsciiConversionDialog',
+    'DictionarySearchDialog',
     'RESULT_ABORT',
     'RESULT_STOP_SAVE'
 ]

@@ -75,6 +75,7 @@ a = Analysis(
         'gui.dialogs.config_dialog',
         'gui.dialogs.field_conflict_dialog',
         'gui.dialogs.dictionary_info_dialog',
+        'gui.dialogs.dictionary_search_dialog',
         'gui.dialogs.dictionary_suggestion_dialog',
         'gui.dialogs.field_rules_validation_dialog',
         'gui.dialogs.format_conversion_dialog',

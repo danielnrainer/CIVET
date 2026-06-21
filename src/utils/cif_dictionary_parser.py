@@ -39,6 +39,7 @@ class FieldMetadata:
     is_replaced: bool = False  # Whether field is replaced/obsolete
     replacement_by: Optional[str] = None  # _definition_replaced.by
     enumeration_values: Optional[List[str]] = None  # Allowed enumeration values if any
+    examples: Optional[List[str]] = None  # Example values if provided by dictionary
     units: Optional[str] = None  # Units code (DDLm: _units.code, DDL1: _units)
     ddl_format: Optional[str] = None  # Source DDL format ('DDLm', 'DDL1', 'DDL2')
     source_dictionary: Optional[str] = None  # Name of the source dictionary

@@ -10,7 +10,7 @@ import os
 import json
 import sys
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker, safe_eval_expr
 from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, update_audit_creation_date
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
@@ -31,6 +31,7 @@ from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog,
                      RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.data_name_validation_dialog import DataNameValidationDialog
 from .dialogs.dictionary_info_dialog import DictionaryInfoDialog
+from .dialogs.dictionary_search_dialog import DictionarySearchDialog
 from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.field_rules_validation_dialog import FieldRulesValidationDialog
 from .dialogs.dictionary_suggestion_dialog import show_dictionary_suggestions
@@ -307,6 +308,10 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         self.text_editor = self.cif_text_editor.text_editor
         self.line_numbers = self.cif_text_editor.line_numbers
         self.ruler = self.cif_text_editor.ruler
+
+        # Extend editor right-click menu with dictionary search for selected text.
+        self.text_editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.text_editor.customContextMenuRequested.connect(self._show_editor_context_menu)
         
         main_layout.addWidget(self.cif_text_editor)
         
@@ -584,23 +589,28 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         syntax_action.setChecked(self.cif_text_editor.settings['syntax_highlighting_enabled'])
         syntax_action.triggered.connect(self.toggle_syntax_highlighting)
         
-        # Settings menu
-        settings_menu = menubar.addMenu("Settings")
-        
-        # Dictionary management section
-        dict_info_action = settings_menu.addAction("Dictionary Information...")
+        # Dictionaries menu
+        dictionaries_menu = menubar.addMenu("Dictionaries")
+
+        search_dict_action = dictionaries_menu.addAction("Search Loaded Dictionaries...")
+        search_dict_action.triggered.connect(self.show_dictionary_search)
+
+        dictionaries_menu.addSeparator()
+
+        dict_info_action = dictionaries_menu.addAction("Dictionary Information...")
         dict_info_action.triggered.connect(self.show_dictionary_info)
         
-        load_dict_action = settings_menu.addAction("Replace Core CIF Dictionary...")
+        load_dict_action = dictionaries_menu.addAction("Replace Core CIF Dictionary...")
         load_dict_action.triggered.connect(self.load_custom_dictionary)
         
-        add_dict_action = settings_menu.addAction("Add Additional CIF Dictionary...")
+        add_dict_action = dictionaries_menu.addAction("Add Additional CIF Dictionary...")
         add_dict_action.triggered.connect(self.add_additional_dictionary)
         
-        suggest_dict_action = settings_menu.addAction("Suggest Dictionaries for Current CIF...")
+        suggest_dict_action = dictionaries_menu.addAction("Suggest Dictionaries for Current CIF...")
         suggest_dict_action.triggered.connect(self.suggest_dictionaries)
-        
-        settings_menu.addSeparator()
+
+        # Settings menu
+        settings_menu = menubar.addMenu("Settings")
         
         # Prefix management section
         show_prefixes_action = settings_menu.addAction("View Recognised Prefixes...")
@@ -1702,6 +1712,57 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             print(f"Dictionary info dialog error: {error_details}")
             QMessageBox.critical(self, "Error", 
                                f"Failed to show dictionary information:\n{str(e)}\n\nCheck console for details.")
+
+    def show_dictionary_search(self):
+        """Show searchable view over loaded dictionary data names and categories."""
+        self._open_dictionary_search()
+
+    def _open_dictionary_search(self, initial_query: Optional[str] = None):
+        """Open dictionary search dialog and optionally prefill the search text."""
+        try:
+            dialog = DictionarySearchDialog(self.dict_manager, self)
+
+            def _get_cif_content() -> str:
+                return self.text_editor.toPlainText()
+
+            def _go_to_line(line_number: int):
+                if line_number <= 0:
+                    return
+                doc = self.text_editor.document()
+                block = doc.findBlockByLineNumber(line_number - 1)
+                if block.isValid():
+                    cursor = self.text_editor.textCursor()
+                    cursor.setPosition(block.position())
+                    self.text_editor.setTextCursor(cursor)
+                    self.text_editor.ensureCursorVisible()
+
+            dialog.set_cif_navigation_hooks(_get_cif_content, _go_to_line)
+            if initial_query:
+                dialog.search_input.setText(initial_query)
+                dialog.search_input.selectAll()
+                dialog.search_input.setFocus()
+            self._show_dialog_with_configured_interaction(dialog)
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Dictionary search dialog error: {error_details}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open dictionary search:\n{str(e)}\n\nCheck console for details.",
+            )
+
+    def _show_editor_context_menu(self, pos):
+        """Show editor context menu with dictionary search for selected text."""
+        menu = self.text_editor.createStandardContextMenu()
+
+        selected_text = self.text_editor.textCursor().selectedText().replace('\u2029', ' ').strip()
+        if selected_text:
+            menu.addSeparator()
+            search_action = menu.addAction("Search in Dictionaries")
+            search_action.triggered.connect(lambda: self._open_dictionary_search(selected_text))
+
+        menu.exec(self.text_editor.viewport().mapToGlobal(pos))
     
     def show_about_dialog(self):
         """Show the About dialog with version and credits."""

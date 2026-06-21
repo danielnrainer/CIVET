@@ -495,6 +495,7 @@ class DDL1DictionaryParser:
             is_replaced=is_replaced,
             replacement_by=replacement_by,
             enumeration_values=block.enumeration_values if block.enumeration_values else None,
+            examples=block.examples if block.examples else None,
             units=block.units,
             ddl_format='DDL1',
             source_dictionary=self._dictionary_name

@@ -17,6 +17,7 @@ Always check your CIF files carefully and if you encounter an issue and would li
 - **Legacy/Modern CIF Handling**: Detects legacy, modern, and mixed notation; includes conversion plus integrated malformed-field detection and correction.
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
+- **Dictionary Search**: Search loaded dictionaries by data name, alias, category, and optionally description text; filter to selected dictionaries and cross-check hits against the currently loaded CIF.
 - **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes, and uses validation-aware highlighting.
 - **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
@@ -159,6 +160,18 @@ The **Actions → Validate Data Values...** dialog checks all field values in th
 - **Go to Line**: navigates the editor to the flagged line (double-click also works)
 
 The dialog opens in non-blocking mode by default so you can edit while it is open. This can be changed under **Settings → Editor Settings → Dialog Behavior**.
+
+### Dictionary Search
+
+The **Dictionaries → Search Loaded Dictionaries...** dialog provides a searchable view over all currently loaded dictionaries:
+
+- Searches canonical data names, known aliases, categories, and optionally description text
+- Supports multi-dictionary selection, with the active CORE dictionary selected by default when available
+- Marks whether hits are present in the current CIF, including separate states for canonical names, alias-only matches, and cases where both forms are present
+- Shows dictionary metadata, known aliases, units, examples or allowed values, and the first matching CIF line
+- Lets you jump directly to the matching line in the editor
+
+You can also select a data name in the editor, right-click, and use **Search in Dictionaries** to open the dialog prefilled with that text.
 
 ### Data Name Validation Results
 
