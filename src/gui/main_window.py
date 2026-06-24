@@ -1359,6 +1359,10 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         else:
             self.cursor_label.setStyleSheet("")
 
+    def _navigate_editor_to_line(self, line_number: int) -> None:
+        """Delegate line navigation to the editor component's shared implementation."""
+        self.cif_text_editor.navigate_to_line(line_number, align='bottom')
+
     def update_status_bar(self):
         path = self.current_file if self.current_file else "Untitled"
         modified = "*" if self.modified else ""
@@ -1728,15 +1732,13 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             def _go_to_line(line_number: int):
                 if line_number <= 0:
                     return
-                doc = self.text_editor.document()
-                block = doc.findBlockByLineNumber(line_number - 1)
-                if block.isValid():
-                    cursor = self.text_editor.textCursor()
-                    cursor.setPosition(block.position())
-                    self.text_editor.setTextCursor(cursor)
-                    self.text_editor.ensureCursorVisible()
+                self._navigate_editor_to_line(line_number)
 
-            dialog.set_cif_navigation_hooks(_get_cif_content, _go_to_line)
+            def _set_hitlist_highlights(line_numbers: List[int], selected_line: Optional[int]) -> None:
+                self.cif_text_editor.set_temporary_line_highlights(line_numbers, selected_line)
+
+            dialog.set_cif_navigation_hooks(_get_cif_content, _go_to_line, _set_hitlist_highlights)
+            dialog.finished.connect(lambda _result: self.cif_text_editor.clear_temporary_line_highlights())
             if initial_query:
                 dialog.search_input.setText(initial_query)
                 dialog.search_input.selectAll()
@@ -1746,6 +1748,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             import traceback
             error_details = traceback.format_exc()
             print(f"Dictionary search dialog error: {error_details}")
+            self.cif_text_editor.clear_temporary_line_highlights()
             QMessageBox.critical(
                 self,
                 "Error",
@@ -1859,13 +1862,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
 
             def _goto(line_number: int):
                 """Move the text editor cursor to the given 1-based line."""
-                doc = self.text_editor.document()
-                block = doc.findBlockByLineNumber(line_number - 1)
-                if block.isValid():
-                    cursor = self.text_editor.textCursor()
-                    cursor.setPosition(block.position())
-                    self.text_editor.setTextCursor(cursor)
-                    self.text_editor.ensureCursorVisible()
+                self._navigate_editor_to_line(line_number)
 
             dialog.navigate_to_line.connect(_goto)
 
@@ -2357,7 +2354,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     "<br><br><b>Tip:</b> To customize registered prefixes, copy "
                     "<code>registered_prefixes.json</code> from the GitHub repository "
                     "to this config folder and edit as needed. "
-                    "Restart CIVET to apply changes."
+                    "Go to Settings > Reload Prefix Configuration to apply changes."
                 )
             
             QMessageBox.information(self, "CIVET Config Directory", info_text)

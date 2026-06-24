@@ -689,15 +689,7 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
         dialog = CIFSyntaxComplianceDialog(results['cif1'], results['cif2'], self)
 
         def _goto(line_number: int):
-            doc = self.text_editor.document()
-            if doc is None:
-                return
-            block = doc.findBlockByLineNumber(line_number - 1)
-            if block.isValid():
-                cursor = self.text_editor.textCursor()
-                cursor.setPosition(block.position())
-                self.text_editor.setTextCursor(cursor)
-                self.text_editor.ensureCursorVisible()
+            self._navigate_editor_to_line(line_number)
 
         def _refresh():
             fresh = self.text_editor.toPlainText()

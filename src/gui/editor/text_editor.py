@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayo
                            QLabel, QLineEdit, QCheckBox, QPushButton, QMessageBox,
                            QFontDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import (QFont, QFontMetrics, QTextCursor, QTextDocument)
+from PyQt6.QtGui import (QFont, QFontMetrics, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QColor)
 import sys
 import os
 
@@ -453,10 +453,103 @@ class CIFTextEditor(QWidget):
         
         return count
     
-    def goto_line(self, line_number):
-        """Go to a specific line number."""
-        self.set_cursor_position(line_number, 0)
+    def navigate_to_line(self, line_number, align='bottom'):
+        """Move cursor to a specific line and optionally align it in the viewport."""
+        doc = self.text_editor.document()
+        if doc is None:
+            return
+
+        total_lines = doc.blockCount()
+        if total_lines <= 0:
+            return
+
+        try:
+            target_line = int(line_number)
+        except (TypeError, ValueError):
+            return
+
+        target_line = max(1, min(target_line, total_lines))
+        block = doc.findBlockByLineNumber(target_line - 1)
+        if not block.isValid():
+            return
+
+        cursor = self.text_editor.textCursor()
+        cursor.setPosition(block.position())
+        self.text_editor.setTextCursor(cursor)
         self.text_editor.ensureCursorVisible()
+
+        if align != 'bottom':
+            return
+
+        layout = doc.documentLayout()
+        viewport = self.text_editor.viewport()
+        scrollbar = self.text_editor.verticalScrollBar()
+        if layout is None or viewport is None or scrollbar is None:
+            return
+
+        block_rect = layout.blockBoundingRect(block)
+        desired_scroll = int(round(block_rect.bottom() - viewport.height()))
+        desired_scroll = max(scrollbar.minimum(), min(desired_scroll, scrollbar.maximum()))
+        scrollbar.setValue(desired_scroll)
+
+    def set_temporary_line_highlights(self, line_numbers, selected_line=None):
+        """Highlight a set of 1-based lines, with an optional distinct selected line."""
+        doc = self.text_editor.document()
+        if doc is None:
+            return
+
+        total_lines = doc.blockCount()
+        if total_lines <= 0:
+            self.text_editor.setExtraSelections([])
+            return
+
+        unique_lines = []
+        seen = set()
+        for line in line_numbers or []:
+            try:
+                line_num = int(line)
+            except (TypeError, ValueError):
+                continue
+            if line_num < 1 or line_num > total_lines or line_num in seen:
+                continue
+            seen.add(line_num)
+            unique_lines.append(line_num)
+
+        try:
+            selected_line_num = int(selected_line) if selected_line is not None else None
+        except (TypeError, ValueError):
+            selected_line_num = None
+
+        base_format = QTextCharFormat()
+        base_format.setBackground(QColor(255, 235, 176, 120))
+        base_format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+
+        selected_format = QTextCharFormat()
+        selected_format.setBackground(QColor(255, 196, 107, 180))
+        selected_format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+
+        selections = []
+        for line_num in unique_lines:
+            block = doc.findBlockByLineNumber(line_num - 1)
+            if not block.isValid():
+                continue
+
+            selection = QTextEdit.ExtraSelection()
+            cursor = QTextCursor(block)
+            cursor.clearSelection()
+            selection.cursor = cursor
+            selection.format = selected_format if selected_line_num == line_num else base_format
+            selections.append(selection)
+
+        self.text_editor.setExtraSelections(selections)
+
+    def clear_temporary_line_highlights(self):
+        """Clear transient dialog-driven line highlights."""
+        self.text_editor.setExtraSelections([])
+
+    def goto_line(self, line_number):
+        """Go to a specific line and keep it at the bottom of the viewport when possible."""
+        self.navigate_to_line(line_number, align='bottom')
     
     def highlight_line(self, line_number):
         """Highlight a specific line."""

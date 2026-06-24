@@ -43,6 +43,7 @@ class DictionarySearchDialog(QDialog):
         self._result_display_order: List[int] = []
         self._get_cif_content: Optional[Callable[[], str]] = None
         self._go_to_line: Optional[Callable[[int], None]] = None
+        self._set_hitlist_highlights: Optional[Callable[[List[int], Optional[int]], None]] = None
         self._dictionary_actions: Dict[str, QAction] = {}
         self._all_dictionaries_action: Optional[QAction] = None
         self._selected_dictionary_names: Optional[List[str]] = None
@@ -153,10 +154,12 @@ class DictionarySearchDialog(QDialog):
         self,
         get_cif_content: Callable[[], str],
         go_to_line: Callable[[int], None],
+        set_hitlist_highlights: Optional[Callable[[List[int], Optional[int]], None]] = None,
     ) -> None:
         """Set callbacks for checking/executing navigation into current CIF content."""
         self._get_cif_content = get_cif_content
         self._go_to_line = go_to_line
+        self._set_hitlist_highlights = set_hitlist_highlights
 
     def _populate_dictionary_selector(self) -> None:
         self.dictionary_menu.clear()
@@ -308,6 +311,7 @@ class DictionarySearchDialog(QDialog):
         self._result_display_order = []
         self.details_text.clear()
         self.goto_line_button.setEnabled(False)
+        self._update_hitlist_highlights(None)
 
         if not query:
             self.details_text.setPlainText("Type in the search bar to find data names, aliases, and categories.")
@@ -366,6 +370,7 @@ class DictionarySearchDialog(QDialog):
         self.details_text.clear()
         self.goto_line_button.setEnabled(False)
         self._result_display_order = []
+        self._update_hitlist_highlights(None)
 
         if not self._results:
             return
@@ -479,6 +484,7 @@ class DictionarySearchDialog(QDialog):
         if row < 0 or row >= len(self._result_display_order):
             self.details_text.clear()
             self.goto_line_button.setEnabled(False)
+            self._update_hitlist_highlights(None)
             return
 
         source_row = self._result_display_order[row]
@@ -548,6 +554,28 @@ class DictionarySearchDialog(QDialog):
 
         self.details_text.setHtml(html_content)
         self.goto_line_button.setEnabled(hit_line > 0 and self._go_to_line is not None)
+        self._update_hitlist_highlights(hit_line if hit_line > 0 else None)
+
+    def _update_hitlist_highlights(self, selected_line: Optional[int]) -> None:
+        """Update temporary editor highlights for the current hit list and selected row."""
+        if self._set_hitlist_highlights is None:
+            return
+
+        line_numbers: List[int] = []
+        for source_row in self._result_display_order:
+            if source_row >= len(self._result_line_numbers):
+                continue
+            line_number = self._result_line_numbers[source_row]
+            if line_number > 0:
+                line_numbers.append(line_number)
+
+        self._set_hitlist_highlights(line_numbers, selected_line)
+
+    def closeEvent(self, event) -> None:
+        """Clear temporary editor highlights when the dialog closes."""
+        if self._set_hitlist_highlights is not None:
+            self._set_hitlist_highlights([], None)
+        super().closeEvent(event)
 
     def _build_field_line_map(self) -> Dict[str, int]:
         """Build map of field names to first line number in current CIF content."""
@@ -609,10 +637,11 @@ class DictionarySearchDialog(QDialog):
             return
 
         row = self.hits_list.currentRow()
-        if row < 0 or row >= len(self._result_line_numbers):
+        if row < 0 or row >= len(self._result_display_order):
             return
 
-        line_number = self._result_line_numbers[row]
+        source_row = self._result_display_order[row]
+        line_number = self._result_line_numbers[source_row] if source_row < len(self._result_line_numbers) else 0
         if line_number > 0:
             self._go_to_line(line_number)
 

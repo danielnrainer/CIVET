@@ -77,7 +77,7 @@ class DictionarySuggestionDialog(QDialog):
         
         self.setWindowTitle("Dictionary Suggestions")
         self.setModal(True)
-        self.resize(600, 500)
+        self.resize(300, 275)
         
         self.init_ui()
     
