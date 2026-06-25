@@ -637,3 +637,96 @@ class FieldRulesValidator:
                 return '\n'.join(new_lines), f"Removed deprecated field {field}"
         
         return content, None
+
+    def convert_field_rules_notation(self, field_rules_content: str, target_notation: str) -> Tuple[str, List[str]]:
+        """
+        Convert data names in a .cif_rules file between legacy and modern notation.
+
+        This converter is intentionally rules-file oriented: it replaces CIF data-name
+        tokens anywhere in the content (including action lines such as RENAME and
+        CALCULATE expressions), while preserving all non-field text verbatim.
+
+        Args:
+            field_rules_content: Original .cif_rules content
+            target_notation: Desired notation, either "legacy" or "modern"
+
+        Returns:
+            Tuple of (converted_content, list_of_changes_made)
+        """
+        normalized_target = target_notation.strip().lower()
+        if normalized_target not in {"legacy", "modern"}:
+            raise ValueError("target_notation must be 'legacy' or 'modern'")
+
+        field_pattern = re.compile(r'_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*')
+        replacements: Dict[str, str] = {}
+        no_equivalent_fields: Set[str] = set()
+        unknown_fields: Set[str] = set()
+
+        def _record_conversion(source: str, target: str) -> None:
+            if source != target:
+                replacements[source] = target
+
+        def _replace_field(match: re.Match) -> str:
+            original_field = match.group(0)
+            field_name = original_field
+
+            # Always replace deprecated names with non-deprecated successors first.
+            if self.dict_manager.is_field_deprecated(field_name):
+                successor = self.dict_manager.get_modern_equivalent(
+                    field_name,
+                    prefer_format=normalized_target,
+                )
+                if successor and successor != field_name:
+                    _record_conversion(original_field, successor)
+                    field_name = successor
+
+            if normalized_target == "modern":
+                if '.' in field_name:
+                    return field_name
+
+                mapped = self.dict_manager.map_to_modern(field_name)
+                if mapped:
+                    _record_conversion(original_field, mapped)
+                    return mapped
+
+                if self.dict_manager.is_known_field(field_name):
+                    no_equivalent_fields.add(field_name)
+                else:
+                    unknown_fields.add(field_name)
+                return field_name
+
+            if '.' not in field_name:
+                return field_name
+
+            mapped = self.dict_manager.map_to_legacy(field_name)
+            if mapped:
+                _record_conversion(original_field, mapped)
+                return mapped
+
+            if self.dict_manager.is_known_field(field_name):
+                no_equivalent_fields.add(field_name)
+            else:
+                unknown_fields.add(field_name)
+            return field_name
+
+        converted_content = field_pattern.sub(_replace_field, field_rules_content)
+
+        changes: List[str] = []
+        for source, target in replacements.items():
+            changes.append(f"Converted {source} -> {target}")
+
+        if no_equivalent_fields:
+            examples = ', '.join(sorted(no_equivalent_fields)[:5])
+            changes.append(
+                "Kept known fields unchanged (no direct "
+                f"{normalized_target} alias): {examples}"
+            )
+
+        if unknown_fields:
+            examples = ', '.join(sorted(unknown_fields)[:5])
+            changes.append(
+                "Kept unknown fields unchanged (not found in loaded dictionaries): "
+                f"{examples}"
+            )
+
+        return converted_content, changes

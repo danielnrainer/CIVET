@@ -17,11 +17,12 @@ import os
 import re
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
-from PyQt6.QtWidgets import QDialog, QMessageBox
+from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.CIF_field_parsing import safe_eval_expr
 from utils.CIF_parser import CIFField, update_audit_creation_method
 from utils.cif_dictionary_manager import FieldNotation
+from utils.field_rules_validator import CIFFormatAnalyzer
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog,
                       RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.data_name_validation_dialog import DataNameValidationDialog
@@ -43,6 +44,285 @@ SOHNCKE_SPACE_GROUPS = {
 
 class FieldCheckingMixin:
     """Mixin providing field checking workflow methods for CIFEditor."""
+
+    def _get_active_field_rules_path(self) -> str:
+        """Return the currently selected .cif_rules source path, if any."""
+        if hasattr(self, 'radio_builtin') and self.radio_builtin.isChecked():
+            item_data = self.builtin_combo.currentData() if hasattr(self, 'builtin_combo') else None
+            if isinstance(item_data, dict):
+                return item_data.get('path', '') or ''
+
+        if hasattr(self, 'radio_user') and self.radio_user.isChecked():
+            if hasattr(self, 'user_combo'):
+                return self.user_combo.currentData() or ''
+
+        if getattr(self, 'current_field_set', None) == 'Custom':
+            return getattr(self, 'custom_field_rules_file', '') or ''
+
+        return getattr(self, 'custom_field_rules_file', '') or ''
+
+    def _load_rules_content_into_current_field_set(self, rules_content: str) -> None:
+        """Load rules content into the active field set via a temporary .cif_rules file."""
+        import tempfile
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.cif_rules', delete=False, encoding='utf-8') as temp_file:
+                temp_file.write(rules_content)
+                temp_path = temp_file.name
+
+            self.field_checker.load_field_set(self.current_field_set, temp_path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def _build_converted_rules_suggestion_path(self, source_rules_path: str, target_notation: str) -> str:
+        """Build a default output filename for converted rules."""
+        base, ext = os.path.splitext(source_rules_path)
+        if not ext:
+            ext = '.cif_rules'
+
+        if base.endswith('_legacy') and target_notation == 'modern':
+            suggested_base = base[:-7]
+        elif base.endswith('_modern') and target_notation == 'legacy':
+            suggested_base = base[:-7]
+        else:
+            suggested_base = f"{base}_{target_notation}"
+
+        return f"{suggested_base}{ext}"
+
+    def _prompt_rules_notation_mismatch_action(
+        self,
+        cif_notation: str,
+        rules_notation: str,
+    ) -> str:
+        """Prompt user for how to handle CIF/rules notation mismatch."""
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Notation Mismatch: CIF vs Field Rules")
+        msg_box.setText(
+            f"Loaded CIF notation: {cif_notation}\n"
+            f"Selected .cif_rules notation: {rules_notation}\n\n"
+            "Choose how to proceed before running checks:"
+        )
+
+        convert_rules_btn = msg_box.addButton(
+            f"Convert Rules to {cif_notation} and Run Checks",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        convert_cif_btn = msg_box.addButton(
+            f"Convert CIF to {rules_notation} and Run Checks",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        run_as_is_btn = msg_box.addButton(
+            "Run Checks As Is (Discouraged)",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_btn = msg_box.addButton(
+            "Cancel",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        msg_box.setDefaultButton(convert_rules_btn)
+
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == convert_rules_btn:
+            return 'convert_rules'
+        if clicked == convert_cif_btn:
+            return 'convert_cif'
+        if clicked == run_as_is_btn:
+            return 'run_as_is'
+        if clicked == cancel_btn:
+            return 'cancel'
+        return 'cancel'
+
+    def _resolve_rules_cif_notation_mismatch_before_checks(self) -> bool:
+        """
+        Detect CIF/rules notation mismatch and apply a user-selected strategy.
+
+        Returns:
+            True to continue checks, False to abort.
+        """
+        cif_content = self.text_editor.toPlainText()
+        cif_notation = self.dict_manager.detect_notation(cif_content)
+        if cif_notation not in {FieldNotation.LEGACY, FieldNotation.MODERN}:
+            return True
+
+        rules_path = self._get_active_field_rules_path()
+        if not rules_path:
+            return True
+
+        try:
+            with open(rules_path, 'r', encoding='utf-8') as file_handle:
+                rules_content = file_handle.read()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Field Rules Read Error",
+                f"Could not read selected field rules file:\n{rules_path}\n\n{exc}"
+            )
+            return False
+
+        rules_notation = CIFFormatAnalyzer.analyze_cif_format(rules_content).lower()
+        if rules_notation not in {'legacy', 'modern'}:
+            return True
+
+        cif_notation_str = 'legacy' if cif_notation == FieldNotation.LEGACY else 'modern'
+        if cif_notation_str == rules_notation:
+            return True
+
+        action = self._prompt_rules_notation_mismatch_action(cif_notation_str, rules_notation)
+        if action == 'cancel':
+            return False
+        if action == 'run_as_is':
+            return True
+
+        if action == 'convert_cif':
+            if rules_notation == 'modern':
+                converted_cif, changes = self.format_converter.convert_to_modern_notation(cif_content)
+            else:
+                converted_cif, changes = self.format_converter.convert_to_legacy_notation(cif_content)
+
+            if converted_cif != cif_content:
+                self.text_editor.setText(converted_cif)
+                self.modified = True
+                QMessageBox.information(
+                    self,
+                    "CIF Converted",
+                    f"Converted CIF to {rules_notation} notation before checks.\n"
+                    f"Applied {len(changes)} change(s)."
+                )
+            return True
+
+        # action == 'convert_rules'
+        converted_rules, changes = self.field_rules_validator.convert_field_rules_notation(
+            rules_content,
+            cif_notation_str,
+        )
+        self._load_rules_content_into_current_field_set(converted_rules)
+
+        save_reply = QMessageBox.question(
+            self,
+            "Save Converted Field Rules",
+            f"Converted selected rules to {cif_notation_str} notation for this run.\n\n"
+            "Do you also want to save the converted .cif_rules file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if save_reply == QMessageBox.StandardButton.Yes:
+            suggested_path = self._build_converted_rules_suggestion_path(rules_path, cif_notation_str)
+            save_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Converted Field Rules",
+                suggested_path,
+                "Field Rules Files (*.cif_rules);;All Files (*)",
+            )
+            if save_path:
+                try:
+                    with open(save_path, 'w', encoding='utf-8') as file_handle:
+                        file_handle.write(converted_rules)
+                    QMessageBox.information(
+                        self,
+                        "Field Rules Saved",
+                        f"Saved converted rules to:\n{save_path}"
+                    )
+                except Exception as exc:
+                    QMessageBox.warning(
+                        self,
+                        "Save Error",
+                        f"Could not save converted rules:\n{exc}"
+                    )
+
+        QMessageBox.information(
+            self,
+            "Field Rules Converted",
+            f"Using rules converted to {cif_notation_str} notation for this check run.\n"
+            f"Applied {len(changes)} conversion note(s)."
+        )
+        return True
+
+    def convert_selected_field_rules_notation(self):
+        """Convert a selected .cif_rules file between legacy and modern notation."""
+        active_rules_path = self._get_active_field_rules_path()
+        default_dir = os.path.dirname(active_rules_path) if active_rules_path else ""
+        rules_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Field Rules File to Convert",
+            default_dir,
+            "Field Rules Files (*.cif_rules);;All Files (*)",
+        )
+        if not rules_path:
+            return
+
+        try:
+            with open(rules_path, 'r', encoding='utf-8') as file_handle:
+                rules_content = file_handle.read()
+        except Exception as exc:
+            QMessageBox.warning(self, "Read Error", f"Could not read rules file:\n{exc}")
+            return
+
+        current_notation = CIFFormatAnalyzer.analyze_cif_format(rules_content).lower()
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Convert Field Rules Notation")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText(
+            f"Selected file: {os.path.basename(rules_path)}\n"
+            f"Detected notation: {current_notation}\n\n"
+            "Choose target notation:"
+        )
+
+        to_modern_btn = msg_box.addButton("Convert to Modern", QMessageBox.ButtonRole.AcceptRole)
+        to_legacy_btn = msg_box.addButton("Convert to Legacy", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == cancel_btn:
+            return
+        if clicked == to_modern_btn:
+            target_notation = 'modern'
+        elif clicked == to_legacy_btn:
+            target_notation = 'legacy'
+        else:
+            return
+
+        if current_notation == target_notation:
+            QMessageBox.information(
+                self,
+                "No Conversion Needed",
+                f"Selected rules are already in {target_notation} notation."
+            )
+            return
+
+        converted_rules, changes = self.field_rules_validator.convert_field_rules_notation(
+            rules_content,
+            target_notation,
+        )
+
+        suggested_path = self._build_converted_rules_suggestion_path(rules_path, target_notation)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Converted Field Rules",
+            suggested_path,
+            "Field Rules Files (*.cif_rules);;All Files (*)",
+        )
+        if not save_path:
+            return
+
+        try:
+            with open(save_path, 'w', encoding='utf-8') as file_handle:
+                file_handle.write(converted_rules)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Error", f"Failed to save converted rules:\n{exc}")
+            return
+
+        QMessageBox.information(
+            self,
+            "Conversion Complete",
+            f"Saved converted rules to:\n{save_path}\n\n"
+            f"Recorded {len(changes)} conversion note(s)."
+        )
 
     def check_line(self, prefix, default_value=None, multiline=False, description="", suggestions=None):
         """Check and potentially update a CIF field value."""
@@ -404,6 +684,9 @@ class FieldCheckingMixin:
                     "Please select a valid file."
                 )
                 return
+
+        if not self._resolve_rules_cif_notation_mismatch_before_checks():
+            return
         
         # Mandatory validation before starting checks (if not done already)
         if not self._ensure_field_rules_validated():
@@ -597,32 +880,6 @@ class FieldCheckingMixin:
     def _process_single_field_set(self, config, initial_state):
         """Process a single field set (Built-in, User, or Custom)."""
         try:
-            # Auto-switch to the paired legacy variant when the loaded CIF uses
-            # legacy format and the selected built-in rule set has a paired
-            # legacy variant registered (stored in the combo item data).
-            # This is data-driven: any rules file whose stem has a sibling
-            # ``{stem}_legacy.cif_rules`` qualifies — no name matching needed.
-            item_data = self.builtin_combo.currentData() if self.radio_builtin.isChecked() else None
-            legacy_path = item_data.get('legacy_path') if item_data else None
-
-            if legacy_path and self.radio_builtin.isChecked():
-                content = self.text_editor.toPlainText()
-                cif_format = self.dict_manager.detect_cif_format(content)
-                if cif_format.upper() == 'LEGACY':
-                    self.field_checker.load_field_set(self.current_field_set, legacy_path)
-                    QMessageBox.information(
-                        self,
-                        "CIF Format Compatibility",
-                        "Detected legacy format. Automatically switched to the "
-                        "legacy-compatible variant of the selected field rules."
-                    )
-                else:
-                    # Reload the primary (modern) variant in case a previous run
-                    # had switched to legacy.
-                    primary_path = item_data.get('path', '')
-                    if primary_path:
-                        self.field_checker.load_field_set(self.current_field_set, primary_path)
-            
             # Get the selected field set
             fields = self.field_checker.get_field_set(self.current_field_set)
             if not fields:

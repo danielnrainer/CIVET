@@ -1,5 +1,7 @@
 """Behavior-focused tests for field-checking decision workflows."""
 
+from PyQt6.QtWidgets import QMessageBox
+
 from gui.field_checking import FieldCheckingMixin
 from utils.cif_dictionary_manager import FieldNotation
 
@@ -10,6 +12,9 @@ class _DummyTextEditor:
 
     def toPlainText(self):
         return self._text
+
+    def setText(self, text: str):
+        self._text = text
 
 
 class _DecisionHarness(FieldCheckingMixin):
@@ -41,6 +46,56 @@ class _DecisionHarness(FieldCheckingMixin):
 
     def _get_radiation_probe(self):
         return self._probe
+
+
+class _DummyRulesFieldChecker:
+    def __init__(self):
+        self.loaded_name = None
+        self.loaded_content = None
+
+    def load_field_set(self, name, file_path):
+        self.loaded_name = name
+        with open(file_path, 'r', encoding='utf-8') as handle:
+            self.loaded_content = handle.read()
+
+
+class _MismatchHarness(FieldCheckingMixin):
+    def __init__(self, cif_content: str, rules_path: str, action: str):
+        self.text_editor = _DummyTextEditor(cif_content)
+        self.custom_field_rules_file = rules_path
+        self.current_field_set = "Custom"
+        self.modified = False
+        self._action = action
+
+        class _DictManager:
+            @staticmethod
+            def detect_notation(_content):
+                return FieldNotation.LEGACY
+
+        class _RulesValidator:
+            @staticmethod
+            def convert_field_rules_notation(content, target_notation):
+                assert target_notation == "legacy"
+                return content.replace("_cell.length_a", "_cell_length_a"), ["converted"]
+
+        class _FormatConverter:
+            @staticmethod
+            def convert_to_modern_notation(_content):
+                return "_cell.length_a 1", ["converted cif"]
+
+            @staticmethod
+            def convert_to_legacy_notation(_content):
+                return "_cell_length_a 1", ["converted cif"]
+
+        self.dict_manager = _DictManager()
+        self.field_rules_validator = _RulesValidator()
+        self.format_converter = _FormatConverter()
+        self.field_checker = _DummyRulesFieldChecker()
+
+    def _prompt_rules_notation_mismatch_action(self, cif_notation, rules_notation):
+        assert cif_notation == "legacy"
+        assert rules_notation == "modern"
+        return self._action
 
 
 def test_detect_electron_diffraction_from_probe_field():
@@ -97,3 +152,33 @@ def test_absolute_structure_workflow_stops_if_absolute_configuration_step_aborts
 
     assert result is False
     assert checker._zscore_called is False
+
+
+def test_mismatch_resolution_can_convert_rules_before_checks(tmp_path, monkeypatch):
+    rules_path = tmp_path / "rules.cif_rules"
+    rules_path.write_text("_cell.length_a 1\n", encoding="utf-8")
+    checker = _MismatchHarness("_cell_length_a 1\n", str(rules_path), action="convert_rules")
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
+
+    result = checker._resolve_rules_cif_notation_mismatch_before_checks()
+
+    assert result is True
+    assert checker.field_checker.loaded_name == "Custom"
+    assert checker.field_checker.loaded_content == "_cell_length_a 1\n"
+
+
+def test_mismatch_resolution_can_convert_cif_before_checks(tmp_path, monkeypatch):
+    rules_path = tmp_path / "rules.cif_rules"
+    rules_path.write_text("_cell.length_a 1\n", encoding="utf-8")
+    checker = _MismatchHarness("_cell_length_a 1\n", str(rules_path), action="convert_cif")
+
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+    result = checker._resolve_rules_cif_notation_mismatch_before_checks()
+
+    assert result is True
+    assert checker.text_editor.toPlainText() == "_cell.length_a 1"
+    assert checker.modified is True

@@ -624,6 +624,9 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         # Field rules section
         validate_field_defs_action = settings_menu.addAction("Validate Field Rules...")
         validate_field_defs_action.triggered.connect(self.validate_field_rules)
+
+        convert_field_rules_notation_action = settings_menu.addAction("Convert Field Rules Notation")
+        convert_field_rules_notation_action.triggered.connect(self.convert_selected_field_rules_notation)
         
         open_user_rules_action = settings_menu.addAction("Open Field Rules Directory...")
         open_user_rules_action.triggered.connect(self.open_user_field_rules_directory)
