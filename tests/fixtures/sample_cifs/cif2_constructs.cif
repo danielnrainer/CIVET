@@ -1,0 +1,12 @@
+# Fixture: cif2_constructs.cif
+# Purpose: CIF2 list/table/triple-quoted value examples.
+# Suggested tests: CIF2 syntax compliance and conversion guardrails.
+
+#\#CIF_2.0
+data_cif2
+_cell.length_a 5.123
+_custom.list_value [1 2 3]
+_custom.table_value {"k1": 10 "k2": 20}
+_custom.triple_text """first line
+second line
+third line"""

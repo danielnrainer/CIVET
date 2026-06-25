@@ -1,0 +1,11 @@
+# Fixture: mixed_notation.cif
+# Purpose: Mixed legacy and modern notation in one file.
+# Suggested tests: notation detection and conversion workflows.
+
+#\#CIF_2.0
+data_mixed_notation
+_cell_length_a 5.000
+_cell.length_b 6.000
+_cell.length_c 7.000
+_diffrn_ambient_temperature 100
+_diffrn.radiation_probe electron

@@ -1,0 +1,13 @@
+# Fixture: multiline_semicolon.cif
+# Purpose: Semicolon-block multiline value coverage.
+# Suggested tests: parser multiline support and formatting retention.
+
+#\#CIF_1.1
+data_multiline
+_publ_section_comment
+;
+This is a multiline text block.
+It should be parsed as a single field value.
+Line breaks must be preserved.
+;
+_cell_length_a 4.321

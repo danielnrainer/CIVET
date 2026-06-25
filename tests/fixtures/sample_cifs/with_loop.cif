@@ -1,0 +1,14 @@
+# Fixture: with_loop.cif
+# Purpose: Verify loop parsing and row/column grouping.
+# Suggested tests: content parsing workflows and loop-data integrity checks.
+
+#\#CIF_1.1
+data_with_loop
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 0.1234 0.2345 0.3456
+C2 0.4567 0.5678 0.6789
+O1 0.1111 0.2222 0.3333

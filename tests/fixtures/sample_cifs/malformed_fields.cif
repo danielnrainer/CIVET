@@ -1,0 +1,9 @@
+# Fixture: malformed_fields.cif
+# Purpose: Negative test case; fields that often appear malformed from external tools.
+# Suggested tests: malformed field detection and auto-correction workflows.
+
+#\#CIF_1.1
+data_malformed
+_diffrn_flux_density 123.4
+_diffrn_total_exposure_time 2.5
+_exptl_crystal_colour yellow

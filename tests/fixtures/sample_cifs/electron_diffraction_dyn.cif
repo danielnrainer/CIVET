@@ -1,0 +1,11 @@
+# Fixture: electron_diffraction_dyn.cif
+# Purpose: Absolute-structure decision path for electron diffraction.
+# Suggested tests: field-checking decision workflow around dyn + z-score.
+
+#\#CIF_2.0
+data_electron_dyn
+_space_group_IT_number 19
+_diffrn.radiation_probe electron
+_chemical.absolute_configuration dyn
+_refine_ls.abs_structure_z-score 3.2
+_diffrn.measurement.method 'Continuous electron diffraction'

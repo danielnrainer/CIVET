@@ -1,0 +1,8 @@
+# Fixture: alias_conflict.cif
+# Purpose: Negative test case; alias-equivalent names with conflicting values.
+# Suggested tests: data-name integrity conflict detection/resolution flows.
+
+#\#CIF_2.0
+data_alias_conflict
+_diffrn_detector.make 'Rigaku HyPix-ED'
+_diffrn_detector.type 'Rigaku HyPix'

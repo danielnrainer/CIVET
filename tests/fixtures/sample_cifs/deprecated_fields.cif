@@ -1,0 +1,10 @@
+# Fixture: deprecated_fields.cif
+# Purpose: Deprecated-vs-successor behavior for validation/replacement workflows.
+# Suggested tests: data-name validation workflows and deprecation action paths.
+
+#\#CIF_1.1
+data_deprecated
+_cell_measurement_temperature 293
+_diffrn_ambient_temperature 293
+_diffrn_source 'Microfocus tube'
+_diffrn_radiation_type 'Mo K-alpha'

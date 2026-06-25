@@ -1,0 +1,12 @@
+# Fixture: incomplete_loop.cif
+# Purpose: Negative test case; loop with value count not divisible by field count.
+# Suggested tests: data-value loop structural validation errors.
+
+#\#CIF_1.1
+data_incomplete_loop
+loop_
+_refln_index_h
+_refln_index_k
+_refln_index_l
+1 0 0
+0 1

@@ -1,0 +1,13 @@
+# Fixture: minimal.cif
+# Purpose: Baseline parser/smoke fixture with simple scalar fields.
+# Suggested tests: content parsing workflows, open/save smoke checks.
+
+#\#CIF_1.1
+data_minimal
+_cell_length_a 5.432
+_cell_length_b 6.543
+_cell_length_c 7.654
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_chemical_formula_sum 'C10 H12 O2'

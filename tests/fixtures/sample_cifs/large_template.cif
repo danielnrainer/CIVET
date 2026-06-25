@@ -1,0 +1,54 @@
+# Fixture: large_template.cif
+# Purpose: Deterministic larger fixture for parser/performance smoke checks.
+# Suggested tests: parser runtime guard checks and conversion throughput comparisons.
+# Note: This is intentionally moderate size for quick CI. Expand manually if needed.
+
+#\#CIF_1.1
+data_large_template
+_audit_creation_method 'CIVET fixture generator'
+_cell_length_a 10.001
+_cell_length_b 10.002
+_cell_length_c 10.003
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 120
+_cell_volume 866.025
+_chemical_formula_sum 'C40 H44 N4 O8'
+_chemical_formula_weight 708.80
+_exptl_crystal_density_diffrn 1.235
+_exptl_crystal_F_000 372
+_exptl_absorpt_coefficient_mu 0.087
+_exptl_crystal_size_max 0.21
+_exptl_crystal_size_mid 0.15
+_exptl_crystal_size_min 0.09
+_diffrn_radiation_wavelength 0.71073
+_diffrn_reflns_number 2567
+_diffrn_reflns_av_unetI/netI 14.2
+_reflns_number_total 2567
+_reflns_number_gt 2234
+_reflns_threshold_expression 'I>2sigma(I)'
+_refine_ls_number_reflns 2567
+_refine_ls_number_parameters 193
+_refine_ls_R_factor_gt 0.035
+_refine_ls_wR_factor_ref 0.089
+_refine_ls_goodness_of_fit_ref 1.04
+_refine_diff_density_max 0.21
+_refine_diff_density_min -0.19
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.101 0.202 0.303
+C2 C 0.111 0.212 0.313
+C3 C 0.121 0.222 0.323
+C4 C 0.131 0.232 0.333
+C5 C 0.141 0.242 0.343
+N1 N 0.151 0.252 0.353
+N2 N 0.161 0.262 0.363
+O1 O 0.171 0.272 0.373
+O2 O 0.181 0.282 0.383
+H1 H 0.191 0.292 0.393
+H2 H 0.201 0.302 0.403
+H3 H 0.211 0.312 0.413
