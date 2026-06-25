@@ -777,6 +777,20 @@ class DataNameValidationDialog(QDialog):
                     lambda checked, fn=field_name, sn=successor: self._on_replace_deprecated(fn, sn)
                 )
                 layout.addWidget(replace_btn)
+
+                # If successor already exists, offer direct delete of deprecated field
+                if field_result.successor_already_exists:
+                    delete_btn = QPushButton("✕ Delete")
+                    delete_btn.setMaximumWidth(BUTTON_WIDTH)
+                    delete_btn.setStyleSheet("color: #c0392b;")
+                    delete_btn.setToolTip(
+                        f"Delete deprecated '{field_name}'\n"
+                        f"(successor '{successor}' already exists)"
+                    )
+                    delete_btn.clicked.connect(
+                        lambda checked, fn=field_name: self._on_delete_field(fn)
+                    )
+                    layout.addWidget(delete_btn)
             
             # Skip button
             skip_btn = QPushButton("⊘ Skip")
