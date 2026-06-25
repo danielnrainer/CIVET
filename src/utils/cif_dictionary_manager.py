@@ -71,7 +71,7 @@ def ensure_user_dictionaries_directory() -> str:
 COMCIFS_DICTIONARIES = {
     'cif_core': {
         # 'url': 'https://github.com/COMCIFS/cif_core/blob/master/cif_core.dic',
-        'url': 'https://raw.githubusercontent.com/COMCIFS/cif_core/refs/heads/master/cif_core.dic',
+        'url': 'https://raw.githubusercontent.com/COMCIFS/cif_core/main/cif_core.dic',
         'name': 'Core Dictionary (cif_core.dic)',
         'description': 'Standard crystallographic data',
         'source': 'COMCIF',
@@ -79,7 +79,7 @@ COMCIFS_DICTIONARIES = {
     },
     'cif_pow': {
         # 'url': 'https://github.com/COMCIFS/Powder_Dictionary/blob/master/cif_pow.dic',
-        'url': 'https://raw.githubusercontent.com/COMCIFS/Powder_Dictionary/refs/heads/master/cif_pow.dic',
+        'url': 'https://raw.githubusercontent.com/COMCIFS/cif_pd/refs/heads/master/cif_pow.dic',
         'name': 'Powder Dictionary (cif_pow.dic)', 
         'description': 'Powder diffraction data',
         'source': 'COMCIF',
@@ -120,7 +120,7 @@ COMCIFS_DICTIONARIES = {
     },
     'cif_multiblock': {
         # 'url': 'https://github.com/COMCIFS/MultiBlock_Dictionary/blob/main/multi_block_core.dic',
-        'url': 'https://raw.githubusercontent.com/COMCIFS/MultiBlock_Dictionary/refs/heads/main/multi_block_core.dic',
+        'url': 'https://raw.githubusercontent.com/COMCIFS/cif_core_multiblock/refs/heads/main/cif_core_multiblock.dic',
         'name': 'Multi-Block Dictionary (multi_block_core.dic)',
         'description': 'Multi-container data',
         'source': 'COMCIF',
@@ -268,6 +268,7 @@ class DictionaryInfo:
     status: Optional[str] = None       # Status: 'release', 'development', 'unknown'
     dict_type: Optional[str] = None    # Dictionary type: 'core', 'powder', 'img', etc.
     is_active: bool = True             # Whether this dictionary is active for its type
+    dict_name: Optional[str] = None    # Human-readable dictionary name parsed from header
     dict_title: Optional[str] = None   # Official dictionary title from _dictionary.title
     dict_date: Optional[str] = None    # Dictionary date from _dictionary.date
     # Update availability fields (populated by check_for_updates)
@@ -287,14 +288,38 @@ class DictionaryInfo:
         'cif_restr': 'restr',   # Current official name
         # Other dictionaries
         'cif_twin': 'twin',
+        'cif_twinning': 'twin',
         'cif_shelxl': 'shelxl',
         'cif_ed': 'ed',
+        'cif_electron_diffraction': 'ed',
         'cif_pow': 'pow',
+        'cif_pd': 'pow',
         'cif_img': 'img',
         'cif_mag': 'mag',
         'cif_sym': 'sym',
-        'cif_mod': 'mod',
+        'cif_ms': 'ms',
+        'cif_mod': 'ms',
+        'cif_modulated': 'ms',
+        'cif_modulated_structures': 'ms',
         'cif_topo': 'topo',
+    }
+
+    # Canonical dictionary type aliases to ensure one-active-per-type logic is reliable.
+    DICT_TYPE_ALIASES = {
+        'rstr': 'restr',
+        'restr': 'restr',
+        'restraints': 'restr',
+        'restraint': 'restr',
+        'constraint': 'restr',
+        'constraints': 'restr',
+        'pd': 'pow',
+        'powder': 'pow',
+        'ms': 'ms',
+        'mod': 'ms',
+        'modulated': 'ms',
+        'modulations': 'ms',
+        'modulated_structures': 'ms',
+        'twinning': 'twin',
     }
     
     def __post_init__(self):
@@ -303,6 +328,15 @@ class DictionaryInfo:
         if self.dict_type is None:
             # Extract type, preferring dict_title over filename
             self.dict_type = self._extract_dict_type()
+        self.dict_type = self._normalize_dict_type(self.dict_type)
+
+    @classmethod
+    def _normalize_dict_type(cls, dict_type: Optional[str]) -> str:
+        """Normalize equivalent dictionary type names to a canonical key."""
+        if not dict_type:
+            return ''
+        normalized = dict_type.lower().strip()
+        return cls.DICT_TYPE_ALIASES.get(normalized, normalized)
     
     def _extract_dict_type(self) -> str:
         """
@@ -319,24 +353,27 @@ class DictionaryInfo:
                 return self.DICT_TITLE_ALIASES[normalized]
             # Try to extract type from title (e.g., "CIF_CORE" -> "core")
             if normalized.startswith('cif_'):
-                return normalized[4:]  # Remove 'cif_' prefix
+                return self._normalize_dict_type(normalized[4:])  # Remove 'cif_' prefix
             if normalized.endswith('_dic'):
-                return normalized[:-4]  # Remove '_dic' suffix
-            return normalized
+                return self._normalize_dict_type(normalized[:-4])  # Remove '_dic' suffix
+            return self._normalize_dict_type(normalized)
         
         # Fallback: extract from filename, but strip version numbers
         name_lower = self.name.lower()
+        # Remove optional source suffixes appended to display names, e.g. " (IUCr Release)"
+        name_lower = re.sub(r'\s*\([^)]*\)\s*$', '', name_lower)
         # Match patterns like cif_core_3.2.0.dic -> extract just 'core'
         # First try with version number pattern
         match = re.match(r'cif[_-]([a-z]+)(?:[_-]\d+\.?\d*\.?\d*)?\.dic', name_lower)
         if match:
-            return match.group(1)
+            return self._normalize_dict_type(match.group(1))
         # Try simpler pattern
         match = re.match(r'cif[_-](\w+)\.dic', name_lower)
         if match:
-            return match.group(1)
+            return self._normalize_dict_type(match.group(1))
         # Fallback to using the filename without extension
-        return os.path.splitext(self.name)[0].replace('cif_', '').replace('cif-', '')
+        base = os.path.splitext(name_lower)[0].replace('cif_', '').replace('cif-', '')
+        return self._normalize_dict_type(base)
 
 
 class FieldNotation(Enum):
@@ -468,6 +505,7 @@ class CIFDictionaryManager:
             source=source,
             status=status
         )
+        primary_info.dict_name = self._extract_dictionary_name(content or "", primary_info.dict_type)
         
         if source_type == DictionarySource.FILE and os.path.exists(primary_path):
             primary_info.size_bytes = os.path.getsize(primary_path)
@@ -1561,6 +1599,77 @@ class CIFDictionaryManager:
             print(f"Warning: Could not extract dictionary title: {e}")
         
         return None
+
+    @staticmethod
+    def _extract_dictionary_name(content: str, dict_type: Optional[str] = None) -> Optional[str]:
+        """Extract a human-readable dictionary name from header comments and metadata."""
+        type_name_overrides = {
+            'core': 'Core',
+            'pow': 'Powder',
+            'topo': 'Topology',
+            'mag': 'Magnetic',
+            'img': 'Image',
+            'ed': 'Electron diffraction',
+            'multiblock': 'Multi-block',
+            'ms': 'Modulated structures',
+            'rho': 'Electron density',
+            'twin': 'Twinning',
+            'restr': 'Restraints and constraints',
+            'shelxl': 'SHELXL restraints and constraints',
+            'sym': 'Symmetry',
+        }
+
+        normalized_type = DictionaryInfo._normalize_dict_type(dict_type)
+        lines = content.splitlines()
+
+        try:
+            for raw_line in lines[:120]:
+                line = raw_line.strip()
+                if not line.startswith('#'):
+                    continue
+
+                header_text = line.lstrip('#').strip()
+                if not header_text:
+                    continue
+
+                header_upper = header_text.upper()
+                if 'SPDX' in header_upper:
+                    continue
+                if 'DICTIONARY' not in header_upper:
+                    continue
+
+                # Remove obvious framing characters and normalize spacing.
+                header_text = re.sub(r'[-_=]{2,}', ' ', header_text)
+                header_text = re.sub(r'\s+', ' ', header_text).strip()
+
+                # Trim generic tokens from common header patterns.
+                header_text = re.sub(r'\bVERSION\b.*$', '', header_text, flags=re.IGNORECASE).strip()
+                header_text = re.sub(r'^\s*CIF\s+', '', header_text, flags=re.IGNORECASE).strip()
+                header_text = re.sub(r'\s+DICTIONARY\s*$', '', header_text, flags=re.IGNORECASE).strip()
+                header_text = re.sub(r'\s*\([^)]*\)\s*$', '', header_text).strip()
+
+                # Normalize generic wording so "Magnetic CIF Dictionary" and
+                # "CIF Magnetic Dictionary" both become "Magnetic".
+                header_text = re.sub(r'\bcif\b', ' ', header_text, flags=re.IGNORECASE)
+                header_text = re.sub(r'\bdictionary\b', ' ', header_text, flags=re.IGNORECASE)
+                header_text = re.sub(r'\s+', ' ', header_text).strip(' -_')
+
+                if not header_text:
+                    break
+
+                # Prefer curated names for known dictionary types.
+                if normalized_type in type_name_overrides:
+                    return type_name_overrides[normalized_type]
+
+                cleaned = header_text.lower()
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                return cleaned[:1].upper() + cleaned[1:]
+        except Exception:
+            pass
+
+        if normalized_type in type_name_overrides:
+            return type_name_overrides[normalized_type]
+        return None
     
     @staticmethod
     def _extract_dictionary_date(content: str) -> Optional[str]:
@@ -1792,6 +1901,7 @@ class CIFDictionaryManager:
                 source=source,
                 status=status
             )
+            dict_info.dict_name = self._extract_dictionary_name(content, dict_info.dict_type)
             
             # Check if there's already an active dictionary of this type
             # If so, mark this new one as inactive by default
@@ -1928,6 +2038,7 @@ class CIFDictionaryManager:
                     source=source,
                     status=status
                 )
+                dict_info.dict_name = self._extract_dictionary_name(response.text, dict_info.dict_type)
                 
                 # Check if there's already an active dictionary of this type
                 # If so, mark this new one as inactive by default
@@ -2325,6 +2436,37 @@ class CIFDictionaryManager:
 
             parser.parse_dictionary()
             yield dict_info, parser
+
+    @staticmethod
+    def _get_raw_github_fallback_urls(url: str) -> List[str]:
+        """Return candidate raw GitHub URLs with common main/master branch variants."""
+        if 'raw.githubusercontent.com' not in url:
+            return [url]
+
+        candidates = [url]
+
+        if '/refs/heads/master/' in url:
+            candidates.append(url.replace('/refs/heads/master/', '/main/'))
+            candidates.append(url.replace('/refs/heads/master/', '/refs/heads/main/'))
+        elif '/refs/heads/main/' in url:
+            candidates.append(url.replace('/refs/heads/main/', '/main/'))
+            candidates.append(url.replace('/refs/heads/main/', '/refs/heads/master/'))
+        elif '/main/' in url:
+            candidates.append(url.replace('/main/', '/refs/heads/main/'))
+            candidates.append(url.replace('/main/', '/refs/heads/master/'))
+        elif '/master/' in url:
+            candidates.append(url.replace('/master/', '/main/'))
+            candidates.append(url.replace('/master/', '/refs/heads/master/'))
+
+        # Dedupe while preserving order.
+        unique_candidates = []
+        seen = set()
+        for candidate in candidates:
+            if candidate not in seen:
+                unique_candidates.append(candidate)
+                seen.add(candidate)
+
+        return unique_candidates
     
     def check_for_updates(self, timeout: int = 10) -> Dict[str, Dict[str, Any]]:
         """
@@ -2409,12 +2551,35 @@ class CIFDictionaryManager:
             if online_url:
                 result['update_url'] = online_url
                 try:
-                    # Fetch just enough of the file to get the metadata
-                    # Most dictionaries have _dictionary.date in the first ~5KB
-                    response = requests.get(online_url, timeout=timeout, headers=HTTP_HEADERS, stream=True)
-                    
+                    # Fetch just enough of the file to get the metadata.
+                    # Most dictionaries have _dictionary.date in the first ~10KB.
+                    response = None
+                    resolved_url = online_url
+                    for candidate_url in self._get_raw_github_fallback_urls(online_url):
+                        candidate_response = requests.get(
+                            candidate_url,
+                            timeout=timeout,
+                            headers=HTTP_HEADERS,
+                            stream=True
+                        )
+
+                        # For non-404 statuses (including 200/403), stop trying fallbacks.
+                        if candidate_response.status_code != 404:
+                            response = candidate_response
+                            resolved_url = candidate_url
+                            break
+
+                        candidate_response.close()
+
+                    # If every attempted URL returned 404, use the last attempted response.
+                    if response is None:
+                        response = requests.get(resolved_url, timeout=timeout, headers=HTTP_HEADERS, stream=True)
+
+                    # If we resolved to a fallback URL, store it for any follow-up update action.
+                    result['update_url'] = resolved_url
+
                     if response.status_code == 403:
-                        if 'iucr.org' in online_url:
+                        if 'iucr.org' in resolved_url:
                             result['error'] = 'IUCr blocked (Cloudflare)'
                         else:
                             result['error'] = 'Access denied'
@@ -2455,6 +2620,7 @@ class CIFDictionaryManager:
                             result['update_available'] = online_version != info.version
                     else:
                         result['error'] = f'HTTP {response.status_code}'
+                        response.close()
                         
                 except requests.Timeout:
                     result['error'] = 'Timeout'

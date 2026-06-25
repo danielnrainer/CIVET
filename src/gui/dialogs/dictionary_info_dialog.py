@@ -172,7 +172,10 @@ class DictionaryInfoDialog(QDialog):
     def setup_ui(self):
         """Set up the user interface"""
         layout = QVBoxLayout()
-        
+
+        # Top row: Summary + guidance notice
+        top_layout = QHBoxLayout()
+
         # Summary section
         summary_group = QGroupBox("Summary")
         summary_layout = QVBoxLayout()
@@ -182,7 +185,24 @@ class DictionaryInfoDialog(QDialog):
         summary_layout.addWidget(self.summary_label)
         
         summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
+
+        notice_group = QGroupBox("Usage Note")
+        notice_layout = QVBoxLayout()
+        self.usage_notice_label = QLabel(
+            "<b>Recommended:</b> Keep only one active dictionary per topic/type "
+            "(for example, one active Magnetic dictionary).<br>"
+            "The automatic recognition of dictionary types might fail, so please "
+            "also check manually.<br><br>"
+            "If multiple versions of the same topic are loaded, activate only "
+            "the one you want to use for checks and mappings."
+        )
+        self.usage_notice_label.setWordWrap(True)
+        notice_layout.addWidget(self.usage_notice_label)
+        notice_group.setLayout(notice_layout)
+
+        top_layout.addWidget(summary_group, 3)
+        top_layout.addWidget(notice_group, 2)
+        layout.addLayout(top_layout)
         
         # Create splitter for table and details
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -192,18 +212,22 @@ class DictionaryInfoDialog(QDialog):
         table_layout = QVBoxLayout()
         
         self.dict_table = QTableWidget()
-        self.dict_table.setColumnCount(10)
+        self.dict_table.setColumnCount(11)
         self.dict_table.setHorizontalHeaderLabels([
-            "Active", "Dictionary Title", "Date", "Version", "Source", "Status", "Update", "Type", "Fields", "Filename"
+            "Active", "Name", "Title", "Date", "Version", "Source", "Status", "Update", "Type", "Fields", "Filename"
         ])
         
         # Set table properties
         self.dict_table.setAlternatingRowColors(True)
+        self.dict_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dict_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.dict_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.dict_table.setSortingEnabled(True)
         h_header = self.dict_table.horizontalHeader()
         if h_header:
-            h_header.setStretchLastSection(True)
+            h_header.setStretchLastSection(False)
+            h_header.setSortIndicatorShown(True)
+            h_header.setSortIndicator(2, Qt.SortOrder.AscendingOrder)
         v_header = self.dict_table.verticalHeader()
         if v_header:
             v_header.setVisible(False)
@@ -222,7 +246,6 @@ class DictionaryInfoDialog(QDialog):
         
         self.details_text = QTextEdit()
         self.details_text.setReadOnly(True)
-        self.details_text.setMaximumHeight(150)
         details_layout.addWidget(self.details_text)
         
         details_group.setLayout(details_layout)
@@ -326,7 +349,7 @@ class DictionaryInfoDialog(QDialog):
             <b>Total Dictionaries:</b> {total_dicts}<br>
             <b>Active Dictionaries:</b> {active_dicts}<br>
             <b>Total Field Mappings:</b> {total_fields} Legacy→Modern, {dict_summary.get('total_modern_mappings', 0)} Modern→Legacy<br>
-            <b>Primary Dictionary:</b> {detailed_info[0].name if detailed_info else 'None'}
+            <b>Primary Dictionary:</b> {(detailed_info[0].dict_name or detailed_info[0].name) if detailed_info else 'None'}
             """
             if total_dicts > 1:
                 summary_text += f"<br><b>Additional Dictionaries:</b> {total_dicts - 1}"
@@ -335,8 +358,19 @@ class DictionaryInfoDialog(QDialog):
             
             # Sort dictionaries by dict_title (alphabetically)
             sorted_info = sorted(detailed_info, key=lambda x: (x.dict_title or x.name or "").lower())
+
+            # Preserve user's current sort choice across refreshes.
+            header = self.dict_table.horizontalHeader()
+            sort_column = 2
+            sort_order = Qt.SortOrder.AscendingOrder
+            if header is not None and header.isSortIndicatorShown():
+                sort_column = header.sortIndicatorSection()
+                sort_order = header.sortIndicatorOrder()
+            if sort_column < 0:
+                sort_column = 2
             
             # Clear and update table
+            self.dict_table.setSortingEnabled(False)
             self.dict_table.clearContents()
             self.dict_table.setRowCount(len(sorted_info))
             
@@ -355,17 +389,21 @@ class DictionaryInfoDialog(QDialog):
                 active_layout.setContentsMargins(0, 0, 0, 0)
                 self.dict_table.setCellWidget(row, 0, active_widget)
                 
+                # Dictionary Name (human-readable)
+                name_text = dict_info.dict_name if dict_info.dict_name else "Unknown"
+                self.dict_table.setItem(row, 1, QTableWidgetItem(name_text))
+
                 # Dictionary Title (from _dictionary.title)
                 title_text = dict_info.dict_title if dict_info.dict_title else "Unknown"
-                self.dict_table.setItem(row, 1, QTableWidgetItem(title_text))
+                self.dict_table.setItem(row, 2, QTableWidgetItem(title_text))
                 
                 # Date (from _dictionary.date)
                 date_text = dict_info.dict_date if dict_info.dict_date else "Unknown"
-                self.dict_table.setItem(row, 2, QTableWidgetItem(date_text))
+                self.dict_table.setItem(row, 3, QTableWidgetItem(date_text))
                 
                 # Version
                 version_text = dict_info.version if dict_info.version else "Unknown"
-                self.dict_table.setItem(row, 3, QTableWidgetItem(version_text))
+                self.dict_table.setItem(row, 4, QTableWidgetItem(version_text))
                 
                 # Source (COMCIF, IUCr, Local, Custom)
                 source_text = dict_info.source if dict_info.source else "Unknown"
@@ -375,7 +413,7 @@ class DictionaryInfoDialog(QDialog):
                     source_item.setForeground(QColor(0, 100, 0))  # Dark green for official
                 elif source_text == 'COMCIF':
                     source_item.setForeground(QColor(0, 0, 200))  # Blue for development
-                self.dict_table.setItem(row, 4, source_item)
+                self.dict_table.setItem(row, 5, source_item)
                 
                 # Status (release, development, unknown)
                 status_text = dict_info.status if dict_info.status else "unknown"
@@ -385,7 +423,7 @@ class DictionaryInfoDialog(QDialog):
                     status_item.setForeground(QColor(0, 100, 0))  # Green for release
                 elif status_text == 'development':
                     status_item.setForeground(QColor(200, 100, 0))  # Orange for development
-                self.dict_table.setItem(row, 5, status_item)
+                self.dict_table.setItem(row, 6, status_item)
                 
                 # Update availability (populated by check_for_updates)
                 update_text = "—"  # em-dash for "not checked"
@@ -403,17 +441,17 @@ class DictionaryInfoDialog(QDialog):
                 else:
                     update_item.setForeground(QColor(150, 150, 150))  # Light gray
                     update_item.setToolTip("Click 'Check for Updates' to check")
-                self.dict_table.setItem(row, 6, update_item)
+                self.dict_table.setItem(row, 7, update_item)
                 
-                # Type (column 7, was 6)
+                # Type
                 type_text = dict_info.source_type.upper()
-                self.dict_table.setItem(row, 7, QTableWidgetItem(type_text))
+                self.dict_table.setItem(row, 8, QTableWidgetItem(type_text))
                 
-                # Fields (column 8, was 7)
-                self.dict_table.setItem(row, 8, QTableWidgetItem(str(dict_info.field_count)))
+                # Fields
+                self.dict_table.setItem(row, 9, QTableWidgetItem(str(dict_info.field_count)))
                 
-                # Filename (column 9, was 8)
-                self.dict_table.setItem(row, 9, QTableWidgetItem(dict_info.name))
+                # Filename
+                self.dict_table.setItem(row, 10, QTableWidgetItem(dict_info.name))
                 
                 # Path column - commented out for now, may want it back later
                 # if dict_info.source_type == 'url':
@@ -428,17 +466,12 @@ class DictionaryInfoDialog(QDialog):
             header = self.dict_table.horizontalHeader()
             if header is None:
                 return
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Active
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)           # Dictionary Title
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Date
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Version
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Source
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Status
-            header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Update
-            header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # Type
-            header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)  # Fields
-            header.setSectionResizeMode(9, QHeaderView.ResizeMode.Stretch)           # Filename
-            # header.setSectionResizeMode(10, QHeaderView.ResizeMode.Stretch)        # Path (commented out)
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+            # Re-enable sorting and re-apply selected sort order.
+            self.dict_table.setSortingEnabled(True)
+            if sort_column != 0:
+                self.dict_table.sortItems(sort_column, sort_order)
             
             # Enable/disable update buttons based on available updates
             updates_available = any(info.update_available is True for info in detailed_info)
@@ -844,24 +877,11 @@ class DictionaryInfoDialog(QDialog):
     
     def on_cell_double_clicked(self, row: int, column: int):
         """Handle double-click on table cells - specifically for Update column to download"""
-        # Column 6 is the Update column
-        if column != 6:
+        # Column 7 is the Update column
+        if column != 7:
             return
-        
-        # Get the filename from this row (column 9)
-        filename_item = self.dict_table.item(row, 9)
-        if not filename_item:
-            return
-        
-        filename = filename_item.text()
-        
-        # Find the dictionary info
-        detailed_info = self.dict_manager.get_detailed_dictionary_info()
-        dict_info = None
-        for info in detailed_info:
-            if info.name == filename:
-                dict_info = info
-                break
+
+        dict_info = self._get_dictionary_info_for_row(row)
         
         if not dict_info or not dict_info.update_available or not dict_info.update_url:
             return
@@ -892,8 +912,8 @@ class DictionaryInfoDialog(QDialog):
         msg_box.setWindowTitle(title)
         msg_box.setText(message)
         msg_box.setInformativeText(
-            "<b>Load Only:</b> Load the update for this session only.\n\n"
-            "<b>Save & Load:</b> Save to your user folder and load.\n"
+            "<b>Load Only:</b> Load the update for this session only.<br>"
+            "<b>Save & Load:</b> Save to your user folder and load."
             "(Updates will persist across sessions)"
         )
         
@@ -1066,16 +1086,21 @@ class DictionaryInfoDialog(QDialog):
             self.details_text.clear()
             return
         
-        # Enable remove button only if no primary dictionary (row 0) is selected
-        has_primary = any(row.row() == 0 for row in selected_rows)
+        # Enable remove button only if no primary dictionary is selected.
+        primary_info = self._get_primary_dictionary_info()
+        has_primary = False
+        for row in selected_rows:
+            selected_info = self._get_dictionary_info_for_row(row.row())
+            if selected_info and primary_info and selected_info.name == primary_info.name:
+                has_primary = True
+                break
         self.remove_btn.setEnabled(not has_primary)
         
         # Show details for the first selected dictionary
         try:
-            detailed_info = self.dict_manager.get_detailed_dictionary_info()
             selected_row = selected_rows[0].row()
-            if selected_row < len(detailed_info):
-                dict_info = detailed_info[selected_row]
+            dict_info = self._get_dictionary_info_for_row(selected_row)
+            if dict_info:
                 self.show_dictionary_details(dict_info)
         except Exception as e:
             self.details_text.setText(f"Error loading details: {str(e)}")
@@ -1083,8 +1108,9 @@ class DictionaryInfoDialog(QDialog):
     def show_dictionary_details(self, dict_info):
         """Show detailed information for a dictionary"""
         details = []
-        details.append(f"<b>Dictionary Details</b><br>")
-        details.append(f"<b>Name:</b> {dict_info.name}")
+        details.append(f"<b>Name:</b> {dict_info.dict_name or 'Unknown'}")
+        details.append(f"<b>Title:</b> {dict_info.dict_title or 'Unknown'}")
+        details.append(f"<b>Filename:</b> {dict_info.name}")
         
         # Show active status with color
         active_text = "Yes" if dict_info.is_active else "No"
@@ -1110,6 +1136,40 @@ class DictionaryInfoDialog(QDialog):
             details.append(f"<br><b>Description:</b><br>{dict_info.description}")
         
         self.details_text.setHtml("<br>".join(details))
+
+    def _get_primary_dictionary_info(self):
+        """Return the primary dictionary info, if available."""
+        detailed_info = self.dict_manager.get_detailed_dictionary_info()
+        return detailed_info[0] if detailed_info else None
+
+    def _get_dictionary_info_for_row(self, row: int):
+        """Resolve the currently displayed row back to dictionary info."""
+        if row < 0:
+            return None
+
+        dict_name = None
+        filename_item = self.dict_table.item(row, 10)
+        if filename_item:
+            dict_name = filename_item.text().strip()
+
+        # Fallback to the active checkbox property when filename item is unavailable.
+        if not dict_name:
+            cell_widget = self.dict_table.cellWidget(row, 0)
+            if cell_widget is not None:
+                checkbox = cell_widget.findChild(QCheckBox)
+                if checkbox is not None:
+                    prop_name = checkbox.property("dict_name")
+                    if isinstance(prop_name, str):
+                        dict_name = prop_name.strip()
+
+        if not dict_name:
+            return None
+
+        for info in self.dict_manager.get_detailed_dictionary_info():
+            if info.name == dict_name:
+                return info
+
+        return None
     
     def remove_selected_dictionary(self):
         """Remove the selected dictionaries"""
@@ -1121,21 +1181,27 @@ class DictionaryInfoDialog(QDialog):
         if not selected_rows:
             return
         
-        # Check if primary dictionary (row 0) is selected
-        if any(row.row() == 0 for row in selected_rows):
+        # Check if primary dictionary is selected
+        primary_info = self._get_primary_dictionary_info()
+        has_primary = False
+        for row in selected_rows:
+            selected_info = self._get_dictionary_info_for_row(row.row())
+            if selected_info and primary_info and selected_info.name == primary_info.name:
+                has_primary = True
+                break
+
+        if has_primary:
             QMessageBox.information(self, "Cannot Remove", 
                                   "The primary CIF core dictionary cannot be removed.")
             return
         
         try:
-            detailed_info = self.dict_manager.get_detailed_dictionary_info()
-            
             # Get all selected dictionaries
             dicts_to_remove = []
             for row in selected_rows:
-                row_index = row.row()
-                if row_index < len(detailed_info):
-                    dicts_to_remove.append(detailed_info[row_index])
+                dict_info = self._get_dictionary_info_for_row(row.row())
+                if dict_info:
+                    dicts_to_remove.append(dict_info)
             
             if not dicts_to_remove:
                 return
