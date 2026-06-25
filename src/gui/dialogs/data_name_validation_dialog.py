@@ -404,6 +404,7 @@ class DataNameValidationDialog(QDialog):
             "<span style='color: #c0392b;'>✕ Delete</span> = remove entry from CIF<br>"
             "⊘ Skip = ignore field (this session)<br>"
             "<span style='color: #27ae60;'>+ Successor</span> = add successor field (keep both)<br>"
+            "<span style='color: #2980b9;'>⇄ Replace</span> = replace with successor field (remove deprecated field)<br>"
             "🔧 <span style='color: #e74c3c;'>Malformed</span> = field name can be auto-corrected"
         )
         instructions_label.setWordWrap(True)
@@ -739,7 +740,10 @@ class DataNameValidationDialog(QDialog):
                 add_successor_btn.setMaximumWidth(BUTTON_WIDTH)
                 if field_result.successor_already_exists:
                     add_successor_btn.setEnabled(False)
-                    add_successor_btn.setStyleSheet("color: #7f8c8d;")  # Grey
+                    add_successor_btn.setStyleSheet("color: #7f8c8d; font-style: strike-through")  # Grey
+                    font = add_successor_btn.font()
+                    font.setStrikeOut(True)
+                    add_successor_btn.setFont(font)
                     add_successor_btn.setToolTip(
                         f"Successor '{successor}' already exists in this CIF\n"
                         "No successor data name needs to be added"

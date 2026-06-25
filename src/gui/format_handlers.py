@@ -462,30 +462,18 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
             )
 
     def check_deprecated_fields(self):
-        """Check for deprecated fields in the current CIF file and offer to replace them"""
+        """Check deprecated fields using the shared data-name validator pipeline."""
         content = self.text_editor.toPlainText()
         if not content.strip():
             QMessageBox.information(self, "No Content", "Please open a CIF file first.")
             return
         
         try:
-            # Parse CIF content to find all fields
-            lines = content.splitlines()
-            found_deprecated = []
-            
-            for line_num, line in enumerate(lines, 1):
-                line_stripped = line.strip()
-                if line_stripped.startswith('_') and ' ' in line_stripped:
-                    field_name = line_stripped.split()[0]
-                    if self.dict_manager.is_field_deprecated(field_name):
-                        modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="LEGACY")
-                        found_deprecated.append({
-                            'field': field_name,
-                            'line_num': line_num,
-                            'line': line_stripped,
-                            'modern': modern_equiv
-                        })
-            
+            # Use the same validation path as the Data Name Validation dialog.
+            self.data_name_validator.clear_cache()
+            report = self.data_name_validator.validate_cif_content(content)
+            found_deprecated = report.deprecated_fields
+
             if not found_deprecated:
                 QMessageBox.information(self, "No Deprecated Fields", 
                                       "No deprecated fields were found in the current CIF file.")
@@ -494,22 +482,43 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
             # Build summary of deprecated fields
             summary = f"Found {len(found_deprecated)} deprecated field(s):\n\n"
             for item in found_deprecated:
-                summary += f"• Line {item['line_num']}: {item['field']}\n"
-                if item['modern']:
-                    summary += f"  → Modern equivalent: {item['modern']}\n"
+                summary += f"• Line {item.line_number}: {item.field_name}\n"
+                successor = item.successor_name or item.modern_equivalent
+                if successor:
+                    summary += f"  → Successor: {successor}\n"
+                    if item.successor_already_exists:
+                        summary += "  → Successor already present in this CIF\n"
                 else:
-                    summary += f"  → No modern equivalent (consider removal)\n"
+                    summary += "  → No successor available\n"
                 summary += "\n"
             
             # Check if any fields can actually be replaced
-            replaceable_count = sum(1 for item in found_deprecated if item['modern'])
+            replaceable_map: Dict[str, str] = {}
+            skipped_existing = 0
+            for item in found_deprecated:
+                successor = item.successor_name or item.modern_equivalent
+                if not successor:
+                    continue
+                if item.successor_already_exists:
+                    skipped_existing += 1
+                    continue
+                replaceable_map[item.field_name.lower()] = successor
+
+            replaceable_count = len(replaceable_map)
             
             if replaceable_count == 0:
+                extra_note = ""
+                if skipped_existing:
+                    extra_note = (
+                        f"\n{skipped_existing} deprecated field(s) already have their successor "
+                        "present in this CIF."
+                    )
                 QMessageBox.information(
                     self, 
                     "Deprecated Fields Found",
-                    summary + "None of these deprecated fields have modern equivalents available.\n\n" +
-                    "Consider reviewing and potentially removing these fields manually."
+                    summary + "None of these deprecated fields can be safely auto-replaced.\n\n" +
+                    "Use CIF Validation > Validate Data Names for per-field add/replace/delete control."
+                    + extra_note
                 )
                 return
             
@@ -518,27 +527,33 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
                 self, 
                 "Deprecated Fields Found",
                 summary + f"Would you like to replace the {replaceable_count} deprecated field(s) " +
-                "that have modern equivalents?",
+                "with their successor names?\n"
+                "Note: fields where the successor already exists are skipped to avoid duplicates.\n\n"
+                "Alternatively, you can use CIF Validation > Validate Data Names for better per-field control.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.Yes
             )
             
             if reply == QMessageBox.StandardButton.Yes:
-                # Replace deprecated fields
-                updated_content = content
+                # Replace deprecated field names line-by-line to avoid accidental global substitutions.
+                updated_lines = []
                 changes_made = []
-                
-                # Process in reverse order to maintain line numbers
-                for item in reversed(found_deprecated):
-                    if item['modern']:
-                        old_line = item['line']
-                        parts = old_line.split(None, 1)
-                        if len(parts) > 1:
-                            new_line = f"{item['modern']} {parts[1]}"
-                            updated_content = updated_content.replace(old_line, new_line)
-                            changes_made.append(f"Replaced {item['field']} → {item['modern']}")
+
+                for line in content.splitlines():
+                    stripped = line.lstrip()
+                    if stripped.startswith('_'):
+                        parts = stripped.split(None, 1)
+                        field_name = parts[0]
+                        replacement = replaceable_map.get(field_name.lower())
+                        if replacement:
+                            leading_ws = line[:len(line) - len(stripped)]
+                            remainder = f" {parts[1]}" if len(parts) > 1 else ""
+                            line = f"{leading_ws}{replacement}{remainder}"
+                            changes_made.append(f"Replaced {field_name} → {replacement}")
+                    updated_lines.append(line)
                 
                 if changes_made:
+                    updated_content = "\n".join(updated_lines)
                     self.text_editor.setText(updated_content)
                     self.modified = True
                     self._check_duplicate_data_names("deprecated data-name replacement", block_on_conflicts=False)
@@ -546,6 +561,11 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
                     change_summary = f"Successfully updated {len(changes_made)} deprecated field(s):\n\n"
                     for change in changes_made:
                         change_summary += f"• {change}\n"
+
+                    if skipped_existing:
+                        change_summary += (
+                            f"\nSkipped {skipped_existing} field(s) because their successor already exists."
+                        )
                     
                     QMessageBox.information(self, "Fields Updated", change_summary)
                 else:

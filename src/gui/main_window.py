@@ -458,6 +458,58 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         exit_action = file_menu.addAction("Exit")
         exit_action.triggered.connect(self.close)
         
+        # Edit menu
+        edit_menu = menubar.addMenu("Edit")
+        
+        # Undo/Redo
+        undo_action = edit_menu.addAction("Undo")
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.text_editor.undo)
+        
+        redo_action = edit_menu.addAction("Redo")
+        redo_action.setShortcut("Ctrl+Y")
+        redo_action.triggered.connect(self.text_editor.redo)
+        
+        edit_menu.addSeparator()
+        
+        # Find
+        find_action = edit_menu.addAction("Find")
+        find_action.setShortcut("Ctrl+F")
+        find_action.triggered.connect(self.show_find_dialog)
+        
+        # Find and Replace
+        replace_action = edit_menu.addAction("Find and Replace")
+        replace_action.setShortcut("Ctrl+H")
+        replace_action.triggered.connect(self.show_replace_dialog)
+        
+        edit_menu.addSeparator()
+        
+        reload_action = edit_menu.addAction("Reload File")
+        reload_action.setShortcut("Ctrl+Shift+R")
+        reload_action.setToolTip("Reload the current file from disk, discarding all unsaved changes")
+        reload_action.triggered.connect(self.reload_file)
+        
+        # View menu for editor settings
+        view_menu = menubar.addMenu("View")
+        
+        font_action = view_menu.addAction("Change Font...")
+        font_action.triggered.connect(self.change_font)
+        
+        line_numbers_action = view_menu.addAction("Show Line Numbers")
+        line_numbers_action.setCheckable(True)
+        line_numbers_action.setChecked(self.cif_text_editor.settings['line_numbers_enabled'])
+        line_numbers_action.triggered.connect(self.toggle_line_numbers)
+        
+        ruler_action = view_menu.addAction("Show 80-Char Ruler")
+        ruler_action.setCheckable(True)
+        ruler_action.setChecked(self.cif_text_editor.settings['show_ruler'])
+        ruler_action.triggered.connect(self.toggle_ruler)
+        
+        syntax_action = view_menu.addAction("Syntax Highlighting")
+        syntax_action.setCheckable(True)
+        syntax_action.setChecked(self.cif_text_editor.settings['syntax_highlighting_enabled'])
+        syntax_action.triggered.connect(self.toggle_syntax_highlighting)
+        
         # Actions menu
         action_menu = menubar.addMenu("Actions")
         
@@ -536,59 +588,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         add_compatibility_action = format_menu.addAction("Add Legacy Compatibility Fields")
         add_compatibility_action.triggered.connect(self.add_legacy_compatibility_fields)
         add_compatibility_action.setToolTip("Add deprecated fields alongside modern equivalents for validation tool compatibility")
-
-        # Edit menu
-        edit_menu = menubar.addMenu("Edit")
-        
-        # Undo/Redo
-        undo_action = edit_menu.addAction("Undo")
-        undo_action.setShortcut("Ctrl+Z")
-        undo_action.triggered.connect(self.text_editor.undo)
-        
-        redo_action = edit_menu.addAction("Redo")
-        redo_action.setShortcut("Ctrl+Y")
-        redo_action.triggered.connect(self.text_editor.redo)
-        
-        edit_menu.addSeparator()
-        
-        # Find
-        find_action = edit_menu.addAction("Find")
-        find_action.setShortcut("Ctrl+F")
-        find_action.triggered.connect(self.show_find_dialog)
-        
-        # Find and Replace
-        replace_action = edit_menu.addAction("Find and Replace")
-        replace_action.setShortcut("Ctrl+H")
-        replace_action.triggered.connect(self.show_replace_dialog)
-        
-        edit_menu.addSeparator()
-        
-        reload_action = edit_menu.addAction("Reload File")
-        reload_action.setShortcut("Ctrl+Shift+R")
-        reload_action.setToolTip("Reload the current file from disk, discarding all unsaved changes")
-        reload_action.triggered.connect(self.reload_file)
-        
-        # View menu for editor settings
-        view_menu = menubar.addMenu("View")
-        
-        font_action = view_menu.addAction("Change Font...")
-        font_action.triggered.connect(self.change_font)
-        
-        line_numbers_action = view_menu.addAction("Show Line Numbers")
-        line_numbers_action.setCheckable(True)
-        line_numbers_action.setChecked(self.cif_text_editor.settings['line_numbers_enabled'])
-        line_numbers_action.triggered.connect(self.toggle_line_numbers)
-        
-        ruler_action = view_menu.addAction("Show 80-Char Ruler")
-        ruler_action.setCheckable(True)
-        ruler_action.setChecked(self.cif_text_editor.settings['show_ruler'])
-        ruler_action.triggered.connect(self.toggle_ruler)
-        
-        syntax_action = view_menu.addAction("Syntax Highlighting")
-        syntax_action.setCheckable(True)
-        syntax_action.setChecked(self.cif_text_editor.settings['syntax_highlighting_enabled'])
-        syntax_action.triggered.connect(self.toggle_syntax_highlighting)
-        
+       
         # Dictionaries menu
         dictionaries_menu = menubar.addMenu("Dictionaries")
 
