@@ -139,7 +139,12 @@ a = Analysis(
         'numpy',           # Not used in this application  
         'pandas',          # Not used in this application
         'PIL',             # Not used in this application
-        'pytest',          # Testing framework not needed in distribution
+        # Test and coverage tooling not needed in compiled distributions
+        'pytest',
+        'pytest_cov',
+        'pytest_qt',
+        'pytest_mock',
+        'coverage',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

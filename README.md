@@ -65,9 +65,11 @@ python CIVET/src/main.py
 
 ## Building Executable
 ```bash
-pip install pyinstaller
+pip install -r requirements-dev.txt
 pyinstaller CIVET.spec
 ```
+
+Compiled releases bundle only the runtime application and required runtime dependencies; development and test tools are not included.
 
 ## Custom Field Rules
 Create validation rules using `.cif_rules` files:
