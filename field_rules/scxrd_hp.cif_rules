@@ -1,0 +1,31 @@
+# CIF Field Rules for CIVET - High-Pressure Diffraction CIF
+# Modern (dot) notation
+#
+# This file covers high-pressure-specific CIF fields. It is intended to supplement
+# other .cif_rules files, e.g. for SCXRD or PXRD
+
+# ==============================================================================
+# Pressure conditions
+# ==============================================================================
+
+# _diffrn.ambient_pressure: Mean hydrostatic pressure during data collection (kPa)
+_diffrn.ambient_pressure  1.00
+
+# _exptl_crystal.pressure_history: Details about the pressure history of the crystal(s).
+_exptl_crystal.pressure_history  ?
+
+# If the pressure needs to be stated in a range, the below data names may be used.
+# _diffrn.ambient_pressure_gt: Mean hydrostatic pressure during data collection (kPa)
+# _diffrn.ambient_pressure_gt  ?
+# _diffrn.ambient_pressure_lt: Mean hydrostatic pressure during data collection (kPa)
+# _diffrn.ambient_pressure_lt  ?
+
+# ==============================================================================
+# Pressure device — reported in _exptl.special_details
+# ==============================================================================
+
+# _diffrn_measurement.specimen_attachment_type: code declaring how the sample was held to the holder
+_diffrn_measurement.specimen_attachment_type  mechanical        # sample held by mechanical forces such as a pressure cell; always use for HP
+
+# _exptl.special_details: Further description of the high-pressure device, pressure medium, etc can be given 
+_exptl.special_details  'Merrill-Bassett DAC; culet diameter 500 mm; Re gasket; PTM: methanol/ethanol 4/1 (quasi-hydrostatic); pressure measured by ruby fluorescence.'

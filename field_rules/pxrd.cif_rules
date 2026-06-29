@@ -1,0 +1,163 @@
+# CIF Field Rules for CIVET - Powder X-ray Diffraction (PXRD)
+# Modern (dot) notation 
+#
+# ==============================================================================
+# Specimen description
+# ==============================================================================
+
+# _pd_char.colour: Visual appearance of the powder
+_pd_char.colour  white
+_pd_char.colour  'off-white'
+_pd_char.colour  'pale yellow'
+_pd_char.colour  yellow
+_pd_char.colour  orange
+_pd_char.colour  colourless
+
+# _pd_spec.mounting: Specimen mounting method
+_pd_spec.mounting  'quartz capillary'
+_pd_spec.mounting  'packed poweder pellet'
+_pd_spec.mounting  'drifted powder on Kapton film'
+
+# _pd_spec.preparation: Preparation steps from sample to diffraction specimen
+_pd_spec.preparation  'wet grinding in acetone'
+_pd_spec.preparation  'sieved through a 44 micron (325 mesh/inch) sieve'
+_pd_spec.preparation  'spray dried in water with 1% clay'
+
+# _pd_spec.shape: Specimen shape
+_pd_spec.shape  cylinder
+_pd_spec.shape  flat_sheet
+_pd_spec.shape  irregular
+
+# _pd_spec.mount_mode: Beam path through specimen.
+_pd_spec.mount_mode  reflection
+_pd_spec.mount_mode  transmission
+
+# _pd_spec.orientation: Orientation of ω(θ) and 2θ axis.
+_pd_spec.orientation  horizontal
+_pd_spec.orientation  vertical
+_pd_spec.orientation  both
+
+# _pd_spec_size_axial: Axial extent of the specimen (mm)
+_pd_spec_size_axial  ?
+
+# _pd_spec_size_equat: Equatorial extent of the specimen (mm)
+_pd_spec_size_equat  ?
+
+# _pd_spec_size_thick: Specimen thickness (mm) — for flat plate only
+_pd_spec_size_thick  ?
+
+# ==============================================================================
+# Data collection conditions
+# ==============================================================================
+
+# _diffrn.ambient_temperature: Temperature during data collection (K)
+_diffrn.ambient_temperature  293(2)
+_diffrn.ambient_temperature  100(2)
+
+# _diffrn.ambient_environment: Environment around specimen
+_diffrn.ambient_environment  'air'
+_diffrn.ambient_environment  'nitrogen'
+_diffrn.ambient_environment  'He'
+_diffrn.ambient_environment  'vacuum'
+
+# ==============================================================================
+# Measurement scan parameters
+# ==============================================================================
+
+# _pd_meas_2theta_range_min: Minimum 2\q angle measured (degrees)
+_pd_meas_2theta_range_min  ?
+
+# _pd_meas_2theta_range_max: Maximum 2\q angle measured (degrees)
+_pd_meas_2theta_range_max  ?
+
+# _pd_meas_2theta_range_inc: Step increment in 2\q (degrees)
+_pd_meas_2theta_range_inc  ?
+
+# _pd_meas_scan_method: Mode of data collection
+_pd_meas_scan_method  step  # options: step, continuous, fixed, disp
+
+# _pd_meas_step_count_time: Counting time per step (s)
+_pd_meas_step_count_time  ?
+
+# ==============================================================================
+# Radiation
+# ==============================================================================
+
+# _diffrn_radiation.probe: Type of radiation used
+_diffrn_radiation.probe  x-ray
+_diffrn_radiation.probe  neutron
+
+# _diffrn_radiation_wavelength.value: Radiation wavelength (Å)
+_diffrn_radiation_wavelength.value  1.54056  # Cu K\a1 
+_diffrn_radiation_wavelength.value  1.54178  # Cu K\a (unresolved K\a1/K\a2)
+_diffrn_radiation_wavelength.value  0.70932  # Mo K\a1
+_diffrn_radiation_wavelength.value  1.78900  # Co K\a1
+_diffrn_radiation_wavelength.value  2.28970  # Cr K\a1
+
+# _diffrn_radiation.monochromator: Monochromator description
+_diffrn_radiation.monochromator  'Ge(111) primary monochromator'
+_diffrn_radiation.monochromator  'Johansson Ge(111) primary monochromator'
+_diffrn_radiation.monochromator  'Ni beta filter'
+_diffrn_radiation.monochromator  none
+
+# ==============================================================================
+# Instrument
+# ==============================================================================
+
+# _diffrn_source.description: Type of X-ray source
+_diffrn_source.description  'sealed tube'
+_diffrn_source.description  'sealed tube with focusing mirror'
+
+# _diffrn_source.make: Manufacturer and target material
+_diffrn_source.make  'Cu, Panalytical Empyrean'
+_diffrn_source.make  'Cu, Rigaku SmartLab'
+_diffrn_source.make  'Cu, Bruker D8 Advance'
+_diffrn_source.make  'Mo, Rigaku SmartLab'
+
+# _diffrn_source.voltage: Generator voltage (kV)
+_diffrn_source.voltage  40
+_diffrn_source.voltage  45
+
+# _diffrn_source.current: Generator current (mA)
+_diffrn_source.current  40
+_diffrn_source.current  30
+
+# _diffrn_measurement.device_class: Primary instrument type
+_diffrn_measurement.device_class  'powder diffractometer'
+
+# _diffrn_measurement.device_make: Diffractometer model
+_diffrn_measurement.device_make  'Panalytical Empyrean'
+_diffrn_measurement.device_make  'Rigaku SmartLab'
+_diffrn_measurement.device_make  'Bruker D8 Advance'
+_diffrn_measurement.device_make  'Bruker D8 Discover'
+_diffrn_measurement.device_make  'Stoe STADI-P'
+
+# _pd_instr_geometry: Diffractometer geometry
+_pd_instr_geometry  'Bragg-Brentano'
+_pd_instr_geometry  'Debye-Scherrer'
+_pd_instr_geometry  'parallel beam'
+_pd_instr_geometry  'transmission'
+
+# _diffrn_detector.description: Detector type
+_diffrn_detector.description  'position-sensitive detector'
+_diffrn_detector.description  'MYTHEN strip detector'
+_diffrn_detector.description  'scintillator point detector'
+_diffrn_detector.description  '2D flat-panel detector'
+
+# _diffrn_detector.make: Specific detector model
+_diffrn_detector.make  'Dectris MYTHEN2 R 1K'
+_diffrn_detector.make  'Panalytical X-Celerator'
+_diffrn_detector.make  'Rigaku D/teX Ultra 250'
+_diffrn_detector.make  'Bruker LYNXEYE XE-T'
+
+# ==============================================================================
+# Profile fitting and refinement
+# ==============================================================================
+
+# _pd_proc_ls_profile_function: Profile function used in refinement
+_pd_proc_ls_profile_function  'pseudo-Voigt (Thompson, Cox & Hastings, 1987)'
+_pd_proc_ls_profile_function  'Pearson VII'
+_pd_proc_ls_profile_function  'fundamental parameters approach'
+
+# _pd_proc_wavelength: Wavelength used in the refinement (Å)
+_pd_proc.wavelength  ?

@@ -1,0 +1,40 @@
+# CIF Field Rules for CIVET - Modulated Structure CIF
+# Modern (dot) notation
+#
+# This file covers modulation-specific CIF fields. It is intended to supplement
+# other .cif_rules files, e.g. for SCXRD or PXRD
+#
+
+# ==============================================================================
+# General data names for modulated structures
+# ==============================================================================
+
+# _cell.modulation_dimension: Number of modulation wave vectors (e.g., 1 for a 3+1 structure)
+_cell.modulation_dimension  1  # options: 1, 2, 3
+
+#_exptl_crystal.type_of_structure: Type of the structure
+_exptl_crystal.type_of_structure  cryst         # crystalline structure
+_exptl_crystal.type_of_structure  mod           # modulated structure
+_exptl_crystal.type_of_structure  comp          # composite (misfit) structure
+
+# _refine.ls_mod_func_description: Types of modulation present in the structure model
+_refine.ls_mod_func_description  ?
+
+# ==============================================================================
+# Data names for 1D modulated structures
+# ==============================================================================
+
+# _superspace_group.IT_number: Superspace group number (ITC, Vol C); only valid for 1D modulated structures
+_superspace_group.IT_number  ?
+
+# _superspace_group.name_IT: Superspace group symbol (ITC, Vol C); only valid for 1D modulated structures
+_superspace_group.name_IT  ?
+
+# _superspace_group.name: Superspace group symbol in alternative definition to ITC, VolC; only valid for 1D modulated structures
+_superspace_group.name  ?
+
+# _superspace_group.name_WJJ: Superspace group symbol as given by de Wolff, Janssen, & Janner; only valid for 1D modulated structures
+_superspace_group.name_WJJ  ?
+
+# _superspace_group.WJJ_code: Superspace group code as given by de Wolff, Janssen, & Janner; only valid for 1D modulated structures
+_superspace_group.WJJ_code  ?

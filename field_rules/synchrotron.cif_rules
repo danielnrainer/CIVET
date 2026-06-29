@@ -1,0 +1,52 @@
+# CIF Field Rules for CIVET - Synchrotron Measurement CIF
+# Modern (dot) notation
+#
+# This file covers the SOURCE and BEAMLINE fields that distinguish a synchrotron
+# experiment from a conventional lab measurement. It is intended to supplement
+# other .cif_rules files
+#
+# For synchrotron SCXRD, combine with scxrd.cif_rules.
+# For synchrotron PXRD, combine with pxrd.cif_rules.
+
+# ==============================================================================
+# Radiation source — facility and beamline
+# ==============================================================================
+
+# _diffrn_source.device: Code for source of radiation
+_diffrn_source.device  synch
+
+# _diffrn_source.facility: Name of the large-scale facility, conforming to https://lightsources.org
+_diffrn_source.beamline  'Diamond Light Source'
+
+# _diffrn_source.beamline: Name of the beamline
+_diffrn_source.beamline  'I19'
+
+# ==============================================================================
+# Radiation wavelength
+# ==============================================================================
+
+# _diffrn_radiation.probe: Type of radiation
+_diffrn_radiation.probe  x-ray
+
+# _diffrn_radiation_wavelength.value: Radiation wavelength (Å)
+_diffrn_radiation_wavelength.value  0.68890
+
+# ==============================================================================
+# Diffractometer and detector
+# ==============================================================================
+
+# _diffrn_measurement.device_class: Type of goniometer
+_diffrn_measurement.device_class  'four-circle diffractometer'
+
+# _diffrn_detector.description: Detector type
+_diffrn_detector.description  'hybrid pixel area detector'
+
+# _diffrn_detector.make: Specific detector model
+_diffrn_detector.make  'Dectris Pilatus 2M'
+
+# ==============================================================================
+# Beamline-specific experimental details
+# ==============================================================================
+
+# _exptl.special_details: Any experimental information not captured elsewhere.
+_exptl.special_details  ?
