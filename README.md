@@ -10,20 +10,24 @@ The code in this project has been written in large parts by Anthropic LLM models
 *Be advised that this software is in constant development and might therefore contain bugs or other unintended behaviour.
 Always check your CIF files carefully and if you encounter an issue and would like to report it, please do so via the [Issues](https://github.com/danielnrainer/CIVET/issues) section.*
 
-## Key Features (v1.2)
+## Key Features (v1.3)
 
 - **CIF Editing and Validation**: Syntax highlighting, guided dialogs, smart field checks, and duplicate/alias-aware workflows.
+- **Command-Line File Opening**: Launch CIVET with an optional CIF file path argument to open it on startup (unknown arguments are ignored, so Qt flags can be passed through safely).
 - **Flexible Field Rules Engine**: Supports `CHECK`, `DELETE`, `EDIT`, `RENAME`, `CALCULATE`, and `APPEND` actions in `.cif_rules` files.
 - **Legacy/Modern CIF Handling**: Detects legacy, modern, and mixed notation; includes conversion plus integrated malformed-field detection and correction.
-- **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values).
+- **`.cif_rules` Notation Converter**: Converts a field-rules file between legacy and modern notation from the main menu; when a loaded CIF's notation doesn't match the active rule set, **Start Checks** offers to convert the rules, convert the CIF, run as-is, or cancel.
+- **CIF Syntax Compliance Dialog**: Dedicated tabbed dialog (CIF 2.0 / CIF 1.1 / all) for syntax-version compliance issues, with line navigation, scoped **Fix All** actions, refresh, and a non-ASCII character conversion entry point.
+- **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values and CIF2 lists/tables).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Dictionary Search**: Search loaded dictionaries by data name, alias, category, and optionally description text; filter to selected dictionaries and cross-check hits against the currently loaded CIF.
-- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes, and uses validation-aware highlighting.
+- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting.
 - **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
 - **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes.
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
+- **Performance**: Debounced/background compliance checks, content-hash-based reparse avoidance, and caching across dictionary lookups and validation keep the editor responsive on larger files.
 
 ## Quick Start
 
@@ -34,6 +38,8 @@ cd CIVET
 pip install -r requirements.txt
 python src/main.py
 ```
+
+Optionally pass a CIF file to open on startup: `python src/main.py path/to/file.cif`.
 
 ### Standalone Executable (Windows)
 1. Download `CIVET.exe` from releases
@@ -179,9 +185,9 @@ You can also select a data name in the editor, right-click, and use **Search in 
 
 The validation results dialog now combines several related checks in one place:
 
-- **Malformed Fields**: Detects names that are structurally wrong but can be mapped to a known field and offers one-click correction.
+- **Malformed Fields**: Detects names that are structurally wrong (including misplaced dots in modern notation) but can be mapped to a known field, and offers one-click, notation-aware correction.
 - **Unknown Fields**: Flags names not recognised by loaded dictionaries or registered prefixes.
-- **Deprecated Fields**: Offers a **+ Successor** action that adds the appropriate successor name while keeping the deprecated field. In legacy or mixed CIF files, CIVET prefers a legacy successor name when one exists; otherwise it falls back to the modern name.
+- **Deprecated Fields**: Offers a **+ Successor** action that adds the appropriate successor name while keeping the deprecated field, a **Replace** action that swaps the deprecated name for its successor in place, and a **Delete** action to remove the deprecated field once its successor already exists. In legacy or mixed CIF files, CIVET prefers a legacy successor name when one exists; otherwise it falls back to the modern name.
 - **Conflict Resolution Controls**: The conflict dialog now supports keeping aliases while synchronizing all alias values when that strategy is preferred.
 - **Details Tooltips**: Hover over the Details column to read the full text when the column is truncated.
 
