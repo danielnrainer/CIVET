@@ -3,14 +3,15 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
                            QButtonGroup, QComboBox, QFormLayout)
-from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop
+from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop, QObject, QRunnable, QThreadPool, pyqtSignal
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
 import os
 import json
 import sys
 import re
-from typing import Dict, List, Optional, Tuple
+import hashlib
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker, safe_eval_expr
 from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, update_audit_creation_date
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
@@ -47,6 +48,28 @@ from .field_checking import FieldCheckingMixin
 from .data_name_integrity import DataNameIntegrityMixin
 
 
+class _BackgroundTaskSignals(QObject):
+    """Signals for background tasks executed via QThreadPool."""
+    finished = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+
+class _BackgroundTask(QRunnable):
+    """Simple QRunnable wrapper to run callables in a worker thread."""
+
+    def __init__(self, fn: Callable[[], Any]):
+        super().__init__()
+        self._fn = fn
+        self.signals = _BackgroundTaskSignals()
+
+    def run(self):
+        try:
+            result = self._fn()
+            self.signals.finished.emit(result)
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+
+
 class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
     def __init__(self):
         super().__init__()
@@ -80,6 +103,16 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         
         # Initialize data name validator
         self.data_name_validator = DataNameValidator(self.dict_manager)
+        self._compliance_revision = 0
+        self._worker_pool = QThreadPool.globalInstance()
+        self._background_task_tokens: Dict[str, int] = {}
+        self._background_task_counter = 0
+        self._compliance_light_timer = QTimer(self)
+        self._compliance_light_timer.setSingleShot(True)
+        self._compliance_light_timer.timeout.connect(self._refresh_compliance_status_light)
+        self._compliance_heavy_timer = QTimer(self)
+        self._compliance_heavy_timer.setSingleShot(True)
+        self._compliance_heavy_timer.timeout.connect(self._refresh_compliance_status_heavy)
 
         # Track dialog-driven read-only state so editor is scrollable while dialogs are open.
         self._dialog_editor_lock_count = 0
@@ -1299,50 +1332,124 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         self.modified = True
         self.update_status_bar()
 
-        # Schedule a compliance status refresh with a short debounce delay so we
-        # don't re-check on every single keystroke.
-        if not hasattr(self, '_compliance_update_timer'):
-            self._compliance_update_timer = QTimer()
-            self._compliance_update_timer.setSingleShot(True)
-            self._compliance_update_timer.timeout.connect(self._refresh_compliance_status)
-        self._compliance_update_timer.start(750)  # 750 ms debounce
+        # Keep quick syntax/notation feedback responsive while deferring heavy checks.
+        self._compliance_revision += 1
+        self._compliance_light_timer.start(300)
+        self._compliance_heavy_timer.start(1200)
 
-    def _refresh_compliance_status(self):
-        """Refresh syntax, notation, data-name, and data-value status indicators."""
+    def _refresh_compliance_status_light(self):
+        """Run only quick syntax and notation checks used by typing feedback."""
         content = self.text_editor.toPlainText()
         self._update_compliance_status(content)
 
         if not content.strip():
             self._update_status_panel_names(None)
             self._update_status_panel_values(None)
+
+    def _refresh_compliance_status_heavy(self, enforce_latest: bool = True):
+        """Run expensive name/value validation with stale-result suppression."""
+        if not enforce_latest:
+            # Keep a synchronous path for explicit refresh callers.
+            self._refresh_compliance_status_heavy_sync()
             return
 
-        # Keep status indicators current without requiring explicit validation actions.
+        run_revision = self._compliance_revision
+        content = self.text_editor.toPlainText()
+
+        if not content.strip():
+            self._update_status_panel_names(None)
+            self._update_status_panel_values(None)
+            return
+
+        self._submit_background_task(
+            task_name="status_names",
+            revision=run_revision,
+            compute=lambda: DataNameValidator(self.dict_manager).validate_cif_content(content),
+            on_success=self._update_status_panel_names,
+            on_failure=self._set_names_status_error,
+            require_latest_revision=True,
+        )
+
+        self._submit_background_task(
+            task_name="status_values",
+            revision=run_revision,
+            compute=lambda: self._compute_data_value_issues(content),
+            on_success=self._update_status_panel_values,
+            on_failure=self._set_values_status_error,
+            require_latest_revision=True,
+        )
+
+    def _refresh_compliance_status_heavy_sync(self):
+        """Synchronous heavy status refresh used by explicit refresh callers."""
+        content = self.text_editor.toPlainText()
+        if not content.strip():
+            self._update_status_panel_names(None)
+            self._update_status_panel_values(None)
+            return
+
         try:
-            self.data_name_validator.clear_cache()
             names_report = self.data_name_validator.validate_cif_content(content)
             self._update_status_panel_names(names_report)
         except Exception:
-            self._update_status_panel_names(None)
-            w = getattr(self, '_status_names_label', None)
-            if w is not None:
-                w.setText("⚠ Error")
-                w.setStyleSheet("color: darkorange; font-weight: bold;")
+            self._set_names_status_error("heavy_sync")
 
         try:
-            from utils.CIF_parser import CIFParser
-            from utils.cif_data_validator import CIFDataValidator
-
-            parser = CIFParser()
-            parser.parse_file(content)
-            issues = CIFDataValidator().validate(parser, self.dict_manager)
+            issues = self._validate_data_values_for_content(content)
             self._update_status_panel_values(issues)
         except Exception:
-            self._update_status_panel_values(None)
-            w = getattr(self, '_status_values_label', None)
-            if w is not None:
-                w.setText("⚠ Error")
-                w.setStyleSheet("color: darkorange; font-weight: bold;")
+            self._set_values_status_error("heavy_sync")
+
+    def _set_names_status_error(self, _message: str) -> None:
+        self._update_status_panel_names(None)
+        w = getattr(self, '_status_names_label', None)
+        if w is not None:
+            w.setText("⚠ Error")
+            w.setStyleSheet("color: darkorange; font-weight: bold;")
+
+    def _set_values_status_error(self, _message: str) -> None:
+        self._update_status_panel_values(None)
+        w = getattr(self, '_status_values_label', None)
+        if w is not None:
+            w.setText("⚠ Error")
+            w.setStyleSheet("color: darkorange; font-weight: bold;")
+
+    def _submit_background_task(
+        self,
+        task_name: str,
+        revision: int,
+        compute: Callable[[], Any],
+        on_success: Callable[[Any], None],
+        on_failure: Callable[[str], None],
+        require_latest_revision: bool = True,
+    ) -> None:
+        """Submit a background task and drop stale results by token/revision."""
+        self._background_task_counter += 1
+        task_token = self._background_task_counter
+        self._background_task_tokens[task_name] = task_token
+        worker = _BackgroundTask(compute)
+
+        def _apply_success(result: Any) -> None:
+            if self._background_task_tokens.get(task_name) != task_token:
+                return
+            if require_latest_revision and revision != self._compliance_revision:
+                return
+            on_success(result)
+
+        def _apply_failure(error_message: str) -> None:
+            if self._background_task_tokens.get(task_name) != task_token:
+                return
+            if require_latest_revision and revision != self._compliance_revision:
+                return
+            on_failure(error_message)
+
+        worker.signals.finished.connect(_apply_success)
+        worker.signals.failed.connect(_apply_failure)
+        self._worker_pool.start(worker)
+
+    def _refresh_compliance_status(self):
+        """Refresh syntax, notation, data-name, and data-value status indicators."""
+        self._refresh_compliance_status_light()
+        self._refresh_compliance_status_heavy(enforce_latest=False)
     
     def update_cursor_position(self):
         cursor = self.text_editor.textCursor()
@@ -1633,6 +1740,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             
             # Update data name validator with new dictionary manager
             self.data_name_validator = DataNameValidator(self.dict_manager)
+            self._data_value_validation_cache = None
             # Re-setup the syntax highlighter callback
             def _field_validator_callback(field_name: str) -> str:
                 result = self.data_name_validator.validate_field(field_name)
@@ -1683,6 +1791,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 
                 # Clear data name validator cache since dictionaries changed
                 self.data_name_validator.clear_cache()
+                self._data_value_validation_cache = None
                 self.cif_text_editor.highlighter.rehighlight()
                 
                 # Update status displays
@@ -1862,14 +1971,11 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             return
 
         try:
-            parser = CIFParser()
-            parser.parse_file(content)
-
-            validator = CIFDataValidator()
-            issues = validator.validate(parser, self.dict_manager)
+            issues = self._validate_data_values_for_content(content)
             self._update_status_panel_values(issues)
 
             dialog = CIFValueValidationDialog(issues, self)
+            dialog._validation_revision = 0
 
             def _goto(line_number: int):
                 """Move the text editor cursor to the given 1-based line."""
@@ -1880,11 +1986,23 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             def _refresh():
                 try:
                     fresh_content = self.text_editor.toPlainText()
-                    fresh_parser = CIFParser()
-                    fresh_parser.parse_file(fresh_content)
-                    fresh_validator = CIFDataValidator()
-                    fresh_issues = fresh_validator.validate(fresh_parser, self.dict_manager)
-                    dialog.update_issues(fresh_issues)
+                    dialog._validation_revision += 1
+                    dialog_revision = dialog._validation_revision
+                    task_name = f"dialog_values_{id(dialog)}"
+
+                    self._submit_background_task(
+                        task_name=task_name,
+                        revision=dialog_revision,
+                        compute=lambda: self._validate_data_values_for_content(fresh_content),
+                        on_success=lambda fresh_issues: dialog.update_issues(fresh_issues)
+                        if dialog_revision == dialog._validation_revision else None,
+                        on_failure=lambda error: QMessageBox.warning(
+                            dialog,
+                            "Refresh Failed",
+                            f"Validation failed:\n{error}",
+                        ),
+                        require_latest_revision=False,
+                    )
                 except Exception as e:
                     import traceback
                     print(traceback.format_exc())
@@ -1901,10 +2019,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             try:
                 close_content = self.text_editor.toPlainText()
                 if close_content.strip():
-                    close_parser = CIFParser()
-                    close_parser.parse_file(close_content)
-                    close_validator = CIFDataValidator()
-                    close_issues = close_validator.validate(close_parser, self.dict_manager)
+                    close_issues = self._validate_data_values_for_content(close_content)
                     self._update_status_panel_values(close_issues)
             except Exception:
                 pass
@@ -1916,6 +2031,30 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 self, "Validation Error",
                 f"Failed to validate data values:\n{str(e)}\n\nCheck console for details.",
             )
+
+    def _validate_data_values_for_content(self, content: str):
+        """Validate data values with per-content cache to avoid redundant parser work."""
+        cache_key = hashlib.sha1(content.encode('utf-8')).hexdigest()
+        cached = getattr(self, '_data_value_validation_cache', None)
+        if cached and cached.get('key') == cache_key:
+            return cached['issues']
+
+        issues = self._compute_data_value_issues(content)
+        self._data_value_validation_cache = {
+            'key': cache_key,
+            'issues': issues,
+        }
+        return issues
+
+    def _compute_data_value_issues(self, content: str):
+        """Compute data value issues without touching UI-layer caches."""
+        from utils.CIF_parser import CIFParser
+        from utils.cif_data_validator import CIFDataValidator
+
+        parser = CIFParser()
+        parser.parse_file(content)
+        validator = CIFDataValidator()
+        return validator.validate(parser, self.dict_manager)
 
     def _apply_validation_actions(self, dialog: DataNameValidationDialog):
         """

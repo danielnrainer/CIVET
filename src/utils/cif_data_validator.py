@@ -19,7 +19,7 @@ Severity levels:
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING, Set
 
 if TYPE_CHECKING:
     from .CIF_parser import CIFParser, CIFLoop
@@ -39,6 +39,8 @@ _NUMERIC_RE = re.compile(
     r'(?:[eEdD][+-]?\d+)?'        # optional exponent
     r'(?:\(\d+\))?$'              # optional (esd) suffix
 )
+
+_INTEGER_RE = re.compile(r'^[+-]?\d+(?:\(\d+\))?$')
 
 
 @dataclass
@@ -90,6 +92,8 @@ class CIFDataValidator:
             All issues found, ordered by line number where available.
         """
         issues: List[ValidationIssue] = []
+        metadata_cache: Dict[str, Any] = {}
+        enum_lower_cache: Dict[str, Set[str]] = {}
 
         # --- Individual (non-loop) fields ---
         for field_obj in cif_parser.fields.values():
@@ -101,12 +105,14 @@ class CIFDataValidator:
                 value=field_obj.value,
                 line_number=field_obj.line_number,
                 dict_manager=dict_manager,
+                metadata_cache=metadata_cache,
+                enum_lower_cache=enum_lower_cache,
             )
             issues.extend(field_issues)
 
         # --- Loop structures ---
         for loop in cif_parser.loops:
-            issues.extend(self._check_loop(loop, dict_manager))
+            issues.extend(self._check_loop(loop, dict_manager, metadata_cache, enum_lower_cache))
 
         # Sort by line number (issues without a line number go last)
         issues.sort(key=lambda x: (x.line_number is None, x.line_number or 0))
@@ -120,8 +126,14 @@ class CIFDataValidator:
         self,
         loop: 'CIFLoop',
         dict_manager: 'CIFDictionaryManager',
+        metadata_cache: Dict[str, Any],
+        enum_lower_cache: Dict[str, Set[str]],
     ) -> List[ValidationIssue]:
         issues: List[ValidationIssue] = []
+        loop_field_metadata = {
+            field_name: self._get_field_metadata_cached(field_name, dict_manager, metadata_cache)
+            for field_name in loop.field_names
+        }
 
         # 1. Structural check: incomplete last row
         if loop.has_incomplete_last_row:
@@ -161,6 +173,9 @@ class CIFDataValidator:
                     line_number=approx_line,
                     dict_manager=dict_manager,
                     row_index=row_idx,
+                    metadata=loop_field_metadata.get(field_name),
+                    metadata_cache=metadata_cache,
+                    enum_lower_cache=enum_lower_cache,
                 )
                 issues.extend(field_issues)
 
@@ -173,6 +188,9 @@ class CIFDataValidator:
         line_number: Optional[int],
         dict_manager: 'CIFDictionaryManager',
         row_index: Optional[int] = None,
+        metadata: Optional[Any] = None,
+        metadata_cache: Optional[Dict[str, Any]] = None,
+        enum_lower_cache: Optional[Dict[str, Set[str]]] = None,
     ) -> List[ValidationIssue]:
         """Check one field value; return any issues found."""
         issues: List[ValidationIssue] = []
@@ -194,7 +212,12 @@ class CIFDataValidator:
             return issues
 
         # Look up dictionary metadata
-        meta = dict_manager.get_field_metadata(field_name)
+        meta = metadata
+        if meta is None:
+            if metadata_cache is not None:
+                meta = self._get_field_metadata_cached(field_name, dict_manager, metadata_cache)
+            else:
+                meta = dict_manager.get_field_metadata(field_name)
         if meta is None:
             # Field not in any loaded dictionary — no type info to check against
             return issues
@@ -203,7 +226,15 @@ class CIFDataValidator:
 
         # --- Enumeration check (highest priority) ---
         if meta.enumeration_values:
-            enum_lower = [v.lower() for v in meta.enumeration_values]
+            enum_key = self._enum_cache_key(field_name, meta)
+            if enum_lower_cache is not None:
+                enum_lower = enum_lower_cache.get(enum_key)
+                if enum_lower is None:
+                    enum_lower = {v.lower() for v in meta.enumeration_values}
+                    enum_lower_cache[enum_key] = enum_lower
+            else:
+                enum_lower = {v.lower() for v in meta.enumeration_values}
+
             if str_value_for_check.lower() not in enum_lower:
                 # Show only a short preview of the allowed list to keep messages readable
                 if len(meta.enumeration_values) <= 10:
@@ -266,4 +297,26 @@ class CIFDataValidator:
     @staticmethod
     def _is_integer(s: str) -> bool:
         """True if *s* looks like a CIF integer (optional sign, digits, optional esd)."""
-        return bool(re.match(r'^[+-]?\d+(?:\(\d+\))?$', s))
+        return bool(_INTEGER_RE.match(s))
+
+    @staticmethod
+    def _metadata_cache_key(field_name: str) -> str:
+        return field_name.lower()
+
+    def _get_field_metadata_cached(
+        self,
+        field_name: str,
+        dict_manager: 'CIFDictionaryManager',
+        metadata_cache: Dict[str, Any],
+    ) -> Optional[Any]:
+        key = self._metadata_cache_key(field_name)
+        if key not in metadata_cache:
+            metadata_cache[key] = dict_manager.get_field_metadata(field_name)
+        return metadata_cache[key]
+
+    @staticmethod
+    def _enum_cache_key(field_name: str, metadata: Any) -> str:
+        definition_id = getattr(metadata, 'definition_id', None)
+        if definition_id:
+            return str(definition_id).lower()
+        return field_name.lower()

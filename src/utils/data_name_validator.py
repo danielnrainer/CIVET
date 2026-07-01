@@ -15,6 +15,8 @@ provides caching for performance optimization.
 """
 
 from enum import Enum
+import copy
+import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
@@ -102,6 +104,9 @@ class DataNameValidator:
     # QSettings keys for persistence
     SETTINGS_KEY_PREFIXES = "CIVET/allowed_prefixes"
     SETTINGS_KEY_FIELDS = "CIVET/allowed_fields"
+    MAX_FIELD_CACHE_ENTRIES = 4096
+    MAX_REPORT_CACHE_ENTRIES = 16
+    MAX_EQUIVALENT_CACHE_ENTRIES = 1024
     
     def __init__(self, dict_manager: 'CIFDictionaryManager'):
         """
@@ -115,6 +120,8 @@ class DataNameValidator:
         self._user_allowed_fields: Set[str] = set()
         self._session_ignored: Set[str] = set()
         self._validation_cache: Dict[str, FieldValidationResult] = {}
+        self._report_cache: Dict[str, ValidationReport] = {}
+        self._equivalent_names_cache: Dict[str, Set[str]] = {}
         
         # Load persisted user preferences
         self._load_user_preferences()
@@ -164,6 +171,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if specific field is user allowed
@@ -176,6 +184,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if prefix is user allowed
@@ -188,6 +197,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if field is deprecated (before checking if known, as deprecated fields are "known")
@@ -202,6 +212,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if field is known in dictionary
@@ -214,6 +225,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if field is a malformed version of a known field.
@@ -231,6 +243,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if field uses a registered IUCr prefix
@@ -246,6 +259,7 @@ class DataNameValidator:
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Field is unknown - check for embedded local prefix in category extension
@@ -263,6 +277,7 @@ class DataNameValidator:
                 suggested_format=suggested_format or ""
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         # Check if embedded local prefix is a registered IUCr prefix
@@ -281,6 +296,7 @@ class DataNameValidator:
                 suggested_format=suggested_format or ""
             )
             self._validation_cache[cache_key] = result
+            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
         
         suggested_dict = suggest_dictionary_for_prefix(prefix) if prefix else ""
@@ -305,6 +321,7 @@ class DataNameValidator:
             embedded_prefix=embedded_prefix or ""
         )
         self._validation_cache[cache_key] = result
+        self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
         return result
     
     def validate_cif_content(self, content: str) -> ValidationReport:
@@ -317,6 +334,10 @@ class DataNameValidator:
         Returns:
             ValidationReport with categorized fields
         """
+        report_cache_key = self._content_cache_key(content)
+        if report_cache_key in self._report_cache:
+            return copy.deepcopy(self._report_cache[report_cache_key])
+
         report = ValidationReport()
         seen_fields: Set[str] = set()
         parsed_fields: List[tuple[str, int]] = []
@@ -396,11 +417,18 @@ class DataNameValidator:
                         result.description = f"Should be {legacy_suggestion}"
                 report.malformed_fields.append(result)
         
+        self._report_cache[report_cache_key] = copy.deepcopy(report)
+        self._trim_cache(self._report_cache, self.MAX_REPORT_CACHE_ENTRIES)
         return report
 
     def _get_equivalent_field_names(self, field_name: str) -> Set[str]:
         """Return known equivalent names (legacy/modern/aliases) for duplicate checks."""
-        names: Set[str] = {field_name.lower()}
+        cache_key = field_name.lower()
+        cached = self._equivalent_names_cache.get(cache_key)
+        if cached is not None:
+            return cached.copy()
+
+        names: Set[str] = {cache_key}
 
         modern_name = self.dict_manager.map_to_modern(field_name)
         if modern_name:
@@ -426,6 +454,8 @@ class DataNameValidator:
                 if alias_name:
                     names.add(alias_name.lower())
 
+        self._equivalent_names_cache[cache_key] = names.copy()
+        self._trim_cache(self._equivalent_names_cache, self.MAX_EQUIVALENT_CACHE_ENTRIES)
         return names
     
     def _extract_field_name(self, line: str) -> Optional[str]:
@@ -639,6 +669,17 @@ class DataNameValidator:
     def clear_cache(self) -> None:
         """Clear the validation cache."""
         self._validation_cache.clear()
+        self._report_cache.clear()
+        self._equivalent_names_cache.clear()
+
+    @staticmethod
+    def _trim_cache(cache: Dict, max_entries: int) -> None:
+        while len(cache) > max_entries:
+            cache.pop(next(iter(cache)))
+
+    @staticmethod
+    def _content_cache_key(content: str) -> str:
+        return hashlib.sha1(content.encode('utf-8')).hexdigest()
     
     def is_field_valid(self, field_name: str) -> bool:
         """

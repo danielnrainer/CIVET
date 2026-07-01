@@ -13,6 +13,7 @@ Uses the actual cif_core.dic file for accurate field mappings.
 
 import os
 import re
+import hashlib
 import json
 import requests
 import sys
@@ -37,6 +38,17 @@ HTTP_HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 from .dictionary_suggestion_manager import DictionarySuggestionManager, DictionarySuggestion
+
+
+_FIELD_NAME_PATTERN = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
+_DICT_TITLE_SUFFIX_RE = re.compile(r'\s*\([^)]*\)\s*$')
+_DICT_FILENAME_VERSION_RE = re.compile(r'cif[_-]([a-z]+)(?:[_-]\d+\.?\d*\.?\d*)?\.dic')
+_DICT_FILENAME_SIMPLE_RE = re.compile(r'cif[_-](\w+)\.dic')
+
+_MAX_CONTENT_CACHE_ENTRIES = 32
+_MAX_LOOKUP_CACHE_ENTRIES = 4096
+
+_MISSING_METADATA = object()
 
 
 def get_user_dictionaries_directory() -> str:
@@ -359,16 +371,16 @@ class DictionaryInfo:
             return self._normalize_dict_type(normalized)
         
         # Fallback: extract from filename, but strip version numbers
-        name_lower = self.name.lower()
+        name_lower = self.name.lower().strip()
         # Remove optional source suffixes appended to display names, e.g. " (IUCr Release)"
-        name_lower = re.sub(r'\s*\([^)]*\)\s*$', '', name_lower)
+        name_lower = _DICT_TITLE_SUFFIX_RE.sub('', name_lower)
         # Match patterns like cif_core_3.2.0.dic -> extract just 'core'
         # First try with version number pattern
-        match = re.match(r'cif[_-]([a-z]+)(?:[_-]\d+\.?\d*\.?\d*)?\.dic', name_lower)
+        match = _DICT_FILENAME_VERSION_RE.match(name_lower)
         if match:
             return self._normalize_dict_type(match.group(1))
         # Try simpler pattern
-        match = re.match(r'cif[_-](\w+)\.dic', name_lower)
+        match = _DICT_FILENAME_SIMPLE_RE.match(name_lower)
         if match:
             return self._normalize_dict_type(match.group(1))
         # Fallback to using the filename without extension
@@ -467,6 +479,15 @@ class CIFDictionaryManager:
         
         # Dictionary suggestion system
         self._suggestion_manager = DictionarySuggestionManager()
+        self._default_dictionaries_loaded = False
+
+        # Hot-path caches (bounded via simple FIFO eviction on dict insertion order).
+        self._notation_cache: Dict[str, FieldNotation] = {}
+        self._syntax_cache: Dict[str, CIFSyntaxVersion] = {}
+        self._known_field_lookup_cache: Dict[str, bool] = {}
+        self._malformed_guess_cache: Dict[str, Optional[str]] = {}
+        self._metadata_lookup_cache: Dict[str, Any] = {}
+        self._modern_from_compact_name: Dict[str, str] = {}
         
         # Initialize primary dictionary info
         primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core_3.3.0.dic')
@@ -512,8 +533,7 @@ class CIFDictionaryManager:
         
         self._dictionary_infos.append(primary_info)
         
-        # Auto-load essential dictionaries by default
-        self._load_default_dictionaries()
+        # Defer discovery of additional dictionaries until first load path.
         
         # Common field patterns for quick detection (fallback only)
         self._legacy_patterns = [
@@ -524,6 +544,76 @@ class CIFDictionaryManager:
         self._modern_patterns = [
             r'^_[a-zA-Z][a-zA-Z0-9_\-\[\]()]*\.[a-zA-Z][a-zA-Z0-9_\-\[\]()]*$'
         ]
+
+    @staticmethod
+    def _content_hash_key(content: str) -> str:
+        return hashlib.sha1(content.encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def _cache_put(cache: Dict[Any, Any], key: Any, value: Any, max_size: int) -> None:
+        cache[key] = value
+        if len(cache) > max_size:
+            cache.pop(next(iter(cache)))
+
+    def _invalidate_runtime_caches(self) -> None:
+        self._notation_cache.clear()
+        self._syntax_cache.clear()
+        self._known_field_lookup_cache.clear()
+        self._malformed_guess_cache.clear()
+        self._metadata_lookup_cache.clear()
+        self._modern_from_compact_name.clear()
+
+    def _ensure_default_dictionaries_loaded(self) -> None:
+        if self._default_dictionaries_loaded:
+            return
+        self._load_default_dictionaries()
+        self._default_dictionaries_loaded = True
+
+    def _register_dictionary_lazy(self, dictionary_path: str) -> bool:
+        """Register a dictionary parser and metadata without full parse upfront."""
+        if not os.path.exists(dictionary_path):
+            return False
+
+        dict_format = detect_dictionary_format(dictionary_path)
+        if dict_format in (DictionaryFormat.DDL2, DictionaryFormat.UNKNOWN):
+            return False
+
+        additional_parser = create_dictionary_parser(dictionary_path, format_hint=dict_format)
+        self._additional_parsers.append(additional_parser)
+
+        with open(dictionary_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        version = self._extract_dictionary_version(content)
+        dict_title = self._extract_dictionary_title(content)
+        dict_date = self._extract_dictionary_date(content)
+        source, status = self._determine_dict_source_and_status(dictionary_path, content)
+
+        dict_info = DictionaryInfo(
+            name=os.path.basename(dictionary_path),
+            path=dictionary_path,
+            source_type=DictionarySource.FILE,
+            size_bytes=os.path.getsize(dictionary_path),
+            field_count=0,
+            description=self._extract_dictionary_description(dictionary_path, content),
+            version=version,
+            dict_title=dict_title,
+            dict_date=dict_date,
+            source=source,
+            status=status,
+        )
+        dict_info.dict_name = self._extract_dictionary_name(content, dict_info.dict_type)
+
+        existing_active = any(
+            info.dict_type == dict_info.dict_type and info.is_active
+            for info in self._dictionary_infos
+        )
+        dict_info.is_active = not existing_active
+        self._dictionary_infos.append(dict_info)
+
+        self._loaded = False
+        self._invalidate_runtime_caches()
+        return True
         
     def _load_default_dictionaries(self):
         """Load all dictionary files from both user and bundled dictionaries folders.
@@ -558,7 +648,7 @@ class CIFDictionaryManager:
                 for dict_file in user_dic_files:
                     dict_path = os.path.join(user_dict_dir, dict_file)
                     try:
-                        self.add_dictionary(dict_path)
+                        self._register_dictionary_lazy(dict_path)
                         loaded_filenames.add(dict_file)
                     except Exception as e:
                         # Silently skip dictionaries that fail to load
@@ -588,7 +678,7 @@ class CIFDictionaryManager:
         for dict_file in dic_files:
             dict_path = os.path.join(dictionaries_dir, dict_file)
             try:
-                self.add_dictionary(dict_path)
+                self._register_dictionary_lazy(dict_path)
                 loaded_filenames.add(dict_file)
             except Exception as e:
                 # Silently skip dictionaries that fail to load
@@ -598,6 +688,8 @@ class CIFDictionaryManager:
     def _ensure_loaded(self):
         """Ensure all active dictionaries are loaded and merged (lazy loading)"""
         if not self._loaded:
+            self._ensure_default_dictionaries_loaded()
+            self._invalidate_runtime_caches()
             # Initialize caches
             self._field_cache = {}
             self._alias_map = {}
@@ -663,6 +755,15 @@ class CIFDictionaryManager:
             
             # Manual fixes for missing mappings
             self._add_missing_field_mappings()
+
+            # Build compact modern-name index used by malformed-name guessing.
+            self._modern_from_compact_name = {}
+            for known_field in self._merged_known_fields_lower:
+                if '.' not in known_field:
+                    continue
+                compact = known_field.replace('.', '_')
+                if compact not in self._modern_from_compact_name:
+                    self._modern_from_compact_name[compact] = known_field
             
             self._loaded = True
         
@@ -695,13 +796,16 @@ class CIFDictionaryManager:
         Returns:
             FieldNotation enum indicating the detected notation style
         """
-        lines = content.strip().split('\n')
+        cache_key = self._content_hash_key(content)
+        cached = self._notation_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        lines = content.split('\n')
         
         legacy_fields = 0
         modern_fields = 0
         in_text_block = False
-        
-        field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
         
         for line in lines:
             stripped = line.strip()
@@ -719,22 +823,25 @@ class CIFDictionaryManager:
             if stripped.startswith('#'):
                 continue
             
-            match = field_pattern.match(line)
+            match = _FIELD_NAME_PATTERN.match(line)
             if match:
                 field_name = match.group(2)
                 if '.' in field_name:
                     modern_fields += 1
                 else:
                     legacy_fields += 1
-        
+
         if modern_fields > 0 and legacy_fields > 0:
-            return FieldNotation.MIXED
+            result = FieldNotation.MIXED
         elif modern_fields > 0:
-            return FieldNotation.MODERN
+            result = FieldNotation.MODERN
         elif legacy_fields > 0:
-            return FieldNotation.LEGACY
+            result = FieldNotation.LEGACY
         else:
-            return FieldNotation.UNKNOWN
+            result = FieldNotation.UNKNOWN
+
+        self._cache_put(self._notation_cache, cache_key, result, _MAX_CONTENT_CACHE_ENTRIES)
+        return result
 
     def detect_syntax_version(self, content: str) -> CIFSyntaxVersion:
         """
@@ -749,15 +856,27 @@ class CIFDictionaryManager:
         Returns:
             CIFSyntaxVersion enum (CIF1, CIF2, or UNKNOWN)
         """
-        lines = content.strip().split('\n')
+        cache_key = self._content_hash_key(content)
+        cached = self._syntax_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        lines = content.split('\n')
         
         # Check for explicit version header (authoritative)
         for line in lines[:5]:
             stripped = line.strip()
             if stripped.startswith('#\\#CIF_2.0'):
+                self._cache_put(self._syntax_cache, cache_key, CIFSyntaxVersion.CIF2, _MAX_CONTENT_CACHE_ENTRIES)
                 return CIFSyntaxVersion.CIF2
             elif stripped.startswith('#\\#CIF_1'):
+                self._cache_put(self._syntax_cache, cache_key, CIFSyntaxVersion.CIF1, _MAX_CONTENT_CACHE_ENTRIES)
                 return CIFSyntaxVersion.CIF1
+
+        # Fast path: no known CIF2 construct markers present.
+        if not any(marker in content for marker in ('[', '{', '"""', "'''")):
+            self._cache_put(self._syntax_cache, cache_key, CIFSyntaxVersion.UNKNOWN, _MAX_CONTENT_CACHE_ENTRIES)
+            return CIFSyntaxVersion.UNKNOWN
         
         # No header — scan for CIF2-only constructs
         from .cif_format_converter import CIFFormatConverter
@@ -765,9 +884,11 @@ class CIFDictionaryManager:
         # Call the static-like detection without full init
         constructs = CIFFormatConverter._detect_cif2_constructs_static(content)
         if constructs:
+            self._cache_put(self._syntax_cache, cache_key, CIFSyntaxVersion.CIF2, _MAX_CONTENT_CACHE_ENTRIES)
             return CIFSyntaxVersion.CIF2
         
         # No header, no CIF2 constructs — syntax version is indeterminate
+        self._cache_put(self._syntax_cache, cache_key, CIFSyntaxVersion.UNKNOWN, _MAX_CONTENT_CACHE_ENTRIES)
         return CIFSyntaxVersion.UNKNOWN
 
     def detect_cif_version(self, content: str) -> FieldNotation:
@@ -876,25 +997,34 @@ class CIFDictionaryManager:
         
         # Check field cache first (main dictionary)
         field_name_lower = field_name.lower().strip()
+        cached_result = self._known_field_lookup_cache.get(field_name_lower)
+        if cached_result is not None:
+            return cached_result
+
         if hasattr(self, '_field_cache') and field_name_lower in self._field_cache:
+            self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
             return True
             
         # Check alias mappings
         if hasattr(self, '_alias_map') and field_name_lower in self._alias_map:
+            self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
             return True
         
         # Check merged known fields from all active dictionaries (includes DDL1 fields)
         if hasattr(self, '_merged_known_fields_lower') and field_name_lower in self._merged_known_fields_lower:
+            self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
             return True
             
         # Check CIF format conversion mappings (case-insensitive)
         if (field_name.lower() in self._legacy_to_modern or 
             field_name.lower() in self._modern_to_legacy):
+            self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
             return True
         
         # Also check exact case match for backwards compatibility
         if (field_name in self._legacy_to_modern or 
             field_name in self._modern_to_legacy):
+            self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
             return True
         
         # For modern format fields (with dots), only treat underscore variants as known
@@ -903,6 +1033,7 @@ class CIFDictionaryManager:
             legacy_equivalent = field_name.replace('.', '_')
             canonical_modern = self.map_to_modern(legacy_equivalent)
             if canonical_modern and canonical_modern.lower() == field_name_lower:
+                self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
                 return True
         
         # For legacy format fields (with underscores), check if modern equivalent exists
@@ -914,11 +1045,14 @@ class CIFDictionaryManager:
                     modern_equivalent.lower() in self._modern_to_legacy or
                     modern_equivalent in self._legacy_to_modern or 
                     modern_equivalent in self._modern_to_legacy):
+                    self._cache_put(self._known_field_lookup_cache, field_name_lower, True, _MAX_LOOKUP_CACHE_ENTRIES)
                     return True
         
         # As a fallback, directly search the dictionary file
         # This handles cases where fields exist but aren't in the parsed mappings
-        return self._search_field_in_dictionary_file(field_name)
+        result = self._search_field_in_dictionary_file(field_name)
+        self._cache_put(self._known_field_lookup_cache, field_name_lower, result, _MAX_LOOKUP_CACHE_ENTRIES)
+        return result
 
     def get_field_metadata(self, field_name: str):
         """Return the FieldMetadata for *field_name*, searching all active parsers.
@@ -929,12 +1063,16 @@ class CIFDictionaryManager:
         from .cif_dictionary_parser import FieldMetadata  # avoid circular at module level
         self._ensure_loaded()
         key = field_name.lower().strip()
+        cached = self._metadata_lookup_cache.get(key)
+        if cached is not None:
+            return None if cached is _MISSING_METADATA else cached
 
         # Primary parser
         def_id = self.parser._alias_to_definition.get(key)
         if def_id:
             meta = self.parser._field_metadata.get(def_id)
             if meta:
+                self._cache_put(self._metadata_lookup_cache, key, meta, _MAX_LOOKUP_CACHE_ENTRIES)
                 return meta
 
         # Additional / DDL1 parsers
@@ -947,8 +1085,10 @@ class CIFDictionaryManager:
                 if def_id and hasattr(parser, '_field_metadata'):
                     meta = parser._field_metadata.get(def_id)
                     if meta:
+                        self._cache_put(self._metadata_lookup_cache, key, meta, _MAX_LOOKUP_CACHE_ENTRIES)
                         return meta
 
+        self._cache_put(self._metadata_lookup_cache, key, _MISSING_METADATA, _MAX_LOOKUP_CACHE_ENTRIES)
         return None
 
     def _search_field_in_dictionary_file(self, field_name: str) -> bool:
@@ -1437,12 +1577,17 @@ class CIFDictionaryManager:
         """
         self._ensure_loaded()
         field_name = field_name.strip()
+        cache_key = field_name.lower()
+        if cache_key in self._malformed_guess_cache:
+            return self._malformed_guess_cache[cache_key]
 
         if not field_name.startswith('_'):
+            self._cache_put(self._malformed_guess_cache, cache_key, None, _MAX_LOOKUP_CACHE_ENTRIES)
             return None
 
         # Known names are not malformed.
         if self.is_known_field(field_name):
+            self._cache_put(self._malformed_guess_cache, cache_key, None, _MAX_LOOKUP_CACHE_ENTRIES)
             return None
 
         def _to_known_modern(name: str) -> Optional[str]:
@@ -1455,8 +1600,13 @@ class CIFDictionaryManager:
         # known legacy alias. Convert that alias to canonical modern if possible.
         if '.' in field_name:
             collapsed_legacy = field_name.replace('.', '_')
+            direct_modern = self._modern_from_compact_name.get(collapsed_legacy.lower())
+            if direct_modern and direct_modern.lower() != cache_key:
+                self._cache_put(self._malformed_guess_cache, cache_key, direct_modern, _MAX_LOOKUP_CACHE_ENTRIES)
+                return direct_modern
             modern_from_collapsed = _to_known_modern(collapsed_legacy)
             if modern_from_collapsed and modern_from_collapsed.lower() != field_name.lower():
+                self._cache_put(self._malformed_guess_cache, cache_key, modern_from_collapsed, _MAX_LOOKUP_CACHE_ENTRIES)
                 return modern_from_collapsed
         
         # Remove leading underscore for processing
@@ -1465,7 +1615,13 @@ class CIFDictionaryManager:
         parts = name_without_prefix.split('_')
         
         if len(parts) < 2:
+            self._cache_put(self._malformed_guess_cache, cache_key, None, _MAX_LOOKUP_CACHE_ENTRIES)
             return None
+
+        direct_compact_match = self._modern_from_compact_name.get(f"_{name_without_prefix}".lower())
+        if direct_compact_match and direct_compact_match.lower() != cache_key:
+            self._cache_put(self._malformed_guess_cache, cache_key, direct_compact_match, _MAX_LOOKUP_CACHE_ENTRIES)
+            return direct_compact_match
         
         # Try placing a dot after each underscore position
         for i in range(1, len(parts)):
@@ -1475,8 +1631,10 @@ class CIFDictionaryManager:
 
             known_modern = _to_known_modern(guessed_name)
             if known_modern and known_modern.lower() != field_name.lower():
+                self._cache_put(self._malformed_guess_cache, cache_key, known_modern, _MAX_LOOKUP_CACHE_ENTRIES)
                 return known_modern
         
+        self._cache_put(self._malformed_guess_cache, cache_key, None, _MAX_LOOKUP_CACHE_ENTRIES)
         return None
     
     def _guess_modern_equivalent(self, field_name: str) -> Optional[str]:

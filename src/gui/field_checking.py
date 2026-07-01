@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
 from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
@@ -899,9 +900,19 @@ class FieldCheckingMixin:
             filename_part = f" {os.path.basename(self.current_file)}" if self.current_file else ""
             self.setWindowTitle(f"CIVET{filename_part} - Checking with {field_set_display_name} fields")
             
-            # Parse the current CIF content
-            content = self.text_editor.toPlainText()
-            self.cif_parser.parse_file(content)
+            # Parse the current CIF content once and only reparse when the content changes.
+            parsed_content_hash = None
+
+            def ensure_parser_current() -> str:
+                nonlocal parsed_content_hash
+                current_content = self.text_editor.toPlainText()
+                current_hash = hashlib.sha1(current_content.encode('utf-8')).hexdigest()
+                if current_hash != parsed_content_hash:
+                    self.cif_parser.parse_file(current_content)
+                    parsed_content_hash = current_hash
+                return current_content
+
+            ensure_parser_current()
             
             # Process rules in file order (fully sequential).
             # Action rules (DELETE/EDIT/APPEND/RENAME) are applied immediately when
@@ -948,9 +959,8 @@ class FieldCheckingMixin:
                 suggestions = getattr(field_def, 'suggestions', None)
 
                 if action == 'CALCULATE' and hasattr(field_def, 'expression'):
-                    # Re-parse CIF to get current values (content may have changed)
-                    current_content = self.text_editor.toPlainText()
-                    self.cif_parser.parse_file(current_content)
+                    # Re-parse only if content changed since the last CALCULATE evaluation.
+                    ensure_parser_current()
 
                     # Extract field references from expression
                     field_refs = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', field_def.expression)

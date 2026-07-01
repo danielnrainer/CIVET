@@ -20,6 +20,12 @@ from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotat
 from .user_config import get_bundled_resource_path
 
 
+_FIELD_LINE_MATCH = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$')
+_FIELD_WITH_VALUE_MATCH = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s+(.+)$')
+_FIELD_IN_CONTENT_MATCH = re.compile(r'^(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s')
+_INLINE_COMMENT_MARKER = re.compile(r'\s#')
+
+
 class CIFFormatConverter:
     """
     Converts CIF files between different format versions and fixes compliance issues.
@@ -35,6 +41,7 @@ class CIFFormatConverter:
         """
         self.dict_manager = dictionary_manager or CIFDictionaryManager()
         self.checkcif_compatibility_fields = self._load_checkcif_compatibility_fields()
+        self._modern_field_conversion_cache: Dict[str, str] = {}
     
     def _load_checkcif_compatibility_fields(self) -> Set[str]:
         """
@@ -195,23 +202,99 @@ class CIFFormatConverter:
             converted_lines.append(converted_line)
         
         converted_content = '\n'.join(converted_lines)
-        
-        # Post-processing pipeline
+
+        # Post-processing pipeline: combine duplicate cleanup and compatibility
+        # insertion into a single scan when duplicate removal is enabled.
         if remove_duplicates:
-            converted_content, dup_changes = self._remove_duplicate_aliases(converted_content)
-            changes.extend(dup_changes)
-        
+            converted_content, merged_changes = self._remove_duplicates_and_add_checkcif_legacy(converted_content)
+            changes.extend(merged_changes)
+        else:
+            converted_content, compat_changes = self._add_checkcif_legacy_notation(converted_content)
+            changes.extend(compat_changes)
+
         converted_content, deprecated_changes = self._handle_deprecated_fields(
             converted_content, deprecated_fields_found
         )
         changes.extend(deprecated_changes)
         
-        converted_content, compat_changes = self._add_checkcif_legacy_notation(converted_content)
-        changes.extend(compat_changes)
-        
         self._append_unknown_fields_warning(changes, unknown_fields)
         
         return converted_content, changes
+
+    def _remove_duplicates_and_add_checkcif_legacy(self, cif_content: str) -> Tuple[str, List[str]]:
+        """Single pass over content for duplicate alias removal and checkCIF compatibility insertion."""
+        if not cif_content:
+            return cif_content, []
+
+        lines = cif_content.split('\n')
+        seen_fields: Dict[str, Tuple[int, str]] = {}
+        lines_to_remove: Set[int] = set()
+        changes: List[str] = []
+        in_text_block = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == ';':
+                in_text_block = not in_text_block
+                continue
+            if in_text_block:
+                continue
+
+            field_match = _FIELD_LINE_MATCH.match(line)
+            if not field_match:
+                continue
+
+            _indent, field_name, _rest = field_match.groups()
+            canonical = self.dict_manager.map_to_modern(field_name) or field_name
+            previous = seen_fields.get(canonical)
+            if previous is None:
+                seen_fields[canonical] = (i, field_name)
+                continue
+
+            prev_line, prev_field = previous
+            if '.' in field_name and '.' not in prev_field:
+                lines_to_remove.add(prev_line)
+                seen_fields[canonical] = (i, field_name)
+                changes.append(f"Removed duplicate legacy field {prev_field} (kept modern {field_name})")
+            else:
+                lines_to_remove.add(i)
+                changes.append(f"Removed duplicate field {field_name} (kept {prev_field})")
+
+        cleaned_lines = [line for idx, line in enumerate(lines) if idx not in lines_to_remove]
+
+        if not self.checkcif_compatibility_fields:
+            return '\n'.join(cleaned_lines), changes
+
+        existing_fields: Dict[str, Tuple[int, str, str]] = {}
+        for i, line in enumerate(cleaned_lines):
+            field_match = _FIELD_WITH_VALUE_MATCH.match(line)
+            if not field_match:
+                continue
+            indent, field_name, value = field_match.groups()
+            existing_fields[field_name] = (i, value, indent)
+
+        insertions: List[Tuple[int, str, str, str, str]] = []
+        for legacy_field in self.checkcif_compatibility_fields:
+            if self.dict_manager.is_field_deprecated(legacy_field):
+                modern_replacement = self.dict_manager.get_modern_replacement(legacy_field)
+                if modern_replacement and modern_replacement in existing_fields:
+                    continue
+                if legacy_field in existing_fields:
+                    continue
+
+            legacy_present = legacy_field in existing_fields
+            modern_equiv = self.dict_manager.map_to_modern(legacy_field)
+            modern_present = bool(modern_equiv and modern_equiv in existing_fields)
+
+            if modern_present and not legacy_present:
+                line_idx, value, indent = existing_fields[modern_equiv]
+                insertions.append((line_idx + 1, legacy_field, value, indent, modern_equiv))
+
+        for insert_idx, field_name, value, indent, modern_equiv in reversed(insertions):
+            cleaned_lines.insert(insert_idx, f"{indent}{field_name} {value}")
+            changes.append(f"Added legacy field {field_name} for checkCIF compatibility (alongside {modern_equiv})")
+
+        return '\n'.join(cleaned_lines), changes
 
     def convert_to_modern(self, cif_content: str, remove_duplicates: bool = True) -> Tuple[str, List[str]]:
         """
@@ -517,7 +600,7 @@ class CIFFormatConverter:
         
         # Check if line starts with a field name (allow hyphens, dots, brackets, slashes, etc.)
         # Handle both cases: field with value and field without value (loop definitions)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$', line)
+        field_match = _FIELD_LINE_MATCH.match(line)
         if not field_match:
             return line
         
@@ -559,7 +642,7 @@ class CIFFormatConverter:
         
         # Check if line starts with a CIF field name (allow dots, hyphens, brackets, slashes, etc.)
         # Handle both cases: field with value and field without value (loop definitions)
-        field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$', line)
+        field_match = _FIELD_LINE_MATCH.match(line)
         if not field_match:
             return line
         
@@ -621,11 +704,16 @@ class CIFFormatConverter:
         Returns:
             modern field name (e.g., '_cell.length_a') based on dictionary lookups
         """
+        cached = self._modern_field_conversion_cache.get(field_name)
+        if cached is not None:
+            return cached
+
         # Check if this is a deprecated field with a modern replacement
         # (e.g., _cell_measurement_temperature -> _diffrn.ambient_temperature)
         if self.dict_manager.is_field_deprecated(field_name):
             modern_replacement = self.dict_manager.get_modern_replacement(field_name)
             if modern_replacement and modern_replacement != field_name:
+                self._modern_field_conversion_cache[field_name] = modern_replacement
                 return modern_replacement
         
         # Otherwise, use standard modern equivalent (alias conversion)
@@ -633,10 +721,12 @@ class CIFFormatConverter:
         modern_equivalent = self.dict_manager.map_to_modern(field_name)
         
         if modern_equivalent:
+            self._modern_field_conversion_cache[field_name] = modern_equivalent
             return modern_equivalent
             
         # If not found in dictionary, return original field name unchanged
         # (This preserves unknown/custom fields)
+        self._modern_field_conversion_cache[field_name] = field_name
         return field_name
     
     def _convert_field_to_legacy(self, field_name: str) -> str:
@@ -845,7 +935,7 @@ class CIFFormatConverter:
         stripped = value_part.lstrip()
         if stripped.startswith("'") or stripped.startswith('"'):
             return value_part   # Quoted string — leave as-is
-        m = re.search(r'\s#', value_part)
+        m = _INLINE_COMMENT_MARKER.search(value_part)
         if m:
             return value_part[: m.start()].rstrip()
         return value_part
@@ -908,7 +998,7 @@ class CIFFormatConverter:
                 continue
             
             # Match field definitions (both standalone and in loops)
-            field_match = re.match(r'^(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s', line)
+            field_match = _FIELD_IN_CONTENT_MATCH.match(line)
             if field_match:
                 field_name = field_match.group(1)
                 
@@ -986,7 +1076,7 @@ class CIFFormatConverter:
             if in_text_block:
                 continue
             
-            field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s+(.+)$', line)
+            field_match = _FIELD_WITH_VALUE_MATCH.match(line)
             if field_match:
                 indent, field_name, value = field_match.groups()
                 existing_fields[field_name] = (i, value, indent)
