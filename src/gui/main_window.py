@@ -92,11 +92,11 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         
         # Set up syntax highlighter field validator callback
         def _field_validator_callback(field_name: str) -> str:
-            if '.' in field_name and self.dict_manager.is_known_field(field_name):
+            result = self.data_name_validator.validate_field(field_name)
+            if result.category.value == "valid" and '.' in field_name:
                 canonical = self.dict_manager.map_to_modern(field_name) or field_name
                 if self.dict_manager.map_to_legacy(canonical) is None:
                     return "modern_only"
-            result = self.data_name_validator.validate_field(field_name)
             return result.category.value
         self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
         
@@ -1463,8 +1463,8 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
 
             in_text_block = False
             modern_fields = 0
-            convertible_modern_fields = 0
-            field_pattern = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
+            modern_only_fields = 0
+            field_pattern = re.compile(r'^(\s*)(_[^\s#]+)')
 
             for line in cif_content.split('\n'):
                 stripped = line.strip()
@@ -1485,10 +1485,17 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     continue
 
                 modern_fields += 1
-                if self.dict_manager.map_to_legacy(field_name) is not None:
-                    convertible_modern_fields += 1
+                validation = self.data_name_validator.validate_field(field_name)
+                if validation.category != FieldCategory.VALID:
+                    return False
 
-            return modern_fields > 0 and convertible_modern_fields == 0
+                canonical = self.dict_manager.map_to_modern(field_name) or field_name
+                if self.dict_manager.map_to_legacy(canonical) is None:
+                    modern_only_fields += 1
+                else:
+                    return False
+
+            return modern_fields > 0 and modern_only_fields == modern_fields
 
         if not content.strip():
             self._compliance_label.setText("")
@@ -1628,10 +1635,11 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self.data_name_validator = DataNameValidator(self.dict_manager)
             # Re-setup the syntax highlighter callback
             def _field_validator_callback(field_name: str) -> str:
-                if '.' in field_name and self.dict_manager.is_known_field(field_name):
-                    if self.dict_manager.map_to_legacy(field_name) is None:
-                        return "modern_only"
                 result = self.data_name_validator.validate_field(field_name)
+                if result.category.value == "valid" and '.' in field_name:
+                    canonical = self.dict_manager.map_to_modern(field_name) or field_name
+                    if self.dict_manager.map_to_legacy(canonical) is None:
+                        return "modern_only"
                 return result.category.value
             self.cif_text_editor.highlighter.set_field_validator(_field_validator_callback)
             self.cif_text_editor.highlighter.rehighlight()

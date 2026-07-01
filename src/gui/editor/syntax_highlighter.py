@@ -86,8 +86,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         self.field_format = QTextCharFormat()
         self.field_format.setForeground(QColor("#800080"))  # Purple
         
-        # Field name pattern for manual matching (not in highlighting_rules when validator is set)
-        self._field_pattern = QRegularExpression(r'^\s*(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)')
+        # Field token pattern for manual matching (not in highlighting_rules when validator is set)
+        # Capture the full non-whitespace token so malformed suffixes (e.g. trailing quotes)
+        # are preserved for validation/classification instead of being silently truncated.
+        self._field_pattern = QRegularExpression(r'^\s*(_[^\s#]+)')
         
         # Add to highlighting rules (used only when no validator is set)
         self.highlighting_rules.append((

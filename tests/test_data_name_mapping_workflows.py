@@ -71,6 +71,14 @@ def test_is_known_field_true_for_core_field_false_for_unknown_field():
     assert manager.is_known_field("_definitely_not_a_real_cif_field_name") is False
 
 
+def test_is_known_field_rejects_wrong_dot_position_false_positive():
+    manager = _manager()
+
+    # This looks similar to valid audit-contact names but resolves to a different
+    # canonical field family and must not be accepted as known.
+    assert manager.is_known_field("_audit_contact.author_address") is False
+
+
 def test_get_modern_replacement_for_deprecated_field_with_explicit_replacement():
     manager = _manager()
 

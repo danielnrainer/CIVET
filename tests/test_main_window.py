@@ -1,10 +1,14 @@
 """Behavior-focused tests for main window workflows."""
 
+from types import SimpleNamespace
+
 import pytest
 from PyQt6.QtWidgets import QApplication
 
 from gui import main_window
 from gui.main_window import CIFEditor
+from utils.cif_dictionary_manager import FieldNotation
+from utils.data_name_validator import FieldCategory, FieldValidationResult
 from utils import cif_data_validator as cif_data_validator_module
 from utils.cif_data_validator import ValidationIssue
 
@@ -142,3 +146,46 @@ def test_main_window_validate_data_values_rejects_empty_content(editor, monkeypa
 
     assert captured_messages
     assert captured_messages[0][0] == "No Content"
+
+
+def test_status_notation_mixed_with_unknown_dotted_field_stays_mixed(editor, monkeypatch):
+    # Keep syntax-status path deterministic and focus on notation label behavior.
+    monkeypatch.setattr(
+        "utils.cif_syntax_compliance.check_compliance",
+        lambda _content: {"cif1": [SimpleNamespace(severity="error")],
+                          "cif2": [SimpleNamespace(severity="error")]},
+    )
+    monkeypatch.setattr(editor.dict_manager, "detect_notation", lambda _content: FieldNotation.MIXED)
+    monkeypatch.setattr(editor.data_name_validator, "validate_field", lambda field_name: FieldValidationResult(
+        field_name=field_name,
+        category=FieldCategory.UNKNOWN,
+        line_number=0,
+        description="Unknown field",
+    ))
+
+    content = "data_test\n_cell_length_a 5.0\n_audit_contact.author_address value\n"
+    editor._update_compliance_status(content)
+
+    assert editor._status_notation_label.text() == "⚠ Mixed"
+
+
+def test_status_notation_mixed_with_valid_modern_only_fields_uses_legacy_except_label(editor, monkeypatch):
+    monkeypatch.setattr(
+        "utils.cif_syntax_compliance.check_compliance",
+        lambda _content: {"cif1": [SimpleNamespace(severity="error")],
+                          "cif2": [SimpleNamespace(severity="error")]},
+    )
+    monkeypatch.setattr(editor.dict_manager, "detect_notation", lambda _content: FieldNotation.MIXED)
+    monkeypatch.setattr(editor.data_name_validator, "validate_field", lambda field_name: FieldValidationResult(
+        field_name=field_name,
+        category=FieldCategory.VALID,
+        line_number=0,
+        description="Known in dictionary",
+    ))
+    monkeypatch.setattr(editor.dict_manager, "map_to_modern", lambda field_name: field_name)
+    monkeypatch.setattr(editor.dict_manager, "map_to_legacy", lambda _field_name: None)
+
+    content = "data_test\n_cell_length_a 5.0\n_audit_contact.author_name value\n"
+    editor._update_compliance_status(content)
+
+    assert editor._status_notation_label.text() == "Legacy (except un-aliased modern fields)"

@@ -897,13 +897,12 @@ class CIFDictionaryManager:
             field_name in self._modern_to_legacy):
             return True
         
-        # For modern format fields (with dots), also check if the legacy equivalent exists
+        # For modern format fields (with dots), only treat underscore variants as known
+        # when they map back to the same canonical modern definition.
         if '.' in field_name:
             legacy_equivalent = field_name.replace('.', '_')
-            if (legacy_equivalent.lower() in self._legacy_to_modern or 
-                legacy_equivalent.lower() in self._modern_to_legacy or
-                legacy_equivalent in self._legacy_to_modern or 
-                legacy_equivalent in self._modern_to_legacy):
+            canonical_modern = self.map_to_modern(legacy_equivalent)
+            if canonical_modern and canonical_modern.lower() == field_name_lower:
                 return True
         
         # For legacy format fields (with underscores), check if modern equivalent exists
