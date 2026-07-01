@@ -167,7 +167,8 @@ class CIFValueValidationDialog(QDialog):
             if issue.line_number:
                 item.setData(2, Qt.ItemDataRole.UserRole, issue.line_number)
                 # Use zero-padded string so text-sort keeps numeric order
-                item.setText(2, f"{issue.line_number:06d}")
+                # item.setText(2, f"{issue.line_number:06d}")
+                item.setText(2, f"{issue.line_number}")
 
             item.setData(0, Qt.ItemDataRole.UserRole + 1, issue)  # store full issue
 

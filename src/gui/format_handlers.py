@@ -423,7 +423,7 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
                 summary += f"• Line {item['line_number']}: {item['original']}\n"
                 summary += f"  → Should be: {item['suggested']}\n\n"
             
-            summary += "These fields use incorrect underscore-only format instead of the proper category.attribute format.\n\n"
+            summary += "These fields appear to use malformed data-name notation and can be auto-corrected.\n\n"
             summary += "Would you like to fix all of these field names?"
             
             # Ask user to confirm

@@ -79,6 +79,47 @@ def test_is_known_field_rejects_wrong_dot_position_false_positive():
     assert manager.is_known_field("_audit_contact.author_address") is False
 
 
+def test_guess_modern_equivalent_detects_misplaced_dot_name():
+    manager = _manager()
+
+    suggested = manager.guess_modern_equivalent("_audit_contact.author_address")
+
+    assert suggested == "_audit_contact_author.address"
+
+
+def test_find_malformed_fields_detects_misplaced_dot_name():
+    manager = _manager()
+    content = "data_t\n_audit_contact.author_address ;Street\n;\n"
+
+    malformed = manager.find_malformed_fields(content)
+
+    assert len(malformed) == 1
+    assert malformed[0]["original"] == "_audit_contact.author_address"
+    assert malformed[0]["suggested"] == "_audit_contact_author.address"
+
+
+def test_find_malformed_fields_prefers_legacy_suggestion_for_legacy_notation_file():
+    manager = _manager()
+    content = "data_t\n_cell_length_a 5.0\n_audit_contact.author_address ;Street\n;\n"
+
+    malformed = manager.find_malformed_fields(content)
+
+    assert len(malformed) == 1
+    assert malformed[0]["original"] == "_audit_contact.author_address"
+    assert malformed[0]["suggested"] == "_audit_contact_author_address"
+
+
+def test_find_malformed_fields_prefers_legacy_suggestion_for_mixed_notation_file():
+    manager = _manager()
+    content = "data_t\n_cell_length_a 5.0\n_cell.length_b 6.0\n_audit_contact.author_address ;Street\n;\n"
+
+    malformed = manager.find_malformed_fields(content)
+
+    assert len(malformed) == 1
+    assert malformed[0]["original"] == "_audit_contact.author_address"
+    assert malformed[0]["suggested"] == "_audit_contact_author_address"
+
+
 def test_get_modern_replacement_for_deprecated_field_with_explicit_replacement():
     manager = _manager()
 

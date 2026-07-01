@@ -1360,9 +1360,10 @@ class CIFDictionaryManager:
         Find malformed field names that look like incorrectly formatted versions 
         of known dictionary fields.
         
-        This detects fields like '_diffrn_total_exposure_time' which should be 
-        '_diffrn.total_exposure_time'. These are unknown fields that can be 
-        automatically corrected by converting underscores to dots.
+        This detects fields like '_diffrn_total_exposure_time' which should be
+        '_diffrn.total_exposure_time', as well as misplaced-dot forms like
+        '_audit_contact.author_address' which should be
+        '_audit_contact_author.address'.
         
         Args:
             content: CIF file content
@@ -1377,6 +1378,8 @@ class CIFDictionaryManager:
         self._ensure_loaded()
         malformed_fields = []
         lines = content.splitlines()
+        notation = self.detect_notation(content)
+        prefer_legacy = notation in (FieldNotation.LEGACY, FieldNotation.MIXED)
         
         for line_num, line in enumerate(lines, 1):
             line_stripped = line.strip()
@@ -1395,13 +1398,16 @@ class CIFDictionaryManager:
             if self.is_known_field(field_name):
                 continue
             
-            # Skip if already has a dot (modern format) - those are either valid or truly unknown
-            if '.' in field_name:
-                continue
-            
-            # Try to guess the correct modern name by converting underscore to dot
-            # Strategy: Try placing the dot after each underscore and check if known
-            suggestion = self._guess_modern_equivalent(field_name)
+            # Try to guess a corrected known name. This handles:
+            # - underscore-only malformed fields
+            # - misplaced-dot malformed fields
+            modern_suggestion = self._guess_modern_equivalent(field_name)
+
+            suggestion = modern_suggestion
+            if modern_suggestion and prefer_legacy:
+                legacy_suggestion = self.map_to_legacy(modern_suggestion)
+                if legacy_suggestion:
+                    suggestion = legacy_suggestion
             
             if suggestion:
                 malformed_fields.append({
@@ -1416,24 +1422,46 @@ class CIFDictionaryManager:
     def guess_modern_equivalent(self, field_name: str) -> Optional[str]:
         """
         Try to guess the correct modern (dot notation) equivalent of a malformed field.
-        
-        For a field like '_diffrn_total_exposure_time', tries:
-            - '_diffrn.total_exposure_time' (most likely)
-            - '_diffrn_total.exposure_time'
-            - '_diffrn_total_exposure.time'
+
+        Handles both underscore-only malformed names and names with misplaced dots.
+
+        Examples:
+            - '_diffrn_total_exposure_time' -> '_diffrn.total_exposure_time'
+            - '_audit_contact.author_address' -> '_audit_contact_author.address'
         
         Args:
-            field_name: Malformed field name (underscore only, no dots)
+            field_name: Potentially malformed field name
             
         Returns:
             The correct modern field name if found, None otherwise
         """
         self._ensure_loaded()
+        field_name = field_name.strip()
+
         if not field_name.startswith('_'):
             return None
+
+        # Known names are not malformed.
+        if self.is_known_field(field_name):
+            return None
+
+        def _to_known_modern(name: str) -> Optional[str]:
+            """Return canonical modern name if *name* is known, else None."""
+            if not self.is_known_field(name):
+                return None
+            return self.map_to_modern(name) or name
+
+        # If a dotted field is malformed, flattening separators often reveals a
+        # known legacy alias. Convert that alias to canonical modern if possible.
+        if '.' in field_name:
+            collapsed_legacy = field_name.replace('.', '_')
+            modern_from_collapsed = _to_known_modern(collapsed_legacy)
+            if modern_from_collapsed and modern_from_collapsed.lower() != field_name.lower():
+                return modern_from_collapsed
         
         # Remove leading underscore for processing
         name_without_prefix = field_name[1:]
+        name_without_prefix = name_without_prefix.replace('.', '_')
         parts = name_without_prefix.split('_')
         
         if len(parts) < 2:
@@ -1444,10 +1472,10 @@ class CIFDictionaryManager:
             category = '_'.join(parts[:i])
             attribute = '_'.join(parts[i:])
             guessed_name = f"_{category}.{attribute}"
-            
-            # Check if this guessed name exists in the dictionary
-            if self.is_known_field(guessed_name):
-                return guessed_name
+
+            known_modern = _to_known_modern(guessed_name)
+            if known_modern and known_modern.lower() != field_name.lower():
+                return known_modern
         
         return None
     

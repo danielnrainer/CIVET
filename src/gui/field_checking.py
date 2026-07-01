@@ -845,7 +845,7 @@ class FieldCheckingMixin:
             if len(malformed) > 5:
                 summary += f"• ... and {len(malformed) - 5} more\n"
             
-            summary += "\nThese fields use incorrect underscore-only format. "
+            summary += "\nThese fields use malformed data-name notation. "
             summary += "Fixing them will prevent duplicates when the correct fields are added during checks.\n\n"
             summary += "Would you like to fix these field names now?"
             

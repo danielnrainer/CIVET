@@ -216,21 +216,22 @@ class DataNameValidator:
             self._validation_cache[cache_key] = result
             return result
         
-        # Check if field is a malformed version of a known field
-        # e.g. _diffrn_flux_density → _diffrn.flux_density
-        if '.' not in field_name_lower:
-            modern_equiv = self.dict_manager.guess_modern_equivalent(field_name)
-            if modern_equiv:
-                result = FieldValidationResult(
-                    field_name=field_name,
-                    category=FieldCategory.MALFORMED,
-                    line_number=line_number,
-                    description=f"Should be {modern_equiv}",
-                    suggested_format=modern_equiv,
-                    prefix=prefix
-                )
-                self._validation_cache[cache_key] = result
-                return result
+        # Check if field is a malformed version of a known field.
+        # Examples:
+        # - _diffrn_flux_density -> _diffrn.flux_density
+        # - _audit_contact.author_address -> _audit_contact_author.address
+        modern_equiv = self.dict_manager.guess_modern_equivalent(field_name)
+        if modern_equiv:
+            result = FieldValidationResult(
+                field_name=field_name,
+                category=FieldCategory.MALFORMED,
+                line_number=line_number,
+                description=f"Should be {modern_equiv}",
+                suggested_format=modern_equiv,
+                prefix=prefix
+            )
+            self._validation_cache[cache_key] = result
+            return result
         
         # Check if field uses a registered IUCr prefix
         if is_registered_prefix(field_name):
@@ -388,6 +389,11 @@ class DataNameValidator:
 
                 report.deprecated_fields.append(result)
             elif result.category == FieldCategory.MALFORMED:
+                if result.suggested_format and prefer_legacy:
+                    legacy_suggestion = self.dict_manager.map_to_legacy(result.suggested_format)
+                    if legacy_suggestion:
+                        result.suggested_format = legacy_suggestion
+                        result.description = f"Should be {legacy_suggestion}"
                 report.malformed_fields.append(result)
         
         return report
