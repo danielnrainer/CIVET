@@ -62,6 +62,8 @@ a = Analysis(
         # Application modules - Main application structure
         'gui',
         'gui.main_window',
+        'gui.field_checking',
+        'gui.format_handlers',
         'gui.collapsible_box',
         'gui.data_name_integrity',
         'gui.editor',

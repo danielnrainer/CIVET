@@ -2,10 +2,10 @@
 # Dependencies required to run CIVET from source.
 
 # GUI framework - core runtime requirement
-PyQt6>=6.4.0
+PyQt6>=6.4,<7
 
 # HTTP client for dictionary downloads and update checks
-requests>=2.28.0
+requests>=2.28,<3
 
 # Build, development, and test tooling is listed in requirements-dev.txt.
 

@@ -1,9 +1,10 @@
+# Include runtime dependencies for dev environments
+-r requirements.txt
+
 # Build tooling
-pyinstaller>=5.13.0
+pyinstaller>=5.13
 
 # Test tooling
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-qt>=4.2.0
-pytest-mock>=3.11.0
-coverage>=7.2.0
+pytest>=7.4
+pytest-cov>=4.1
+coverage>=7.2
