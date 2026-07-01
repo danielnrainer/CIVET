@@ -90,6 +90,80 @@ def test_main_window_open_file_loads_content(editor, tmp_path):
     assert editor.modified is False
 
 
+def test_select_initial_file_uses_python_cli_argument(editor, tmp_path, monkeypatch):
+    _stub_window_updates(editor)
+    cif_path = tmp_path / "cli_open.cif"
+    cif_path.write_text("data_test\n", encoding="utf-8")
+
+    opened = []
+    monkeypatch.setattr(editor, "open_file", lambda initial=False: opened.append((initial, editor.current_file)))
+    monkeypatch.setattr(main_window.sys, "argv", ["main.py", str(cif_path)])
+    monkeypatch.setattr(main_window.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(
+        main_window.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: pytest.fail("file dialog should not open for valid CLI path"),
+    )
+
+    editor.select_initial_file()
+
+    assert opened == [(True, str(cif_path.resolve()))]
+
+
+def test_select_initial_file_ignores_cli_argument_when_frozen(editor, tmp_path, monkeypatch):
+    _stub_window_updates(editor)
+    cif_path = tmp_path / "frozen_mode.cif"
+    cif_path.write_text("data_test\n", encoding="utf-8")
+
+    opened = []
+    dialog_calls = []
+    monkeypatch.setattr(editor, "open_file", lambda initial=False: opened.append((initial, editor.current_file)))
+    monkeypatch.setattr(main_window.sys, "argv", ["CIVET.exe", str(cif_path)])
+    monkeypatch.setattr(main_window.sys, "frozen", True, raising=False)
+
+    def _dialog_stub(*args, **kwargs):
+        _ = (args, kwargs)
+        dialog_calls.append(True)
+        return str(cif_path), "CIF Files (*.cif)"
+
+    monkeypatch.setattr(
+        main_window.QFileDialog,
+        "getOpenFileName",
+        _dialog_stub,
+    )
+
+    editor.select_initial_file()
+
+    assert dialog_calls == [True]
+    assert opened == [(True, str(cif_path))]
+
+
+def test_select_initial_file_warns_and_falls_back_for_missing_cli_path(editor, monkeypatch):
+    _stub_window_updates(editor)
+    missing_path = "definitely_missing_file_for_cli_open.cif"
+
+    warnings = []
+    infos = []
+    dialog_calls = []
+    monkeypatch.setattr(main_window.sys, "argv", ["main.py", missing_path])
+    monkeypatch.setattr(main_window.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(main_window.QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[1:3]))
+    monkeypatch.setattr(main_window.QMessageBox, "information", lambda *args, **kwargs: infos.append(args[1:3]))
+    monkeypatch.setattr(
+        main_window.QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (dialog_calls.append(True) and "", ""),
+    )
+
+    editor.select_initial_file()
+
+    assert warnings
+    assert warnings[0][0] == "File Not Found"
+    assert dialog_calls == [True]
+    assert infos
+    assert infos[0][0] == "No File Selected"
+
+
 def test_main_window_save_file_overwrites_existing_content(editor, tmp_path, monkeypatch):
     _stub_window_updates(editor)
     cif_path = tmp_path / "save_target.cif"

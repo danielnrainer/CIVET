@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 from io import TextIOWrapper
 
 from PyQt6.QtWidgets import QApplication
@@ -13,6 +14,21 @@ def _configure_utf8_stream(stream):
     """Configure UTF-8 output for standard streams when supported."""
     if isinstance(stream, TextIOWrapper):
         stream.reconfigure(encoding='utf-8', errors='replace')
+
+
+def _parse_cli_args(argv):
+    """Parse optional CLI arguments while allowing unknown Qt arguments."""
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="Launch CIVET GUI. Optionally open a CIF file at startup.",
+    )
+    parser.add_argument(
+        "cif_file",
+        nargs="?",
+        help="Optional path to a CIF file to open on startup.",
+    )
+    args, _ = parser.parse_known_args(argv)
+    return args
 
 
 def main():
@@ -40,6 +56,9 @@ def main():
     except (AttributeError, TypeError):
         # Fallback for environments where reconfigure is not available
         pass
+
+    # Optional positional startup file. If omitted, GUI defaults to file picker.
+    _parse_cli_args(sys.argv[1:])
     
     app = QApplication(sys.argv)
     

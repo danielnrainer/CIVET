@@ -61,55 +61,55 @@ a = Analysis(
         
         # Application modules - Main application structure
         'gui',
-        'gui.main_window',
-        'gui.field_checking',
-        'gui.format_handlers',
         'gui.collapsible_box',
         'gui.data_name_integrity',
+        'gui.field_checking',
+        'gui.format_handlers',
+        'gui.main_window',
         'gui.editor',
-        'gui.editor.text_editor',
         'gui.editor.syntax_highlighter',
+        'gui.editor.text_editor',
         'gui.dialogs',
+        'gui.dialogs.about_dialog',
         'gui.dialogs.cif_syntax_compliance_dialog',
-        'gui.dialogs.non_ascii_conversion_dialog',
-        'gui.dialogs.input_dialog',
-        'gui.dialogs.multiline_dialog', 
+        'gui.dialogs.cif_value_validation_dialog',
         'gui.dialogs.config_dialog',
-        'gui.dialogs.field_conflict_dialog',
+        'gui.dialogs.critical_issues_dialog',
+        'gui.dialogs.data_name_validation_dialog',
         'gui.dialogs.dictionary_info_dialog',
         'gui.dialogs.dictionary_search_dialog',
         'gui.dialogs.dictionary_suggestion_dialog',
+        'gui.dialogs.editor_settings_dialog',
+        'gui.dialogs.field_conflict_dialog',
         'gui.dialogs.field_rules_validation_dialog',
         'gui.dialogs.format_conversion_dialog',
-        'gui.dialogs.editor_settings_dialog',
-        'gui.dialogs.about_dialog',
-        'gui.dialogs.data_name_validation_dialog',
-        'gui.dialogs.cif_value_validation_dialog',
-        'gui.dialogs.critical_issues_dialog',
+        'gui.dialogs.input_dialog',
+        'gui.dialogs.multiline_dialog', 
+        'gui.dialogs.non_ascii_conversion_dialog',
         'gui.dialogs.recognised_prefixes_dialog',
         'version',
         
         # Utility modules - Core functionality
         'utils',
-        'utils.CIF_field_parsing',
-        'utils.CIF_parser',
-        'utils.cif_dictionary_manager',
-        'utils.cif_format_converter',
-        'utils.cif_dictionary_parser',
         'utils.cif_char_encoding',
-        'utils.cif_syntax_compliance',
         'utils.cif_data_name_integrity',
-        'utils.dictionary_suggestion_manager',
-        'utils.field_rules_validator',
-        'utils.user_config',              # Unified configuration management
-        'utils.user_field_rules',         # User field rules management
-        'utils.registered_prefixes',      # CIF prefix registry
-        'utils.data_name_validator',      # CIF data name validation
         'utils.cif_data_validator',        # CIF data value validation (types, enums, loops)
-        'utils.cif2_value_formatting',    # CIF2 value formatting
-        'utils.format_compatibility_warning',  # Modern format warning system
         'utils.cif_ddl1_parser',          # DDL1 dictionary format parser
         'utils.cif_dictionary_format',    # Dictionary format detection and factory
+        'utils.cif_dictionary_manager',
+        'utils.cif_dictionary_parser',
+        'utils.CIF_field_parsing',
+        'utils.cif_format_converter',
+        'utils.CIF_parser',
+        'utils.cif_syntax_compliance',
+        'utils.cif2_value_formatting',    # CIF2 value formatting
+        'utils.data_name_validator',      # CIF data name validation
+        'utils.dictionary_suggestion_manager',
+        'utils.field_rules_validator',
+        'utils.format_compatibility_warning',  # Modern format warning system
+        'utils.registered_prefixes',      # CIF prefix registry
+        'utils.user_config',              # Unified configuration management
+        'utils.user_field_rules',         # User field rules management
         
         # Third-party libraries
         'requests',
@@ -135,12 +135,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Exclude unused modules to reduce size
-        'tkinter',         # We use PyQt6, not tkinter
-        'matplotlib',      # Not used in this application
-        'numpy',           # Not used in this application  
-        'pandas',          # Not used in this application
-        'PIL',             # Not used in this application
         # Test and coverage tooling not needed in compiled distributions
         'pytest',
         'pytest_cov',

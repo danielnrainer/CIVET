@@ -870,6 +870,21 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     lines[field_index] = f"{field_name} {formatted_value}"
 
     def select_initial_file(self):
+        # Python run only: allow an initial CIF path as the first positional arg.
+        if not getattr(sys, "frozen", False) and len(sys.argv) > 1:
+            cli_path = sys.argv[1]
+            if cli_path and not cli_path.startswith("-"):
+                resolved_path = os.path.abspath(cli_path)
+                if os.path.isfile(resolved_path):
+                    self.current_file = resolved_path
+                    self.open_file(initial=True)
+                    return
+                QMessageBox.warning(
+                    self,
+                    "File Not Found",
+                    f"Could not open command-line file:\n{resolved_path}",
+                )
+
         file_filter = "CIF Files (*.cif);;All Files (*.*)"
         self.current_file, _ = QFileDialog.getOpenFileName(
             self, "Select a CIF File", "", file_filter)
