@@ -93,3 +93,46 @@ def test_ensure_cif1_compliant_raises_for_cif2_constructs(converter: CIFFormatCo
 
     with pytest.raises(ValueError):
         converter.ensure_cif1_compliant(content)
+
+
+def test_notation_conversion_ignores_legacy_field_echoed_in_semicolon_block(converter: CIFFormatConverter):
+    """Regression: an _iucr_refine_fcf_details-style echo of a legacy field
+    inside a ';' text block (including inline content on the opening line)
+    must not be converted or removed."""
+    content = "\n".join(
+        [
+            "data_test",
+            "_cell_length_a 5.0",
+            "_iucr_refine_fcf_details",
+            "; some notes about _cell_length_a and the refinement",
+            "_cell_length_a should stay untouched here too",
+            ";",
+            "",
+        ]
+    )
+
+    converted, _ = converter.convert_to_modern_notation(content)
+
+    assert "; some notes about _cell_length_a and the refinement" in converted
+    assert "_cell_length_a should stay untouched here too" in converted
+    assert "_cell.length_a 5.0" in converted
+
+
+def test_notation_conversion_ignores_legacy_field_echoed_in_triple_quoted_block(converter: CIFFormatConverter):
+    """Regression: CIF 2.0 triple-quoted multiline values must be treated the
+    same as ';' text blocks - content inside is never converted."""
+    content = "\n".join(
+        [
+            "data_test",
+            "_cell_length_a 5.0",
+            '_dummy_data_name    """',
+            "_cell_length_a should stay untouched here",
+            '"""',
+            "",
+        ]
+    )
+
+    converted, _ = converter.convert_to_modern_notation(content)
+
+    assert "_cell_length_a should stay untouched here" in converted
+    assert "_cell.length_a 5.0" in converted

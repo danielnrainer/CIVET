@@ -10,6 +10,13 @@ The code in this project has been written in large parts by Anthropic LLM models
 *Be advised that this software is in constant development and might therefore contain bugs or other unintended behaviour.
 Always check your CIF files carefully and if you encounter an issue and would like to report it, please do so via the [Issues](https://github.com/danielnrainer/CIVET/issues) section.*
 
+## Known checkCIF Compatibility Notes
+
+A few CIVET behaviours exist specifically to keep files compatible for example with IUCr's checkCIF service:
+
+- **Multiline text blocks are never rewritten.** Content inside a semicolon-delimited (`;...;`) or CIF 2.0 triple-quoted (`"""..."""` / `'''...'''`) value — such as the reflection/refinement narrative in `_iucr_refine_fcf_details` — is treated as opaque text. CIVET does not convert notation, flag deprecated data names, or otherwise modify anything inside these blocks, even if the text happens to contain data-name-like strings (e.g. software echoing part of the CIF back into a details block). This is intentional: checkCIF and other downstream tools may expect that content to survive untouched. I will review this periodically and change the behaviour if it becomes safe to do so.
+- **Some legacy data names are deliberately retained alongside their modern successors.** For example, `_cell_measurement_temperature` is kept even when the modern `_diffrn_ambient_temperature` is present, because checkCIF's [PLAT197](https://journals.iucr.org/services/cif/checking/PLAT197.html) check does not yet recognise the modern name. The full list of these data names (as far as I am aware) lives in [field_rules/checkcif_compatibility.cif_rules](field_rules/checkcif_compatibility.cif_rules) and is reviewed periodically as checkCIF is updated.
+
 ## Key Features (v1.3)
 
 - **CIF Editing and Validation**: Syntax highlighting, guided dialogs, smart field checks, and duplicate/alias-aware workflows.

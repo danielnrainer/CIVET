@@ -18,6 +18,62 @@ import re
 from typing import Dict, Any, List, Tuple, Optional
 
 
+class TextBlockTracker:
+    """Tracks whether a line lies inside a multiline CIF text value.
+
+    Covers both CIF 1.1 semicolon-delimited text fields (';') and CIF 2.0
+    triple-quoted values ('\"\"\"' or "'''"), so line-based scanners can
+    avoid mistaking field-like text inside such a value (e.g. an echoed CIF
+    fragment inside an _iucr_refine_fcf_details block) for a real field.
+
+    Feed each line (stripped of surrounding whitespace) to consume() in
+    order. It returns True when the line is a text-block delimiter or lies
+    inside an open text block - such lines should be skipped (or, when
+    rebuilding content, preserved verbatim) rather than parsed as CIF
+    structure.
+    """
+
+    _TRIPLE_QUOTE_DELIMS = ('"""', "'''")
+
+    def __init__(self):
+        self._in_semicolon_block = False
+        self._triple_quote_delim: Optional[str] = None
+
+    @property
+    def in_block(self) -> bool:
+        return self._in_semicolon_block or self._triple_quote_delim is not None
+
+    def consume(self, line_stripped: str) -> bool:
+        """Update block state for one line; returns True if it should be
+        treated as text-block content (delimiter or interior line)."""
+        if self._triple_quote_delim is not None:
+            if self._triple_quote_delim in line_stripped:
+                self._triple_quote_delim = None
+            return True
+
+        # Per the CIF grammar, a line inside a semicolon text field can never
+        # itself start with ';' except at the closing delimiter, and the
+        # opening ';' may carry content on the same line (e.g. "; some text").
+        if line_stripped.startswith(';'):
+            self._in_semicolon_block = not self._in_semicolon_block
+            return True
+
+        if self._in_semicolon_block:
+            return True
+
+        # A field/value line may open an unterminated triple-quoted value,
+        # e.g. `_field """` or `_field """some text`. An even number of
+        # occurrences means any triple-quoted values on this line are
+        # already closed; an odd number means one was opened and continues
+        # on subsequent lines.
+        for delim in self._TRIPLE_QUOTE_DELIMS:
+            if line_stripped.count(delim) % 2 == 1:
+                self._triple_quote_delim = delim
+                break
+
+        return False
+
+
 class CIFField:
     """Represents a single CIF field instance parsed from a CIF file.
     
@@ -99,22 +155,15 @@ class CIFParser:
         """
         if not dict_manager:
             return "No dictionary manager provided"
-            
+
         added_fields = []
         deprecated_field_objs = []
-        
-        # Define critical deprecated fields that validation tools often still require
-        critical_deprecated_fields = [
-            '_cell_measurement_temperature',
-            '_cell_measurement_reflns_used',
-            '_cell_measurement_pressure',
-            '_cell_measurement_radiation',
-            '_cell_measurement_wavelength',
-            '_diffrn_source',
-            '_diffrn_radiation_type',
-            '_diffrn_radiation_wavelength'
-        ]
-        
+
+        # Fields validation tools (like checkCIF/PLAT) often still require in
+        # legacy notation - see field_rules/checkcif_compatibility.cif_rules,
+        # the single source of truth for this list.
+        critical_deprecated_fields = sorted(dict_manager.get_checkcif_compatibility_fields())
+
         # Check each critical field
         for deprecated_field in critical_deprecated_fields:
             # Get the modern equivalent

@@ -90,6 +90,41 @@ def test_convert_cif_format_to_legacy_keeps_existing_preferred_alias():
     assert changes == []
 
 
+def test_resolution_does_not_touch_alias_text_echoed_inside_text_block():
+    """Regression: field-like text inside a semicolon block (e.g. an
+    _iucr_refine_fcf_details echo) must survive conflict resolution untouched,
+    and must not itself be treated as a conflicting occurrence to resolve."""
+    manager = _build_manager()
+
+    content = "\n".join(
+        [
+            "data_test",
+            "_diffrn_detector.make 'Rigaku HyPix-ED'",
+            "_diffrn_detector.type 'Rigaku HyPix'",
+            "_iucr_refine_fcf_details",
+            ";",
+            "_diffrn_detector.make 'should not be touched'",
+            ";",
+            "",
+        ]
+    )
+
+    resolutions = {
+        "_diffrn_detector.make": (
+            "_diffrn_detector.make",
+            "Rigaku HyPix-ED",
+            False,
+        )
+    }
+
+    resolved_content, changes = manager.apply_field_conflict_resolutions(content, resolutions)
+
+    assert "_diffrn_detector.make 'should not be touched'" in resolved_content
+    lines = resolved_content.splitlines()
+    make_lines = [l for l in lines if l.strip().startswith("_diffrn_detector.make")]
+    assert len(make_lines) == 2  # one resolved occurrence, one untouched echo inside the block
+
+
 def test_resolution_can_keep_aliases_and_sync_values():
     manager = _build_manager()
 

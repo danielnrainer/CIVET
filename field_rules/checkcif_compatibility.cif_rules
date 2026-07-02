@@ -1,29 +1,45 @@
 # checkCIF Compatibility Configuration
 # =====================================
-# 
+#
 # This file lists CIF field names that checkCIF validation does not recognize in modern format.
 # For these fields, we retain BOTH the modern format AND the legacy format to ensure compatibility.
 #
-# Format: One field name per line (legacy underscore notation)
-# Lines starting with # are comments and will be ignored
-# Empty lines are ignored
+# Format: One field name per line (legacy underscore notation), optionally followed
+# immediately by a line starting with ### classifying the issue:
 #
-# Last updated: 2025-10-24
-# 
+#   # Description comment
+#   _legacy_field_name
+#   ### deprecation issue     <- field is deprecated; checkCIF doesn't recognise its successor
+#                                (e.g. _cell_measurement_temperature / _diffrn_ambient_temperature)
+#   ### modern notation issue <- field is NOT deprecated; checkCIF just doesn't recognise its
+#                                modern dot-notation form (e.g. _geom_angle / _geom_angle.value)
+#
+# Lines starting with # are comments and will be ignored
+# Empty lines are ignored, and separate one field's entry from the next
+#
+# Last updated: 2026-07-02
+#
 # NOTE: This is a temporary workaround until checkCIF is updated to recognize modern field names.
-# Periodically review this list and remove fields once checkCIF supports them.
+# Periodically review this list (against checkCIF, not just the dictionary) and remove
+# fields once checkCIF supports their modern/successor name.
 
-# Diffraction measurement device
-_diffrn_measurement_device_type
 
 # Atomic site anisotropic displacement parameters
 _atom_site_aniso_label
+### modern notation issue
 
 # Geometry angle measurements
 _geom_angle
+### modern notation issue
 
 # Cell measurement temperature
 _cell_measurement_temperature
+### deprecation issue
 
-# Recorded [sum |su(netI)| / sum |netI|] for all measured reflections. 
+# Recorded [sum |su(netI)| / sum |netI|] for all measured reflections.
 _diffrn_reflns_av_unetI/netI
+### modern notation issue
+
+# Diffraction radiation wavelength
+_diffrn_radiation_wavelength
+### modern notation issue

@@ -14,10 +14,9 @@ Converts between CIF1 and modern formats, handling:
 """
 
 import re
-import os
 from typing import Dict, List, Tuple, Optional, Set
 from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
-from .user_config import get_bundled_resource_path
+from .CIF_parser import TextBlockTracker
 
 
 _FIELD_LINE_MATCH = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$')
@@ -40,53 +39,8 @@ class CIFFormatConverter:
             dictionary_manager: Optional pre-configured dictionary manager
         """
         self.dict_manager = dictionary_manager or CIFDictionaryManager()
-        self.checkcif_compatibility_fields = self._load_checkcif_compatibility_fields()
+        self.checkcif_compatibility_fields = self.dict_manager.get_checkcif_compatibility_fields()
         self._modern_field_conversion_cache: Dict[str, str] = {}
-    
-    def _load_checkcif_compatibility_fields(self) -> Set[str]:
-        """
-        Load the list of fields that need legacy notation for checkCIF compatibility.
-        
-        Returns:
-            Set of field names (in legacy underscore notation) that need dual format
-        """
-        try:
-            # Try field_rules directory first (production location)
-            config_path = str(get_bundled_resource_path(os.path.join('field_rules', 'checkcif_compatibility.cif_rules')))
-            if not os.path.exists(config_path):
-                # Try alternative path for development
-                config_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                    'field_rules', 
-                    'checkcif_compatibility.cif_rules'
-                )
-            
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    fields = set()
-                    for line in f:
-                        line = line.strip()
-                        # Skip comments and empty lines
-                        if line and not line.startswith('#'):
-                            fields.add(line)
-                    return fields
-            else:
-                # Fallback hardcoded list if file not found
-                return {
-                    '_diffrn_measurement_device_type',
-                    '_atom_site_aniso_label',
-                    '_geom_angle',
-                    '_cell_measurement_temperature'
-                }
-        except Exception as e:
-            print(f"Warning: Could not load checkCIF compatibility fields: {e}")
-            # Return hardcoded fallback
-            return {
-                '_diffrn_measurement_device_type',
-                '_atom_site_aniso_label',
-                '_geom_angle',
-                '_cell_measurement_temperature'
-            }
 
     def _append_unknown_fields_warning(self, changes: List[str], unknown_fields: List[str]) -> None:
         """Append a concise unknown-fields warning to conversion change logs."""
@@ -150,22 +104,18 @@ class CIFFormatConverter:
         # Track loop state for proper field conversion within loops
         in_loop = False
         loop_field_count = 0
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         for i, line in enumerate(lines):
             original_line = line
-            
-            # Track text block boundaries (semicolon-delimited blocks)
-            if line.strip() == ';':
-                in_text_block = not in_text_block
+
+            # Preserve text block delimiters/content as-is (CIF 1.1 ';' blocks
+            # and CIF 2.0 triple-quoted values) - never convert field-like text
+            # that just happens to be embedded inside a multiline value.
+            if text_block_tracker.consume(line.strip()):
                 converted_lines.append(line)
                 continue
-            
-            # Preserve text block content as-is
-            if in_text_block:
-                converted_lines.append(line)
-                continue
-            
+
             # Before converting, check if this line contains a deprecated field
             field_match = re.match(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s+(.+)$', line)
             if field_match:
@@ -230,14 +180,10 @@ class CIFFormatConverter:
         seen_fields: Dict[str, Tuple[int, str]] = {}
         lines_to_remove: Set[int] = set()
         changes: List[str] = []
-        in_text_block = False
+        text_block_tracker = TextBlockTracker()
 
         for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped == ';':
-                in_text_block = not in_text_block
-                continue
-            if in_text_block:
+            if text_block_tracker.consume(line.strip()):
                 continue
 
             field_match = _FIELD_LINE_MATCH.match(line)
@@ -266,7 +212,10 @@ class CIFFormatConverter:
             return '\n'.join(cleaned_lines), changes
 
         existing_fields: Dict[str, Tuple[int, str, str]] = {}
+        text_block_tracker = TextBlockTracker()
         for i, line in enumerate(cleaned_lines):
+            if text_block_tracker.consume(line.strip()):
+                continue
             field_match = _FIELD_WITH_VALUE_MATCH.match(line)
             if not field_match:
                 continue
@@ -353,21 +302,17 @@ class CIFFormatConverter:
         
         in_loop = False
         loop_field_count = 0
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         for i, line in enumerate(lines):
             stripped = line.strip()
-            
-            # Track text block boundaries
-            if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
-                in_text_block = not in_text_block
+
+            # Preserve text block delimiters/content as-is (CIF 1.1 ';' blocks
+            # and CIF 2.0 triple-quoted values)
+            if text_block_tracker.consume(stripped):
                 converted_lines.append(line)
                 continue
-            
-            if in_text_block:
-                converted_lines.append(line)
-                continue
-            
+
             original_line = line
             
             if stripped == 'loop_':
@@ -982,21 +927,15 @@ class CIFFormatConverter:
         seen_fields = {}  # field_canonical -> (line_number, field_name_used)
         lines_to_remove = set()
         changes = []
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         # First pass: identify all field definitions and their canonical forms
         for i, line in enumerate(lines):
-            stripped = line.strip()
-            
-            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
-            if stripped == ';':
-                in_text_block = not in_text_block
+            # Skip field detection on text-block delimiters/content (e.g.
+            # _iucr_refine_fcf_details blocks; CIF 1.1 ';' or CIF 2.0 """/''' )
+            if text_block_tracker.consume(line.strip()):
                 continue
-            
-            # Skip field detection inside text blocks
-            if in_text_block:
-                continue
-            
+
             # Match field definitions (both standalone and in loops)
             field_match = _FIELD_IN_CONTENT_MATCH.match(line)
             if field_match:
@@ -1062,20 +1001,15 @@ class CIFFormatConverter:
         # First pass: catalog all existing fields IN THE MAIN SECTION ONLY
         # Also respect text blocks (don't catalog fields inside them)
         scan_end = deprecated_section_start if deprecated_section_start is not None else len(lines)
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         for i in range(scan_end):
             line = lines[i]
-            
-            # Track text block boundaries
-            if line.strip() == ';':
-                in_text_block = not in_text_block
+
+            # Skip field detection on text-block delimiters/content
+            if text_block_tracker.consume(line.strip()):
                 continue
-            
-            # Skip field detection inside text blocks
-            if in_text_block:
-                continue
-            
+
             field_match = _FIELD_WITH_VALUE_MATCH.match(line)
             if field_match:
                 indent, field_name, value = field_match.groups()

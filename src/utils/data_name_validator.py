@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 from PyQt6.QtCore import QSettings
 
+from utils.CIF_parser import TextBlockTracker
 from utils.registered_prefixes import (
     is_registered_prefix,
     get_prefix_from_field,
@@ -68,6 +69,7 @@ class FieldValidationResult:
     modern_equivalent: str = ""        # If deprecated, the modern (dot-notation) replacement
     successor_name: str = ""           # Format-aware successor (legacy or modern, depending on file)
     successor_already_exists: bool = False  # True when successor (or alias-equivalent) is already present
+    checkcif_retain_required: bool = False  # True when checkCIF needs this deprecated field kept (see checkcif_compatibility.cif_rules)
     prefix: str = ""                   # Extracted prefix if applicable
     suggested_format: str = ""         # Suggested correct format (for embedded local prefixes)
     embedded_prefix: str = ""          # If local prefix is embedded in category extension
@@ -155,6 +157,7 @@ class DataNameValidator:
                 modern_equivalent=cached.modern_equivalent,
                 successor_name=cached.successor_name,
                 successor_already_exists=cached.successor_already_exists,
+                checkcif_retain_required=cached.checkcif_retain_required,
                 prefix=cached.prefix
             )
         
@@ -203,12 +206,17 @@ class DataNameValidator:
         # Check if field is deprecated (before checking if known, as deprecated fields are "known")
         if self.dict_manager.is_field_deprecated(field_name):
             modern_replacement = self.dict_manager.get_modern_replacement(field_name) or ""
+            checkcif_retain_required = self.dict_manager.is_checkcif_deprecation_field(field_name)
+            description = "Field is deprecated"
+            if checkcif_retain_required:
+                description += " (retained for checkCIF compatibility - see README)"
             result = FieldValidationResult(
                 field_name=field_name,
                 category=FieldCategory.DEPRECATED,
                 line_number=line_number,
-                description="Field is deprecated",
+                description=description,
                 modern_equivalent=modern_replacement,
+                checkcif_retain_required=checkcif_retain_required,
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
@@ -348,18 +356,26 @@ class DataNameValidator:
         
         # Parse CIF content to extract field names and line numbers
         lines = content.split('\n')
-        
+        text_block_tracker = TextBlockTracker()
+
         for line_num, line in enumerate(lines, start=1):
             line_stripped = line.strip()
-            
+
+            # Skip field detection on text-block delimiters and interior lines
+            # (e.g. _iucr_refine_fcf_details blocks) so that field-like text
+            # inside a multiline value - CIF 1.1 ';' blocks or CIF 2.0
+            # triple-quoted values - isn't mistaken for a real field.
+            if text_block_tracker.consume(line_stripped):
+                continue
+
             # Skip empty lines, comments, and headers
             if not line_stripped or line_stripped.startswith('#') or line_stripped.startswith('data_'):
                 continue
-            
+
             # Skip loop_ headers
             if line_stripped.lower() == 'loop_':
                 continue
-            
+
             # Match field names (start with underscore)
             # Handle both standalone field names and field name with value
             if line_stripped.startswith('_'):

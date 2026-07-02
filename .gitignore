@@ -15,6 +15,7 @@ dist/
 *.swp
 *.swo
 *~
+.claude/
 
 # System files
 .DS_Store

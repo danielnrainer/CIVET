@@ -2165,6 +2165,12 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         deprecated_replace_to_delete = set()
         for old_name, new_name in deprecated_replacements.items():
             old_name_lower = old_name.lower()
+            # Safety net: never remove a field that checkCIF still requires kept
+            # (e.g. _cell_measurement_temperature for PLAT197), even if a
+            # replacement action was queued for it - the dialog should already
+            # prevent this, but this guard covers any other call path.
+            if self.dict_manager.is_checkcif_compatibility_field(old_name):
+                continue
             successor_equivalents = _equivalent_names(new_name)
             successor_already_present = any(
                 eq_name in present_or_planned_fields and eq_name != old_name_lower

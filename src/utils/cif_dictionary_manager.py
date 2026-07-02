@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
+from .CIF_parser import TextBlockTracker
 from .cif_dictionary_parser import CIFDictionaryParser
 from .cif_dictionary_format import detect_dictionary_format, create_dictionary_parser, DictionaryFormat
 from .user_config import (
@@ -49,6 +50,12 @@ _MAX_CONTENT_CACHE_ENTRIES = 32
 _MAX_LOOKUP_CACHE_ENTRIES = 4096
 
 _MISSING_METADATA = object()
+
+# checkCIF compatibility issue categories (see field_rules/checkcif_compatibility.cif_rules).
+# DEPRECATION: field is deprecated and checkCIF does not recognise its successor.
+# NOTATION: field is not deprecated, but checkCIF does not recognise its modern dot-notation form.
+CHECKCIF_ISSUE_DEPRECATION = 'deprecation'
+CHECKCIF_ISSUE_NOTATION = 'notation'
 
 
 def get_user_dictionaries_directory() -> str:
@@ -488,7 +495,9 @@ class CIFDictionaryManager:
         self._malformed_guess_cache: Dict[str, Optional[str]] = {}
         self._metadata_lookup_cache: Dict[str, Any] = {}
         self._modern_from_compact_name: Dict[str, str] = {}
-        
+        self._checkcif_compatibility_fields: Optional[Dict[str, str]] = None
+
+
         # Initialize primary dictionary info
         primary_path = getattr(self.parser, 'cif_core_path', 'dictionaries/cif_core_3.3.0.dic')
         source_type = DictionarySource.BUNDLED if 'dictionaries/' in str(primary_path) else DictionarySource.FILE
@@ -802,23 +811,19 @@ class CIFDictionaryManager:
             return cached
 
         lines = content.split('\n')
-        
+
         legacy_fields = 0
         modern_fields = 0
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         for line in lines:
             stripped = line.strip()
-            
-            # Track semicolon text block boundaries
-            if stripped == ';' or (stripped.startswith(';') and not stripped.startswith(';_')):
-                in_text_block = not in_text_block
+
+            # Skip text-block delimiters/content (CIF 1.1 ';' blocks and
+            # CIF 2.0 triple-quoted values)
+            if text_block_tracker.consume(stripped):
                 continue
-            
-            # Skip lines inside text blocks
-            if in_text_block:
-                continue
-            
+
             # Skip comment lines
             if stripped.startswith('#'):
                 continue
@@ -1182,6 +1187,123 @@ class CIFDictionaryManager:
         
         return field_info
     
+    def get_checkcif_compatibility_fields(self) -> Set[str]:
+        """
+        Get the set of legacy field names that must be retained for checkCIF
+        compatibility, regardless of issue type (see
+        field_rules/checkcif_compatibility.cif_rules).
+
+        Returns:
+            Set of field names (in legacy underscore notation), lowercased.
+        """
+        return set(self._get_checkcif_compatibility_field_details().keys())
+
+    def get_checkcif_deprecation_fields(self) -> Set[str]:
+        """
+        Get checkCIF-compatibility fields tagged as a "deprecation issue":
+        the field is deprecated and checkCIF does not recognise its successor
+        (e.g. _cell_measurement_temperature / _diffrn_ambient_temperature).
+        """
+        return {
+            name for name, issue in self._get_checkcif_compatibility_field_details().items()
+            if issue == CHECKCIF_ISSUE_DEPRECATION
+        }
+
+    def get_checkcif_notation_fields(self) -> Set[str]:
+        """
+        Get checkCIF-compatibility fields tagged as a "modern notation issue":
+        the field is not deprecated, but checkCIF does not recognise its
+        modern dot-notation form (e.g. _geom_angle / _geom_angle.value).
+        """
+        return {
+            name for name, issue in self._get_checkcif_compatibility_field_details().items()
+            if issue == CHECKCIF_ISSUE_NOTATION
+        }
+
+    def is_checkcif_compatibility_field(self, field_name: str) -> bool:
+        """Check whether a field name must be retained for checkCIF compatibility."""
+        return field_name.lower() in self.get_checkcif_compatibility_fields()
+
+    def is_checkcif_deprecation_field(self, field_name: str) -> bool:
+        """Check whether a field is a checkCIF "deprecation issue" field."""
+        return field_name.lower() in self.get_checkcif_deprecation_fields()
+
+    def is_checkcif_notation_field(self, field_name: str) -> bool:
+        """Check whether a field is a checkCIF "modern notation issue" field."""
+        return field_name.lower() in self.get_checkcif_notation_fields()
+
+    def _get_checkcif_compatibility_field_details(self) -> Dict[str, str]:
+        """Lazily load and cache field_name -> issue_type for compatibility fields."""
+        if self._checkcif_compatibility_fields is None:
+            self._checkcif_compatibility_fields = self._load_checkcif_compatibility_fields()
+        return self._checkcif_compatibility_fields
+
+    @staticmethod
+    def _load_checkcif_compatibility_fields() -> Dict[str, str]:
+        """
+        Load the list of fields that need legacy notation for checkCIF compatibility.
+
+        Each field name may be followed by a line starting with '###' that
+        classifies the issue, e.g.:
+
+            # Cell measurement temperature
+            _cell_measurement_temperature
+            ### deprecation issue
+
+        Recognised issue lines contain "deprecat" (-> CHECKCIF_ISSUE_DEPRECATION)
+        or "notation" (-> CHECKCIF_ISSUE_NOTATION). A field without a
+        recognised '###' annotation gets an empty-string issue type.
+
+        Returns:
+            Dict mapping field name (in legacy underscore notation,
+            lowercased) to its issue type.
+        """
+        fallback = {
+            '_diffrn_measurement_device_type': '',
+            '_atom_site_aniso_label': CHECKCIF_ISSUE_NOTATION,
+            '_geom_angle': CHECKCIF_ISSUE_NOTATION,
+            '_cell_measurement_temperature': CHECKCIF_ISSUE_DEPRECATION,
+        }
+        try:
+            # Try field_rules directory first (production location)
+            config_path = str(get_bundled_resource_path(os.path.join('field_rules', 'checkcif_compatibility.cif_rules')))
+            if not os.path.exists(config_path):
+                # Try alternative path for development
+                config_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    'field_rules',
+                    'checkcif_compatibility.cif_rules'
+                )
+
+            if not os.path.exists(config_path):
+                return fallback
+
+            fields: Dict[str, str] = {}
+            pending_field: Optional[str] = None
+            with open(config_path, 'r', encoding='utf-8') as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        pending_field = None
+                        continue
+                    if line.startswith('###'):
+                        if pending_field is not None:
+                            issue_text = line[3:].strip().lower()
+                            if 'deprecat' in issue_text:
+                                fields[pending_field] = CHECKCIF_ISSUE_DEPRECATION
+                            elif 'notation' in issue_text:
+                                fields[pending_field] = CHECKCIF_ISSUE_NOTATION
+                        continue
+                    if line.startswith('#'):
+                        continue
+                    # Field name line
+                    pending_field = line.lower()
+                    fields.setdefault(pending_field, '')
+            return fields
+        except Exception as e:
+            print(f"Warning: Could not load checkCIF compatibility fields: {e}")
+            return fallback
+
     def is_field_deprecated(self, field_name: str) -> bool:
         """Check if a field is deprecated"""
         self._ensure_loaded()
@@ -3161,22 +3283,16 @@ class CIFDictionaryManager:
         """
         lines = cif_content.split('\n')
         field_matches = []
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         field_pattern = re.compile(r'^\s*(_[a-zA-Z][a-zA-Z0-9_\.\[\]()/]*)')
-        
+
         for line in lines:
-            stripped = line.strip()
-            
-            # Check for start/end of multi-line text block
-            if stripped == ';':
-                in_text_block = not in_text_block
+            # Skip field detection on text-block delimiters/content (CIF 1.1
+            # ';' blocks and CIF 2.0 triple-quoted values)
+            if text_block_tracker.consume(line.strip()):
                 continue
-            
-            # Skip field detection inside text blocks
-            if in_text_block:
-                continue
-            
+
             # Look for fields in non-text-block lines
             match = field_pattern.match(line)
             if match:
@@ -3211,23 +3327,16 @@ class CIFDictionaryManager:
         """
         lines = cif_content.split('\n')
         result_lines = []
-        in_text_block = False
+        text_block_tracker = TextBlockTracker()
         replacements_made = 0
-        
+
         for line in lines:
-            stripped = line.strip()
-            
-            # Check for start/end of multi-line text block
-            if stripped == ';':
-                in_text_block = not in_text_block
+            # Preserve text-block delimiters/content as-is (CIF 1.1 ';'
+            # blocks and CIF 2.0 triple-quoted values)
+            if text_block_tracker.consume(line.strip()):
                 result_lines.append(line)
                 continue
-            
-            # Skip replacement inside text blocks
-            if in_text_block:
-                result_lines.append(line)
-                continue
-            
+
             # Replace field names outside text blocks
             if max_replacements == -1 or replacements_made < max_replacements:
                 if old_field in line:
@@ -3259,22 +3368,17 @@ class CIFDictionaryManager:
         lines = cif_content.split('\n')
         updated_lines = []
         changes = []
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         # Pattern to find field references in text
         field_reference_pattern = re.compile(r'(_[a-zA-Z][a-zA-Z0-9_\.\[\]()/]*)')
-        
+
         for line in lines:
-            stripped = line.strip()
-            
-            # Track text block boundaries
-            if stripped == ';':
-                in_text_block = not in_text_block
-                updated_lines.append(line)
-                continue
-            
-            # Process field references within text blocks
-            if in_text_block:
+            # Track text block boundaries (CIF 1.1 ';' blocks and CIF 2.0
+            # triple-quoted values), then scan block content (including
+            # delimiter lines, which never contain field-like text) for
+            # field references to convert.
+            if text_block_tracker.consume(line.strip()):
                 original_line = line
                 updated_line = line
                 
@@ -3411,27 +3515,21 @@ class CIFDictionaryManager:
         lines = cif_content.split('\n')
         result_lines = []
         in_loop = False
-        in_text_block = False
+        text_block_tracker = TextBlockTracker()
         loop_fields = []
         field_index = -1
-        
+
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            
-            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
-            if line == ';':
-                in_text_block = not in_text_block
+
+            # Don't remove anything on text-block delimiters/content (e.g.
+            # _iucr_refine_fcf_details blocks; CIF 1.1 ';' or CIF 2.0 """/''')
+            if text_block_tracker.consume(line):
                 result_lines.append(lines[i])
                 i += 1
                 continue
-            
-            # Don't remove anything inside text blocks
-            if in_text_block:
-                result_lines.append(lines[i])
-                i += 1
-                continue
-            
+
             if line.startswith('loop_'):
                 in_loop = True
                 loop_fields = []
@@ -3604,12 +3702,36 @@ class CIFDictionaryManager:
             chosen_field = resolution_data[0]
             chosen_value = resolution_data[1] if len(resolution_data) > 1 else ""
             keep_aliases = bool(resolution_data[2]) if len(resolution_data) > 2 else False
-                
+
             alias_list = current_conflicts[canonical_field]
-            
+
+            # Safety net: never let a field checkCIF requires in legacy notation
+            # (see field_rules/checkcif_compatibility.cif_rules) be dropped by
+            # alias-conflict resolution, even if the user chose to keep a
+            # different (e.g. modern) alias instead.
+            checkcif_fields_at_risk = [
+                alias for alias in alias_list
+                if alias.lower() != chosen_field.lower() and self.is_checkcif_compatibility_field(alias)
+            ]
+
             # Check if any of the aliases are in loops
             field_in_loop = self._is_field_in_loop(resolved_content, alias_list)
-            
+
+            if checkcif_fields_at_risk:
+                if field_in_loop:
+                    # Loop resolution cannot keep multiple aliases (see
+                    # _resolve_loop_field_conflict), so retain the checkCIF-
+                    # required field itself instead of losing it entirely.
+                    original_choice = chosen_field
+                    chosen_field = checkcif_fields_at_risk[0]
+                    changes.append(
+                        f"Kept '{chosen_field}' instead of '{original_choice}' because "
+                        "checkCIF requires this legacy field name "
+                        "(see field_rules/checkcif_compatibility.cif_rules)"
+                    )
+                else:
+                    keep_aliases = True
+
             if field_in_loop:
                 # Handle loop fields differently - rename instead of remove/add
                 resolved_content, loop_changes = self._resolve_loop_field_conflict(
@@ -3622,7 +3744,7 @@ class CIFDictionaryManager:
                     resolved_content, alias_list, chosen_field, chosen_value, keep_aliases
                 )
                 changes.extend(field_changes)
-        
+
         return resolved_content, changes
     
     def _resolve_simple_field_conflict(self, cif_content: str, alias_list: List[str], 
@@ -3653,8 +3775,8 @@ class CIFDictionaryManager:
         first_occurrence_replaced = False
         seen_aliases = set()
         fields_to_remove = set(alias_list)  # Track which fields to remove
-        in_text_block = False
-        
+        text_block_tracker = TextBlockTracker()
+
         # Format the chosen value properly
         if chosen_value and chosen_value.strip() and chosen_value != "(loop data)":
             if ' ' in chosen_value or ',' in chosen_value or '[' in chosen_value or ']' in chosen_value or '{' in chosen_value or '}' in chosen_value:
@@ -3671,20 +3793,14 @@ class CIFDictionaryManager:
         while i < len(lines):
             line = lines[i]
             line_stripped = line.strip()
-            
-            # Track text block boundaries (e.g., _iucr_refine_fcf_details blocks)
-            if line_stripped == ';':
-                in_text_block = not in_text_block
+
+            # Don't modify anything on text-block delimiters/content (e.g.
+            # _iucr_refine_fcf_details blocks; CIF 1.1 ';' or CIF 2.0 """/''')
+            if text_block_tracker.consume(line_stripped):
                 result_lines.append(line)
                 i += 1
                 continue
-            
-            # Don't modify anything inside text blocks
-            if in_text_block:
-                result_lines.append(line)
-                i += 1
-                continue
-            
+
             # Check if this line contains any of the conflicting fields
             found_conflict = False
             for alias in fields_to_remove:
@@ -3875,25 +3991,20 @@ class CIFDictionaryManager:
             CIF content with field added
         """
         lines = cif_content.split('\n')
-        
+
         # Find a good place to insert the field
         # Look for the data_ block and add after it, avoiding text blocks
         insert_index = len(lines)
-        in_text_block = False
+        text_block_tracker = TextBlockTracker()
         found_data_block = False
-        
+
         for i, line in enumerate(lines):
             stripped = line.strip()
-            
-            # Track text block boundaries
-            if stripped == ';':
-                in_text_block = not in_text_block
+
+            # Skip insertion points on text-block delimiters/content
+            if text_block_tracker.consume(stripped):
                 continue
-                
-            # Skip insertion points inside text blocks
-            if in_text_block:
-                continue
-                
+
             if line.strip().startswith('data_'):
                 found_data_block = True
                 continue

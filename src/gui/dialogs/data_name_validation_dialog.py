@@ -596,7 +596,7 @@ class DataNameValidationDialog(QDialog):
         parent_item.addChild(field_item)
         
         self._field_items[field_result.field_name.lower()] = field_item
-        
+
         # Create widget with action buttons in column 2 (Actions)
         button_widget = self._create_action_buttons(field_result, category)
         self.tree.setItemWidget(field_item, 2, button_widget)
@@ -733,7 +733,12 @@ class DataNameValidationDialog(QDialog):
         
         elif category == FieldCategory.DEPRECATED:
             successor = field_result.successor_name or field_result.modern_equivalent
-            
+            retain_required = field_result.checkcif_retain_required
+            retain_tooltip = (
+                f"'{field_name}' must be retained for checkCIF compatibility\n"
+                f"(see CIVET README for more information)"
+            )
+
             # Add Successor button (if a successor exists)
             if successor:
                 add_successor_btn = QPushButton("+ Successor")
@@ -744,10 +749,13 @@ class DataNameValidationDialog(QDialog):
                     font = add_successor_btn.font()
                     font.setStrikeOut(True)
                     add_successor_btn.setFont(font)
-                    add_successor_btn.setToolTip(
+                    tooltip = (
                         f"Successor '{successor}' already exists in this CIF\n"
                         "No successor data name needs to be added"
                     )
+                    if retain_required:
+                        tooltip += "\n\n" + retain_tooltip
+                    add_successor_btn.setToolTip(tooltip)
                 else:
                     add_successor_btn.setStyleSheet("color: #27ae60;")  # Green
                     add_successor_btn.setToolTip(
@@ -762,34 +770,45 @@ class DataNameValidationDialog(QDialog):
 
                 replace_btn = QPushButton("⇄ Replace")
                 replace_btn.setMaximumWidth(BUTTON_WIDTH)
-                replace_btn.setStyleSheet("color: #2980b9;")  # Blue
-                if field_result.successor_already_exists:
-                    replace_btn.setToolTip(
-                        f"Successor '{successor}' already exists in this CIF\n"
-                        f"Deprecated '{field_name}' will be removed"
-                    )
+                if retain_required:
+                    replace_btn.setEnabled(False)
+                    replace_btn.setStyleSheet("color: #7f8c8d;")  # Grey
+                    replace_btn.setToolTip(retain_tooltip)
                 else:
-                    replace_btn.setToolTip(
-                        f"Replace deprecated '{field_name}'\n"
-                        f"with successor '{successor}'"
+                    replace_btn.setStyleSheet("color: #2980b9;")  # Blue
+                    if field_result.successor_already_exists:
+                        replace_btn.setToolTip(
+                            f"Successor '{successor}' already exists in this CIF\n"
+                            f"Deprecated '{field_name}' will be removed"
+                        )
+                    else:
+                        replace_btn.setToolTip(
+                            f"Replace deprecated '{field_name}'\n"
+                            f"with successor '{successor}'"
+                        )
+                    replace_btn.clicked.connect(
+                        lambda checked, fn=field_name, sn=successor: self._on_replace_deprecated(fn, sn)
                     )
-                replace_btn.clicked.connect(
-                    lambda checked, fn=field_name, sn=successor: self._on_replace_deprecated(fn, sn)
-                )
                 layout.addWidget(replace_btn)
 
                 # If successor already exists, offer direct delete of deprecated field
+                # unless checkCIF compatibility requires keeping it.
                 if field_result.successor_already_exists:
                     delete_btn = QPushButton("✕ Delete")
                     delete_btn.setMaximumWidth(BUTTON_WIDTH)
-                    delete_btn.setStyleSheet("color: #c0392b;")
-                    delete_btn.setToolTip(
-                        f"Delete deprecated '{field_name}'\n"
-                        f"(successor '{successor}' already exists)"
-                    )
-                    delete_btn.clicked.connect(
-                        lambda checked, fn=field_name: self._on_delete_field(fn)
-                    )
+                    if retain_required:
+                        delete_btn.setEnabled(False)
+                        delete_btn.setStyleSheet("color: #7f8c8d;")
+                        delete_btn.setToolTip(retain_tooltip)
+                    else:
+                        delete_btn.setStyleSheet("color: #c0392b;")
+                        delete_btn.setToolTip(
+                            f"Delete deprecated '{field_name}'\n"
+                            f"(successor '{successor}' already exists)"
+                        )
+                        delete_btn.clicked.connect(
+                            lambda checked, fn=field_name: self._on_delete_field(fn)
+                        )
                     layout.addWidget(delete_btn)
             
             # Skip button
@@ -853,10 +872,16 @@ class DataNameValidationDialog(QDialog):
     def _on_delete_field(self, field_name: str) -> None:
         """
         Mark field for deletion.
-        
+
         Args:
             field_name: The field to delete
         """
+        field_result = self._find_field_result(field_name)
+        if field_result is not None and field_result.checkcif_retain_required:
+            # Safety net: the corresponding button should already be disabled
+            # for checkCIF-required fields, but never delete one regardless.
+            return
+
         self._fields_to_delete.add(field_name.lower())
         self._pending_actions[field_name.lower()] = FieldAction.DELETE
         
@@ -946,11 +971,16 @@ class DataNameValidationDialog(QDialog):
             successor_name: Successor field name
         """
         field_name_lower = field_name.lower()
+        field_result = self._find_field_result(field_name)
+        if field_result is not None and field_result.checkcif_retain_required:
+            # Safety net: the corresponding button should already be disabled
+            # for checkCIF-required fields, but never remove one regardless.
+            return
+
         self._deprecated_replacements[field_name_lower] = successor_name
         self._deprecated_updates.pop(field_name_lower, None)
         self._pending_actions[field_name_lower] = FieldAction.DEPRECATION_REPLACE
 
-        field_result = self._find_field_result(field_name)
         if field_result and field_result.successor_already_exists:
             status = f"Will remove (successor {successor_name} exists)"
         else:

@@ -110,6 +110,38 @@ def test_deprecated_actions_switch_between_add_and_replace_modes(app):
     dialog.close()
 
 
+def _report_with_checkcif_retained_deprecated_field():
+    deprecated = FieldValidationResult(
+        field_name="_cell_measurement_temperature",
+        category=FieldCategory.DEPRECATED,
+        line_number=5,
+        description="Field is deprecated (retained for checkCIF compatibility - see README)",
+        modern_equivalent="_diffrn_ambient_temperature",
+        successor_name="_diffrn_ambient_temperature",
+        successor_already_exists=True,
+        checkcif_retain_required=True,
+    )
+    return ValidationReport(deprecated_fields=[deprecated], total_fields=1)
+
+
+def test_checkcif_required_deprecated_field_cannot_be_deleted_or_replaced(app):
+    """Regression: deprecated fields checkCIF still requires (e.g.
+    _cell_measurement_temperature for PLAT197) must survive both the
+    'Replace' and 'Delete' actions even if somehow triggered."""
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_checkcif_retained_deprecated_field(), validator)
+
+    dialog._on_delete_field("_cell_measurement_temperature")
+    assert "_cell_measurement_temperature" not in dialog._fields_to_delete
+    assert "_cell_measurement_temperature" not in dialog._pending_actions
+
+    dialog._on_replace_deprecated("_cell_measurement_temperature", "_diffrn_ambient_temperature")
+    assert "_cell_measurement_temperature" not in dialog._deprecated_replacements
+    assert "_cell_measurement_temperature" not in dialog._pending_actions
+    dialog.close()
+
+
 def test_undo_action_clears_pending_state_for_field(app):
     _ = app
     validator = _FakeValidator()
