@@ -345,9 +345,12 @@ class FieldCheckingMixin:
                 
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
-                    f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value, operation_type=operation_type, suggestions=suggestions)
-                
+                    f"Line {i + 1}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    current_value, default_value, operation_type=operation_type, suggestions=suggestions,
+                    show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                        d, "dialogs.field_check_edit_mode"
+                    ))
+
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
@@ -364,9 +367,12 @@ class FieldCheckingMixin:
         """Add a missing CIF field with value."""
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
-            f"The line starting with '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
-            default_value if default_value else "", default_value, operation_type="add", suggestions=suggestions)
-        
+            f"Data name '{prefix}' is missing.\n\nDescription: {description}\nSuggested value: {default_value}",
+            default_value if default_value else "", default_value, operation_type="add", suggestions=suggestions,
+            show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                d, "dialogs.field_check_edit_mode"
+            ))
+
         if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
             return result
             
@@ -455,9 +461,12 @@ class FieldCheckingMixin:
                 
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
-                    f"Edit the line:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
-                    current_value, default_value, operation_type=operation_type, suggestions=suggestions)
-                
+                    f"Line {i + 2}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    current_value, default_value, operation_type=operation_type, suggestions=suggestions,
+                    show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                        d, "dialogs.field_check_edit_mode"
+                    ))
+
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
@@ -465,7 +474,7 @@ class FieldCheckingMixin:
                     self.update_field_value(lines, i, prefix, value)
                     self.text_editor.setText("\n".join(lines))
                 return result
-        
+
         # Field not found - handle missing field
         if not field_found:
             return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config, suggestions)
@@ -1402,8 +1411,18 @@ class FieldCheckingMixin:
                             })
                             break
             
-            # Show dialog with scrollable content
-            dialog_result = CriticalIssuesDialog.show_dialog(detailed_conflicts, deprecated_fields, self)
+            # Show dialog with scrollable content, honoring configured editor
+            # interaction behavior (browse/edit the main editor while open).
+            issues_dialog = CriticalIssuesDialog(detailed_conflicts, deprecated_fields, self)
+            raw_result = self._show_dialog_with_configured_interaction(
+                issues_dialog, "dialogs.critical_issues_mode"
+            )
+            if raw_result == 2:  # Custom cancel code
+                dialog_result = 0
+            elif raw_result == QDialog.DialogCode.Accepted:
+                dialog_result = 1
+            else:
+                dialog_result = 2
             
             if dialog_result == 0:  # Cancel
                 # User wants to abort - restore initial state

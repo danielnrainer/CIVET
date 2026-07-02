@@ -1950,7 +1950,8 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 dialog.refresh_validation(new_report)
             
             dialog.changes_requested.connect(on_changes_requested)
-            
+            dialog.navigate_to_line.connect(self._navigate_editor_to_line)
+
             # Show dialog with configured editor interaction behavior.
             self._show_dialog_with_configured_interaction(
                 dialog,
@@ -2618,7 +2619,9 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         """Show dialog with all recognised CIF data name prefixes."""
         try:
             dialog = RecognisedPrefixesDialog(self.data_name_validator, self)
-            self._show_dialog_with_configured_interaction(dialog)
+            self._show_dialog_with_configured_interaction(
+                dialog, "dialogs.recognised_prefixes_mode"
+            )
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()

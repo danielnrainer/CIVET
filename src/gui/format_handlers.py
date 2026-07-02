@@ -807,7 +807,9 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
                 dialog.update_issues(fresh_res['cif1'], fresh_res['cif2'])
 
             na_dialog.conversion_requested.connect(_apply)
-            na_dialog.exec()
+            self._show_dialog_with_configured_interaction(
+                na_dialog, "dialogs.non_ascii_conversion_mode"
+            )
 
         dialog.navigate_to_line.connect(_goto)
         dialog.refresh_requested.connect(_refresh)

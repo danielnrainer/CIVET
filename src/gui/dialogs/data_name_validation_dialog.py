@@ -246,6 +246,10 @@ class DataNameValidationDialog(QDialog):
     
     # Emitted when user clicks "Apply Changes" - caller should apply and call refresh_validation()
     changes_requested = pyqtSignal()
+
+    # Emitted when the user double-clicks a field row (or clicks "Go to Line")
+    # that has a known line number. The integer is the 1-based line number.
+    navigate_to_line = pyqtSignal(int)
     
     # Category display configuration
     CATEGORY_CONFIG = {
@@ -478,7 +482,10 @@ class DataNameValidationDialog(QDialog):
         header.setStretchLastSection(True)
         # Set alignment for Actions column to right
         # Note: We'll handle item alignment when creating buttons
-        
+
+        self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
+        self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
+
         layout.addWidget(self.tree, stretch=1)
     
     def _create_allowed_prefixes_section(self, layout: QVBoxLayout) -> None:
@@ -508,8 +515,17 @@ class DataNameValidationDialog(QDialog):
     def _create_button_section(self, layout: QVBoxLayout) -> None:
         """Create the dialog buttons."""
         button_layout = QHBoxLayout()
+
+        self.goto_line_button = QPushButton("Go to Line")
+        self.goto_line_button.setEnabled(False)
+        self.goto_line_button.setToolTip(
+            "Navigate to this field in the editor (double-click also works)"
+        )
+        self.goto_line_button.clicked.connect(self._on_goto_clicked)
+        button_layout.addWidget(self.goto_line_button)
+
         button_layout.addStretch()
-        
+
         self.apply_button = QPushButton("Apply Changes")
         self.apply_button.setDefault(True)
         self.apply_button.clicked.connect(self._on_apply_changes)
@@ -593,8 +609,10 @@ class DataNameValidationDialog(QDialog):
         
         field_item = QTreeWidgetItem([field_result.field_name, details, ""])
         field_item.setToolTip(1, details)
+        if field_result.line_number > 0:
+            field_item.setData(0, Qt.ItemDataRole.UserRole, field_result.line_number)
         parent_item.addChild(field_item)
-        
+
         self._field_items[field_result.field_name.lower()] = field_item
 
         # Create widget with action buttons in column 2 (Actions)
@@ -1106,6 +1124,27 @@ class DataNameValidationDialog(QDialog):
         
         return None
     
+    def _on_tree_selection_changed(
+        self, current: Optional[QTreeWidgetItem], _previous: Optional[QTreeWidgetItem]
+    ) -> None:
+        """Enable/disable the Go to Line button based on the selected row."""
+        line = current.data(0, Qt.ItemDataRole.UserRole) if current else None
+        self.goto_line_button.setEnabled(line is not None)
+
+    def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        """Navigate to the field's line when a row with a known line is double-clicked."""
+        line = item.data(0, Qt.ItemDataRole.UserRole)
+        if line:
+            self.navigate_to_line.emit(int(line))
+
+    def _on_goto_clicked(self) -> None:
+        """Navigate to the currently selected field's line in the editor."""
+        item = self.tree.currentItem()
+        if item:
+            line = item.data(0, Qt.ItemDataRole.UserRole)
+            if line:
+                self.navigate_to_line.emit(int(line))
+
     def _on_filter_changed(self, index: int) -> None:
         """
         Handle filter dropdown change.
@@ -1245,6 +1284,7 @@ class DataNameValidationDialog(QDialog):
         self._populate_tree()
         self._update_prefixes_label()
         self._update_apply_button()
+        self.goto_line_button.setEnabled(False)
     
     def _update_summary_section(self) -> None:
         """Update the summary frame with current counts."""

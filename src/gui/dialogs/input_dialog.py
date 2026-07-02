@@ -184,7 +184,19 @@ class CIFInputDialog(QDialog):
         self.done(self.RESULT_USE_DEFAULT)
 
     @staticmethod
-    def getText(parent, title, text, value="", default_value=None, operation_type="edit", suggestions=None):
+    def getText(parent, title, text, value="", default_value=None, operation_type="edit",
+                suggestions=None, show_dialog_fn=None):
+        """
+        Args:
+            show_dialog_fn: Optional callable(QDialog) -> int, used to display the
+                constructed dialog instead of a plain ``dialog.exec()``. Callers use
+                this to honor the configured dialog-interaction settings (e.g. keep
+                the main editor scrollable while this dialog is open). Defaults to
+                a plain modal ``dialog.exec()``.
+        """
+        if show_dialog_fn is None:
+            show_dialog_fn = lambda d: d.exec()
+
         # Check if the value contains newlines (multiline)
         if '\n' in str(value):
             # Use multiline dialog for multiline values
@@ -239,8 +251,8 @@ class CIFInputDialog(QDialog):
                     }
                 """)
             
-            result = dialog.exec()
-            
+            result = show_dialog_fn(dialog)
+
             if result == QDialog.DialogCode.Accepted:
                 return dialog.getText(), QDialog.DialogCode.Accepted
             elif result == RESULT_ABORT:
@@ -254,8 +266,8 @@ class CIFInputDialog(QDialog):
         else:
             # Use single-line dialog for single-line values
             dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type, suggestions)
-            result = dialog.exec()
-            
+            result = show_dialog_fn(dialog)
+
             if result == QDialog.DialogCode.Accepted:
                 return dialog.getValue(), QDialog.DialogCode.Accepted
             elif result == RESULT_ABORT:

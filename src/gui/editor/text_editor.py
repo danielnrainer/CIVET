@@ -19,8 +19,8 @@ Settings Priority (highest to lowest):
 from PyQt6.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayout,
                            QLabel, QLineEdit, QCheckBox, QPushButton, QMessageBox,
                            QFontDialog)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import (QFont, QFontMetrics, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QColor)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import (QFont, QFontMetrics, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QColor, QTextBlockFormat)
 import sys
 import os
 
@@ -48,6 +48,9 @@ class CIFTextEditor(QWidget):
     textChanged = pyqtSignal()
     cursorPositionChanged = pyqtSignal()
     modificationChanged = pyqtSignal(bool)
+
+    # Number of digits the line number gutter is sized to fit (right-aligned)
+    LINE_NUMBER_DIGITS = 6
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -74,7 +77,6 @@ class CIFTextEditor(QWidget):
         
         # Line numbers widget
         self.line_numbers = QTextEdit()
-        self.line_numbers.setFixedWidth(50)
         self.line_numbers.setReadOnly(True)
         self.line_numbers.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
@@ -157,7 +159,12 @@ class CIFTextEditor(QWidget):
         # Apply font to editor and line numbers
         self.text_editor.setFont(font)
         self.line_numbers.setFont(font)
-        
+
+        # Size the line number gutter to comfortably fit up to
+        # LINE_NUMBER_DIGITS digits, with a small margin for padding.
+        digit_width = metrics.horizontalAdvance('0')
+        self.line_numbers.setFixedWidth(digit_width * self.LINE_NUMBER_DIGITS + 16)
+
         # Update other settings
         self.line_numbers.setVisible(self.settings['line_numbers_enabled'])
         if hasattr(self, 'highlighter'):
@@ -303,29 +310,95 @@ class CIFTextEditor(QWidget):
         num_lines = text.count('\n') + 1
         numbers = '\n'.join(str(i) for i in range(1, num_lines + 1))
         self.line_numbers.setText(numbers)
-    
+
+        # Right-align the line numbers (setText() rebuilds the document with
+        # default left-aligned blocks, so alignment must be reapplied here).
+        cursor = self.line_numbers.textCursor()
+        cursor.select(QTextCursor.SelectionType.Document)
+        block_format = QTextBlockFormat()
+        block_format.setAlignment(Qt.AlignmentFlag.AlignRight)
+        cursor.mergeBlockFormat(block_format)
+        cursor.clearSelection()
+        self.line_numbers.setTextCursor(cursor)
+
+        # Keep the gutter's scroll position aligned with the main editor.
+        # Rebuilding the gutter's document (setText above) can leave its
+        # scrollbar clamped to a stale position - e.g. right after loading a
+        # file, before the editor's own scrollbar next emits valueChanged -
+        # which otherwise shows numbers from the wrong part of the file until
+        # the user manually scrolls. Sync immediately, and once more on the
+        # next event loop iteration in case the editor's own layout (and thus
+        # its scrollbar range/value) hasn't settled yet (e.g. during startup,
+        # before the widget has been shown).
+        self._sync_line_number_scroll()
+        QTimer.singleShot(0, self._sync_line_number_scroll)
+
+    def _sync_line_number_scroll(self):
+        """Align the line-number gutter's scroll position with the main editor."""
+        self.line_numbers.verticalScrollBar().setValue(
+            self.text_editor.verticalScrollBar().value()
+        )
+
     def resizeEvent(self, event):
         """Handle resize events to update the ruler position."""
         super().resizeEvent(event)
         if hasattr(self, 'ruler'):
             self.ruler.setGeometry(self.ruler.x(), 0, 1, self.text_editor.height())
     
+    def _build_goto_line_row(self, dialog: QDialog) -> QHBoxLayout:
+        """Build a 'Go to line' row, shared by the Find and Find & Replace dialogs."""
+        goto_layout = QHBoxLayout()
+        goto_layout.addWidget(QLabel("Go to line:"))
+
+        goto_input = QLineEdit()
+        goto_input.setPlaceholderText(f"1-{self.get_line_count()}")
+        goto_input.setMaximumWidth(80)
+        goto_layout.addWidget(goto_input)
+
+        def _go():
+            text = goto_input.text().strip()
+            if not text:
+                return
+            try:
+                line_number = int(text)
+            except ValueError:
+                QMessageBox.warning(dialog, "Go to Line", "Please enter a valid line number.")
+                return
+            total_lines = self.get_line_count()
+            if line_number < 1 or line_number > total_lines:
+                QMessageBox.warning(
+                    dialog, "Go to Line",
+                    f"Line {line_number} is out of range (1-{total_lines})."
+                )
+                return
+            self.goto_line(line_number)
+
+        goto_input.returnPressed.connect(_go)
+        goto_button = QPushButton("Go")
+        goto_button.clicked.connect(_go)
+        goto_layout.addWidget(goto_button)
+        goto_layout.addStretch()
+        return goto_layout
+
     def show_find_dialog(self):
         """Show a dialog for finding text in the editor."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Find")
         layout = QVBoxLayout(dialog)
-        
+
         # Search input
-        search_label = QLabel("Find what:")
+        search_label = QLabel("Find:")
         search_input = QLineEdit()
         layout.addWidget(search_label)
         layout.addWidget(search_input)
-        
+
         # Options
         case_checkbox = QCheckBox("Match case")
         layout.addWidget(case_checkbox)
-        
+
+        # Go to line
+        layout.addLayout(self._build_goto_line_row(dialog))
+
         # Buttons
         button_layout = QHBoxLayout()
         find_next_button = QPushButton("Find Next")
@@ -350,7 +423,7 @@ class CIFTextEditor(QWidget):
         layout = QVBoxLayout(dialog)
         
         # Find input
-        find_label = QLabel("Find what:")
+        find_label = QLabel("Find:")
         find_input = QLineEdit()
         layout.addWidget(find_label)
         layout.addWidget(find_input)
@@ -364,13 +437,16 @@ class CIFTextEditor(QWidget):
         # Options
         case_checkbox = QCheckBox("Match case")
         layout.addWidget(case_checkbox)
-        
+
+        # Go to line
+        layout.addLayout(self._build_goto_line_row(dialog))
+
         # Buttons
         button_layout = QHBoxLayout()
-        
+
         find_next_button = QPushButton("Find Next")
         find_next_button.clicked.connect(lambda: self.find_text(
-            find_input.text(), 
+            find_input.text(),
             case_sensitive=case_checkbox.isChecked()
         ))
         

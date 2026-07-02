@@ -42,7 +42,16 @@ class EditorSettingsDialog(QDialog):
         ('list_bracket', 'List brackets'),
         ('table_brace', 'Table braces'),
     ]
-    
+
+    # Per-dialog interaction-mode overrides: (combo attribute, label text, settings key)
+    MODE_DIALOG_CONFIGS = [
+        ('syntax_compliance_mode_combo', 'CIF Syntax Compliance Check:', 'syntax_compliance_mode'),
+        ('non_ascii_conversion_mode_combo', 'Non-ASCII Conversion Dialog:', 'non_ascii_conversion_mode'),
+        ('critical_issues_mode_combo', 'Duplicate/Deprecated Fields Check:', 'critical_issues_mode'),
+        ('recognised_prefixes_mode_combo', 'Recognised Prefixes Dialog:', 'recognised_prefixes_mode'),
+        ('field_check_edit_mode_combo', 'Edit Line / Add Missing Line (during checks):', 'field_check_edit_mode'),
+    ]
+
     def __init__(self, parent=None, on_settings_changed=None):
         """
         Initialize the editor settings dialog.
@@ -183,6 +192,13 @@ class EditorSettingsDialog(QDialog):
         dialog_box = CollapsibleBox("Dialog Behavior")
         dialog_layout = QVBoxLayout()
 
+        dialog_help = QLabel(
+            "Controls how result dialogs interact with the main editor. "
+            # "This setting is designed to be reused by additional dialogs in the future."
+        )
+        dialog_help.setWordWrap(True)
+        dialog_layout.addWidget(dialog_help)
+
         default_mode_row = QHBoxLayout()
         default_mode_row.addWidget(QLabel("Default Dialog Interaction:"))
         self.default_dialog_mode_combo = QComboBox()
@@ -210,12 +226,18 @@ class EditorSettingsDialog(QDialog):
         cif_value_mode_row.addWidget(self.cif_value_validation_mode_combo)
         dialog_layout.addLayout(cif_value_mode_row)
 
-        dialog_help = QLabel(
-            "Controls how result dialogs interact with the main editor. "
-            # "This setting is designed to be reused by additional dialogs in the future."
-        )
-        dialog_help.setWordWrap(True)
-        dialog_layout.addWidget(dialog_help)
+        self.mode_combos = {}
+        for attr_name, label_text, settings_key in self.MODE_DIALOG_CONFIGS:
+            mode_row = QHBoxLayout()
+            mode_row.addWidget(QLabel(label_text))
+            combo = QComboBox()
+            combo.addItem("Use default", "inherit_default")
+            combo.addItem("Browse editor (read-only) while open", "browse_readonly")
+            combo.addItem("Classic modal (lock editor while open)", "modal_lock_editor")
+            mode_row.addWidget(combo)
+            dialog_layout.addLayout(mode_row)
+            setattr(self, attr_name, combo)
+            self.mode_combos[settings_key] = combo
 
         dialog_box.content_layout.addLayout(dialog_layout)
         content_layout.addWidget(dialog_box)
@@ -255,7 +277,9 @@ class EditorSettingsDialog(QDialog):
         self.default_dialog_mode_combo.blockSignals(True)
         self.validation_dialog_mode_combo.blockSignals(True)
         self.cif_value_validation_mode_combo.blockSignals(True)
-        
+        for combo in self.mode_combos.values():
+            combo.blockSignals(True)
+
         self.font_combo.setCurrentFont(QFont(self.editor_settings.get('font_family', 'Consolas')))
         self.font_size_spinbox.setValue(self.editor_settings.get('font_size', 10))
         self.line_numbers_checkbox.setChecked(self.editor_settings.get('line_numbers_enabled', True))
@@ -280,6 +304,13 @@ class EditorSettingsDialog(QDialog):
             cif_value_index = self.cif_value_validation_mode_combo.findData('allow_editing')
         self.cif_value_validation_mode_combo.setCurrentIndex(max(cif_value_index, 0))
 
+        for settings_key, combo in self.mode_combos.items():
+            mode_value = self.dialog_settings.get(settings_key, 'inherit_default')
+            mode_index = combo.findData(mode_value)
+            if mode_index < 0:
+                mode_index = combo.findData('inherit_default')
+            combo.setCurrentIndex(max(mode_index, 0))
+
         for color_key in self.color_buttons:
             self._update_color_button(color_key)
         
@@ -292,7 +323,9 @@ class EditorSettingsDialog(QDialog):
         self.default_dialog_mode_combo.blockSignals(False)
         self.validation_dialog_mode_combo.blockSignals(False)
         self.cif_value_validation_mode_combo.blockSignals(False)
-    
+        for combo in self.mode_combos.values():
+            combo.blockSignals(False)
+
     def _update_settings_from_ui(self):
         """Update settings dictionary from UI components."""
         self.editor_settings['font_family'] = self.font_combo.currentFont().family()
@@ -303,6 +336,8 @@ class EditorSettingsDialog(QDialog):
         self.dialog_settings['default_interaction_mode'] = self.default_dialog_mode_combo.currentData()
         self.dialog_settings['data_name_validation_results_mode'] = self.validation_dialog_mode_combo.currentData()
         self.dialog_settings['cif_value_validation_mode'] = self.cif_value_validation_mode_combo.currentData()
+        for settings_key, combo in self.mode_combos.items():
+            self.dialog_settings[settings_key] = combo.currentData()
 
     def _update_color_button(self, color_key: str) -> None:
         """Refresh the label and preview for one color button."""
@@ -363,7 +398,9 @@ class EditorSettingsDialog(QDialog):
             set_setting('dialogs.default_interaction_mode', self.dialog_settings['default_interaction_mode'])
             set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings['data_name_validation_results_mode'])
             set_setting('dialogs.cif_value_validation_mode', self.dialog_settings['cif_value_validation_mode'])
-            
+            for _, _, settings_key in self.MODE_DIALOG_CONFIGS:
+                set_setting(f'dialogs.{settings_key}', self.dialog_settings[settings_key])
+
             self.accept()
         except Exception as e:
             QMessageBox.warning(
@@ -399,7 +436,9 @@ class EditorSettingsDialog(QDialog):
                 set_setting('dialogs.default_interaction_mode', self.dialog_settings.get('default_interaction_mode', 'browse_readonly'))
                 set_setting('dialogs.data_name_validation_results_mode', self.dialog_settings.get('data_name_validation_results_mode', 'inherit_default'))
                 set_setting('dialogs.cif_value_validation_mode', self.dialog_settings.get('cif_value_validation_mode', 'allow_editing'))
-                
+                for _, _, settings_key in self.MODE_DIALOG_CONFIGS:
+                    set_setting(f'dialogs.{settings_key}', self.dialog_settings.get(settings_key, 'inherit_default'))
+
                 # Apply to editor if callback provided
                 if self.on_settings_changed:
                     self.on_settings_changed(self.editor_settings)
