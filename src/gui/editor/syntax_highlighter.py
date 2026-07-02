@@ -80,6 +80,11 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         # Field validator callback - set by main_window to avoid circular imports
         self._field_validator: Optional[Callable[[str], str]] = None
+        # CIF comment lines are ignored by CIF readers and should not be parsed
+        # as loop data, bracket constructs, or fields. Keep handling enabled,
+        # but keep dedicated comment styling disabled for now.
+        self._comment_line_handling_enabled = True
+        self._comment_line_highlighting_enabled = False
         
         # Field names (starting with _ at beginning of line, including hyphens, brackets, slashes, etc.)
         # This is the default format used when no validator is set
@@ -143,6 +148,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         self.loop_data_format = QTextCharFormat()
         self.loop_data_format.setBackground(QColor("#E8E8E8"))  # Light grey background for loop data
+
+        self.comment_format = QTextCharFormat()
+        self.comment_format.setForeground(QColor("#777777"))
+        self.comment_format.setFontItalic(True)
         
         # State for tracking multiline blocks and loops
         self.in_multiline = False
@@ -279,6 +288,42 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
     def has_field_validator(self) -> bool:
         """Check if a field validator callback is currently set."""
         return self._field_validator is not None
+
+    def set_comment_line_mode(self, enabled: bool, highlight_comments: bool = False):
+        """Configure handling of CIF comment lines.
+
+        Args:
+            enabled: If True, lines starting with '#' are treated as comment
+                lines by the block-state machine.
+            highlight_comments: If True and enabled, apply comment formatting
+                to the whole line. Defaults to False so comments remain visually
+                neutral for now.
+        """
+        self._comment_line_handling_enabled = bool(enabled)
+        self._comment_line_highlighting_enabled = bool(highlight_comments)
+
+    @staticmethod
+    def _is_comment_line(stripped_text: str) -> bool:
+        """Return True for CIF comment lines (after trimming leading whitespace)."""
+        return stripped_text.startswith('#')
+
+    def _handle_comment_line(self, text: str):
+        """Handle block state for CIF comment lines.
+
+        Comment lines are ignored by CIF readers and should not change loop
+        field/data phase. Optional formatting is available but disabled by
+        default.
+        """
+        if self.in_loop:
+            if self.in_loop_data:
+                self.setCurrentBlockState(self.STATE_LOOP_DATA)
+            else:
+                self.setCurrentBlockState(self.STATE_LOOP_FIELDS)
+        else:
+            self.setCurrentBlockState(self.STATE_NORMAL)
+
+        if self._comment_line_highlighting_enabled:
+            self.setFormat(0, len(text), self.comment_format)
     
     def _get_format_for_field(self, field_name: str) -> QTextCharFormat:
         """
@@ -366,6 +411,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
             self.in_loop_data = False
         
         stripped_text = text.strip()
+
+        if self._comment_line_handling_enabled and self._is_comment_line(stripped_text):
+            self._handle_comment_line(text)
+            return
 
         # Pre-transition: if the current line is the first data value in a loop
         # (we're still flagged as STATE_LOOP_FIELDS), advance in_loop_data NOW —

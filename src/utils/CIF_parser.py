@@ -135,6 +135,11 @@ class CIFParser:
         self.loops: List[CIFLoop] = []
         self.content_blocks: List[Dict] = []  # Ordered list of fields, loops, and header lines
         self.header_lines: List[str] = []  # Store important header lines like data_
+
+    @staticmethod
+    def _is_comment_line(line: str) -> bool:
+        """Return True if the line is a CIF comment line."""
+        return line.lstrip().startswith('#')
         
     def add_legacy_compatibility_fields(self, dict_manager) -> str:
         """
@@ -396,7 +401,7 @@ class CIFParser:
                 continue
             
             # Preserve comment lines
-            if line.startswith('#'):
+            if self._is_comment_line(line):
                 self.content_blocks.append({'type': 'comment', 'content': line})
                 
                 # Check if this is the start or end of a deprecated section
@@ -485,7 +490,7 @@ class CIFParser:
             line = lines[i].strip()
 
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not line or self._is_comment_line(line):
                 i += 1
                 continue
 
@@ -525,7 +530,7 @@ class CIFParser:
             line = lines[i].strip()
             
             # Skip comments but not empty lines
-            if line.startswith('#'):
+            if self._is_comment_line(line):
                 i += 1
                 continue
             
@@ -841,7 +846,7 @@ class CIFParser:
                 return field_name, val, consumed + 1, vtype  # +1 for field name line
 
             # Single line value on next line
-            if next_line and not next_line.startswith('_'):
+            if next_line and not next_line.startswith('_') and not self._is_comment_line(next_line):
                 # Check for CIF2 triple-quoted strings before single-quote check
                 for triple_delim in ('"""', "'''"):
                     if next_line.startswith(triple_delim):

@@ -29,8 +29,9 @@ theme rather than strict chronological commit order.
   arguments are ignored so future Qt flags can pass through safely.
 - **Editor/UX additions**: `Edit → Reload File` (`Ctrl+Shift+R`); customisable syntax-highlighting colours
   (including a distinct "modern-only" category) via Editor Settings, with a `Help → Syntax Highlighting
-  Guide...` reference; configurable per-dialog interaction modes (allow editing / browse read-only /
+  Guide...` reference; configurable per-dialog interaction modes with editor (allow editing / browse read-only /
   modal-lock).
+- **
 - **Absolute structure check** generalised from 3D-ED-only to any Sohncke space group, plus a check for the
   presence of a z-score for electron diffraction data.
 
