@@ -450,6 +450,7 @@ class CIFTextEditor(QWidget):
             find_input.text(),
             case_sensitive=case_checkbox.isChecked()
         ))
+        find_next_button.setDefault(True)
         
         replace_button = QPushButton("Replace")
         replace_button.clicked.connect(lambda: self.replace_text(
