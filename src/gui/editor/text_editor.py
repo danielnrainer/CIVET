@@ -406,6 +406,7 @@ class CIFTextEditor(QWidget):
             search_input.text(), 
             case_sensitive=case_checkbox.isChecked()
         ))
+        find_next_button.setDefault(True)
         button_layout.addWidget(find_next_button)
         
         close_button = QPushButton("Close")

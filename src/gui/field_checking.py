@@ -331,7 +331,8 @@ class FieldCheckingMixin:
         lines = self.text_editor.toPlainText().splitlines()
         
         for i, line in enumerate(lines):
-            if line.startswith(prefix):
+            parts = line.split(None, 1)
+            if parts and parts[0] == prefix:
                 current_value = self.extract_field_value(lines, i, prefix)
                 
                 # Determine operation type based on whether value differs from default
@@ -437,7 +438,8 @@ class FieldCheckingMixin:
         # Check if field exists
         field_found = False
         for i, line in enumerate(lines):
-            if line.startswith(prefix):
+            parts = line.split(None, 1)
+            if parts and parts[0] == prefix:
                 field_found = True
                 current_value = self.extract_field_value(lines, i, prefix).strip(removable_chars)
                 
@@ -461,7 +463,7 @@ class FieldCheckingMixin:
                 
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
-                    f"Line {i + 2}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    f"Line {i + 1}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
                     current_value, default_value, operation_type=operation_type, suggestions=suggestions,
                     show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                         d, "dialogs.field_check_edit_mode"

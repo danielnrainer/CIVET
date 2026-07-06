@@ -19,8 +19,8 @@ _exptl_crystal.description  'irregular'  # suggestions: 'plate', 'needle', 'bloc
 # _diffrn_radiation_wavelength.value: Electron wavelength in Å
 _diffrn_radiation_wavelength.value  0.0251
 
-# _diffrn_source.description: Primary description of the electron source
-_diffrn_source.description  'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
+# _diffrn_source: Primary description of the electron source
+_diffrn_source  'electron gun'  # suggestion: 'electron gun' in favour of 'electron microscope'
 
 # _diffrn_source.make: Details of electron source type
 _diffrn_source.make  'JEOL JSM-2300ED, LaB6'  # suggestions: 'LaB6', 'tungsten', 'FEG', 'Schottky FEG', 'cold FEG'

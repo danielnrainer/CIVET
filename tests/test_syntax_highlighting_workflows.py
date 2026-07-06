@@ -1,6 +1,7 @@
 """Behavior-focused tests for syntax-highlighting token classification workflows."""
 
 import pytest
+from PyQt6.QtGui import QTextDocument
 from PyQt6.QtWidgets import QApplication
 
 from gui.editor.syntax_highlighter import CIFSyntaxHighlighter
@@ -79,3 +80,43 @@ def test_validated_field_highlighting_uses_full_token_for_classification(app, mo
     highlighter._apply_validated_field_highlighting('_audit_contact.author_name"', '_audit_contact.author_name"')
 
     assert captured_fields == ['_audit_contact.author_name"']
+
+
+def test_hash_inside_semicolon_multiline_value_does_not_end_the_block(app):
+    """A '#' cannot start a comment inside a CIF semicolon-delimited text
+    field - the multiline value takes precedence over comment detection."""
+    _ = app
+    document = QTextDocument()
+    highlighter = CIFSyntaxHighlighter(document)
+
+    document.setPlainText(
+        "\n".join(
+            [
+                "data_test",
+                "_publ_section_comment",
+                ";",
+                "This line is fine.",
+                "# This is not a comment, just text starting with a hash.",
+                "Still inside the value.",
+                ";",
+                "_cell_length_a 4.321",
+                "",
+            ]
+        )
+    )
+    highlighter.rehighlight()
+
+    # Block indices: 0 data_test, 1 field, 2 opening ';', 3 text, 4 '#' line,
+    # 5 text, 6 closing ';', 7 next field, 8 trailing blank line.
+    hash_line_block = document.findBlockByNumber(4)
+    assert hash_line_block.text().startswith('#')
+    # The '#' line must remain inside the semicolon multiline block state,
+    # not be reset to STATE_NORMAL/STATE_LOOP_* by comment handling.
+    assert hash_line_block.userState() == CIFSyntaxHighlighter.STATE_SEMICOLON_MULTILINE
+
+    closing_semicolon_block = document.findBlockByNumber(6)
+    assert closing_semicolon_block.text() == ';'
+    assert closing_semicolon_block.userState() == CIFSyntaxHighlighter.STATE_NORMAL
+
+    next_field_block = document.findBlockByNumber(7)
+    assert next_field_block.text() == '_cell_length_a 4.321'

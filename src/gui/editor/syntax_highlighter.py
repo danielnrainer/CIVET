@@ -412,7 +412,10 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         
         stripped_text = text.strip()
 
-        if self._comment_line_handling_enabled and self._is_comment_line(stripped_text):
+        # A '#' cannot start a comment inside a semicolon-delimited multiline
+        # value — the value takes precedence over comment detection.
+        if (self._comment_line_handling_enabled and not self.in_multiline
+                and self._is_comment_line(stripped_text)):
             self._handle_comment_line(text)
             return
 

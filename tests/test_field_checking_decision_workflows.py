@@ -1,7 +1,9 @@
 """Behavior-focused tests for field-checking decision workflows."""
 
+from PyQt6.QtWidgets import QDialog
 from PyQt6.QtWidgets import QMessageBox
 
+import gui.field_checking as field_checking_module
 from gui.field_checking import FieldCheckingMixin
 from utils.cif_dictionary_manager import FieldNotation
 
@@ -25,6 +27,13 @@ class _DecisionHarness(FieldCheckingMixin):
         self._electron_data = True
         self._probe = (None, None)
 
+        class _DictManager:
+            @staticmethod
+            def is_field_deprecated(_prefix):
+                return False
+
+        self.dict_manager = _DictManager()
+
     def extract_field_value(self, lines, index, prefix):
         line = lines[index]
         parts = line.split(None, 1)
@@ -46,6 +55,10 @@ class _DecisionHarness(FieldCheckingMixin):
 
     def _get_radiation_probe(self):
         return self._probe
+
+    def _show_dialog_with_configured_interaction(self, dialog, mode_setting_key=None):
+        _ = (dialog, mode_setting_key)
+        return QDialog.DialogCode.Accepted
 
 
 class _DummyRulesFieldChecker:
@@ -182,3 +195,33 @@ def test_mismatch_resolution_can_convert_cif_before_checks(tmp_path, monkeypatch
     assert result is True
     assert checker.text_editor.toPlainText() == "_cell.length_a 1"
     assert checker.modified is True
+
+
+def test_check_line_with_config_matches_exact_field_name(monkeypatch):
+    checker = _DecisionHarness(
+        "_diffrn_radiation_wavelength.type electron\n"
+        "_diffrn_radiation_wavelength 0.02510\n"
+    )
+
+    captured = {}
+
+    def fake_get_text(parent, title, prompt, current_value, default_value, **kwargs):
+        _ = (parent, title, default_value, kwargs)
+        captured["prompt"] = prompt
+        captured["current_value"] = current_value
+        return current_value, QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(field_checking_module.CIFInputDialog, "getText", fake_get_text)
+
+    result = checker.check_line_with_config(
+        "_diffrn_radiation_wavelength",
+        "0.0251",
+        False,
+        "Electron wavelength in A",
+        {"skip_matching_defaults": False},
+    )
+
+    assert result == QDialog.DialogCode.Rejected
+    assert captured["current_value"] == "0.02510"
+    assert "Line 2:" in captured["prompt"]
+    assert "_diffrn_radiation_wavelength 0.02510" in captured["prompt"]
