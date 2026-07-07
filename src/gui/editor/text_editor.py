@@ -65,6 +65,11 @@ class CIFTextEditor(QWidget):
             'syntax_highlighting_colors': DEFAULT_SETTINGS['editor']['syntax_highlighting_colors'].copy()
         }
         
+        # Cache of the line count last rendered into the gutter, so we can skip
+        # rebuilding the (potentially large) line-number document on every edit
+        # when the number of lines has not actually changed.
+        self._last_line_number_count = -1
+
         self.init_ui()
         self.load_settings()
         self.apply_settings()
@@ -222,6 +227,58 @@ class CIFTextEditor(QWidget):
         """Set the text content."""
         self.text_editor.setText(text)
         self.update_line_numbers()
+
+    def replace_contents_incrementally(self, new_text):
+        """Replace the editor contents while only editing the region that changed.
+
+        ``QTextEdit.setText`` rebuilds the whole document, which forces the
+        syntax highlighter to re-highlight every block synchronously - expensive
+        on large CIF files and the main cause of lag between dialogs during the
+        field-check loop (which rewrites the editor after every field).
+
+        This instead computes the minimal changed character range (common prefix
+        and suffix) and replaces only that span through a single QTextCursor
+        edit. The highlighter then only re-processes the blocks actually touched
+        (plus any following blocks whose multi-line state changed), and the edit
+        is a single undo step. The viewport scroll position is preserved so the
+        editor does not jump. When the whole document differs this naturally
+        degrades to a full replacement.
+        """
+        editor = self.text_editor
+        old_text = editor.toPlainText()
+        if old_text == new_text:
+            return
+
+        len_old = len(old_text)
+        len_new = len(new_text)
+
+        # Longest common prefix.
+        max_prefix = min(len_old, len_new)
+        prefix = 0
+        while prefix < max_prefix and old_text[prefix] == new_text[prefix]:
+            prefix += 1
+
+        # Longest common suffix that does not overlap the shared prefix.
+        max_suffix = min(len_old, len_new) - prefix
+        suffix = 0
+        while (suffix < max_suffix
+               and old_text[len_old - 1 - suffix] == new_text[len_new - 1 - suffix]):
+            suffix += 1
+
+        vbar = editor.verticalScrollBar()
+        saved_scroll = vbar.value() if vbar is not None else None
+
+        cursor = editor.textCursor()
+        cursor.beginEditBlock()
+        cursor.setPosition(prefix)
+        cursor.setPosition(len_old - suffix, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(new_text[prefix:len_new - suffix])
+        cursor.endEditBlock()
+
+        if saved_scroll is not None:
+            vbar.setValue(min(saved_scroll, vbar.maximum()))
+
+        self.update_line_numbers()
     
     def append_text(self, text):
         """Append text to the editor."""
@@ -235,7 +292,7 @@ class CIFTextEditor(QWidget):
     def clear(self):
         """Clear the editor content."""
         self.text_editor.clear()
-        self.update_line_numbers()
+        self.update_line_numbers(force=True)
     
     def undo(self):
         """Undo the last operation."""
@@ -304,10 +361,26 @@ class CIFTextEditor(QWidget):
         """Handle cursor position change events."""
         self.cursorPositionChanged.emit()
     
-    def update_line_numbers(self):
-        """Update the line numbers display."""
-        text = self.text_editor.toPlainText()
-        num_lines = text.count('\n') + 1
+    def update_line_numbers(self, force=False):
+        """Update the line numbers display.
+
+        The gutter document is only rebuilt when the number of lines actually
+        changes (or when *force* is set, e.g. after a font/settings change).
+        Editing within an existing line - which is the common case during field
+        checks and normal typing - leaves the line count unchanged, so we can
+        skip rebuilding the whole gutter document, re-merging the alignment
+        block format across it, and re-syncing scroll on every edit.
+        """
+        num_lines = self.text_editor.document().blockCount()
+
+        if not force and num_lines == self._last_line_number_count:
+            # Line count unchanged; the existing gutter is still correct. Just
+            # keep the scroll position aligned with the main editor.
+            self._sync_line_number_scroll()
+            return
+
+        self._last_line_number_count = num_lines
+
         numbers = '\n'.join(str(i) for i in range(1, num_lines + 1))
         self.line_numbers.setText(numbers)
 

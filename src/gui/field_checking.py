@@ -46,6 +46,22 @@ SOHNCKE_SPACE_GROUPS = {
 class FieldCheckingMixin:
     """Mixin providing field checking workflow methods for CIFEditor."""
 
+    def _set_editor_text(self, text: str) -> None:
+        """Update the editor contents, preferring an incremental (non-rebuilding) edit.
+
+        In the full application the editor is a CIFTextEditor exposed as
+        ``self.cif_text_editor``; its ``replace_contents_incrementally`` edits
+        only the changed region so the syntax highlighter re-processes just the
+        affected blocks instead of the whole document. Standalone test harnesses
+        provide a minimal ``self.text_editor`` stub with only ``setText`` - fall
+        back to that when the rich editor is unavailable.
+        """
+        editor_widget = getattr(self, 'cif_text_editor', None)
+        if editor_widget is not None and hasattr(editor_widget, 'replace_contents_incrementally'):
+            editor_widget.replace_contents_incrementally(text)
+        else:
+            self.text_editor.setText(text)
+
     def _get_active_field_rules_path(self) -> str:
         """Return the currently selected .cif_rules source path, if any."""
         if hasattr(self, 'radio_builtin') and self.radio_builtin.isChecked():
@@ -185,7 +201,7 @@ class FieldCheckingMixin:
                 converted_cif, changes = self.format_converter.convert_to_legacy_notation(cif_content)
 
             if converted_cif != cif_content:
-                self.text_editor.setText(converted_cif)
+                self._set_editor_text(converted_cif)
                 self.modified = True
                 QMessageBox.information(
                     self,
@@ -357,7 +373,7 @@ class FieldCheckingMixin:
                 elif result == QDialog.DialogCode.Accepted and value:
                     # Update the field value properly
                     self.update_field_value(lines, i, prefix, value)
-                    self.text_editor.setText("\n".join(lines))
+                    self._set_editor_text("\n".join(lines))
                 return result
 
         QMessageBox.warning(self, "Line Not Found",
@@ -400,7 +416,7 @@ class FieldCheckingMixin:
                 formatted_value = stripped_value
             lines.append(f"{prefix} {formatted_value}")
         
-        self.text_editor.setText("\n".join(lines))
+        self._set_editor_text("\n".join(lines))
         return result    
     
     def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None, suggestions=None):
@@ -474,7 +490,7 @@ class FieldCheckingMixin:
                 elif result == QDialog.DialogCode.Accepted and value:
                     # Update the field value properly
                     self.update_field_value(lines, i, prefix, value)
-                    self.text_editor.setText("\n".join(lines))
+                    self._set_editor_text("\n".join(lines))
                 return result
 
         # Field not found - handle missing field
@@ -508,7 +524,7 @@ class FieldCheckingMixin:
                     formatted_value = stripped_value
                 lines.append(f"{prefix} {formatted_value}")
             
-            self.text_editor.setText("\n".join(lines))
+            self._set_editor_text("\n".join(lines))
             return QDialog.DialogCode.Accepted
         
         # Otherwise, use the normal missing line dialog
@@ -583,7 +599,7 @@ class FieldCheckingMixin:
         
         # Generate updated CIF content and update the text editor
         updated_content = self.cif_parser.generate_cif_content()
-        self.text_editor.setText(updated_content)
+        self._set_editor_text(updated_content)
         self._check_duplicate_data_names("adding deprecated successor data names", block_on_conflicts=False)
         
         QMessageBox.information(
@@ -656,7 +672,7 @@ class FieldCheckingMixin:
             
             # Generate updated CIF content and update the text editor
             updated_cif = self.cif_parser.generate_cif_content()
-            self.text_editor.setText(updated_cif)
+            self._set_editor_text(updated_cif)
             self.modified = True
             self.update_status_bar()
             
@@ -711,40 +727,48 @@ class FieldCheckingMixin:
         
         # Get configuration settings
         config = config_dialog.get_config()
-        
+
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
-        
-        # PRE-CHECK: Validate data names against dictionaries (if enabled)
-        # This now includes malformed field detection (e.g. _diffrn_flux_density → _diffrn.flux_density)
-        if config.get('validate_data_names', True):
-            validation_success = self._validate_data_names_before_checks()
-            if not validation_success:
-                return  # User cancelled or aborted
-        
-        # Single field set processing
-        success = self._process_single_field_set(config, initial_state)
-        if not success:
-            return
-        
-        # Check for duplicates and aliases LAST (if enabled)
-        if config.get('check_duplicates_aliases', True):
-            duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
-            if not duplicate_check_success:
-                return  # User aborted or there was an error
-        
-        # Update _audit_creation_method to include CIVET info after successful checks
-        content = self.text_editor.toPlainText()
-        cif_format = self.dict_manager.detect_cif_format(content)
-        updated_content = update_audit_creation_method(content, cif_format)
-        if updated_content != content:
-            self.text_editor.setText(updated_content)
-            self.modified = True
-        
-        # If we get here, checks completed successfully
-        if config.get('reformat_after_checks', False):
-            self.reformat_file()
-        
+
+        # Suspend debounced/background compliance refreshes for the duration of
+        # the check run. The loop rewrites the editor after every field, and each
+        # rewrite would otherwise re-validate the whole file on a background
+        # thread between dialogs. A single refresh runs when the batch completes.
+        self._begin_compliance_batch()
+        try:
+            # PRE-CHECK: Validate data names against dictionaries (if enabled)
+            # This now includes malformed field detection (e.g. _diffrn_flux_density → _diffrn.flux_density)
+            if config.get('validate_data_names', True):
+                validation_success = self._validate_data_names_before_checks()
+                if not validation_success:
+                    return  # User cancelled or aborted
+
+            # Single field set processing
+            success = self._process_single_field_set(config, initial_state)
+            if not success:
+                return
+
+            # Check for duplicates and aliases LAST (if enabled)
+            if config.get('check_duplicates_aliases', True):
+                duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
+                if not duplicate_check_success:
+                    return  # User aborted or there was an error
+
+            # Update _audit_creation_method to include CIVET info after successful checks
+            content = self.text_editor.toPlainText()
+            cif_format = self.dict_manager.detect_cif_format(content)
+            updated_content = update_audit_creation_method(content, cif_format)
+            if updated_content != content:
+                self._set_editor_text(updated_content)
+                self.modified = True
+
+            # If we get here, checks completed successfully
+            if config.get('reformat_after_checks', False):
+                self.reformat_file()
+        finally:
+            self._end_compliance_batch()
+
         self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
 
@@ -875,7 +899,7 @@ class FieldCheckingMixin:
             if reply == QMessageBox.StandardButton.Yes:
                 fixed_content, changes = self.dict_manager.fix_malformed_fields_in_content(content, malformed)
                 if changes:
-                    self.text_editor.setText(fixed_content)
+                    self._set_editor_text(fixed_content)
                     self.modified = True
             
             return True  # Continue with checks (whether fixed or not)
@@ -961,7 +985,7 @@ class FieldCheckingMixin:
                         if done:
                             operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
                     if done:
-                        self.text_editor.setText('\n'.join(lines))
+                        self._set_editor_text('\n'.join(lines))
                     continue
 
                 # --- CHECK / CALCULATE ---
@@ -1038,7 +1062,7 @@ class FieldCheckingMixin:
                 )
 
                 if result == RESULT_ABORT:
-                    self.text_editor.setText(initial_state)
+                    self._set_editor_text(initial_state)
                     self.update_window_title()
                     QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                     return False
@@ -1057,7 +1081,7 @@ class FieldCheckingMixin:
             return True
             
         except Exception as e:
-            self.text_editor.setText(initial_state)
+            self._set_editor_text(initial_state)
             self.update_window_title()
             QMessageBox.critical(self, "Error During Checks", f"An error occurred: {str(e)}")
             return False
@@ -1163,7 +1187,7 @@ class FieldCheckingMixin:
                 config=config
             )
             if result == RESULT_ABORT:
-                self.text_editor.setText(initial_state)
+                self._set_editor_text(initial_state)
                 self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
@@ -1179,7 +1203,7 @@ class FieldCheckingMixin:
                 config=config
             )
             if result == RESULT_ABORT:
-                self.text_editor.setText(initial_state)
+                self._set_editor_text(initial_state)
                 self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
@@ -1215,7 +1239,7 @@ class FieldCheckingMixin:
                 config=config
             )
             if result == RESULT_ABORT:
-                self.text_editor.setText(initial_state)
+                self._set_editor_text(initial_state)
                 self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
@@ -1231,7 +1255,7 @@ class FieldCheckingMixin:
                 config=config
             )
             if result == RESULT_ABORT:
-                self.text_editor.setText(initial_state)
+                self._set_editor_text(initial_state)
                 self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
@@ -1428,7 +1452,7 @@ class FieldCheckingMixin:
             
             if dialog_result == 0:  # Cancel
                 # User wants to abort - restore initial state
-                self.text_editor.setText(initial_state)
+                self._set_editor_text(initial_state)
                 self.update_window_title()
                 QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
                 return False
@@ -1563,7 +1587,7 @@ class FieldCheckingMixin:
                 resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
                 
                 if changes:
-                    self.text_editor.setText(resolved_content)
+                    self._set_editor_text(resolved_content)
                     self.modified = True
                     
                     change_summary = f"✅ Successfully resolved {len(conflicts)} conflict(s):\n\n"

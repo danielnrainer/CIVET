@@ -117,6 +117,13 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         # Track dialog-driven read-only state so editor is scrollable while dialogs are open.
         self._dialog_editor_lock_count = 0
         self._editor_readonly_before_dialog = False
+
+        # When >0, editor text changes skip the debounced compliance refresh.
+        # Batch operations that rewrite the editor many times in quick succession
+        # (e.g. the field-check loop, which updates the editor after every field)
+        # raise this so the whole file is not re-validated on a background thread
+        # between every dialog. A single refresh is run when the batch finishes.
+        self._suppress_compliance_refresh = 0
         
         self.init_ui()
         
@@ -1347,10 +1354,29 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         self.modified = True
         self.update_status_bar()
 
+        # During batch operations (e.g. the field-check loop) skip scheduling the
+        # debounced compliance refresh. Each edit would otherwise restart the
+        # timers and, while a dialog's event loop is running, spawn a full-file
+        # background re-validation - contending for the GIL right as the next
+        # dialog opens. The batch runs a single refresh when it completes.
+        if self._suppress_compliance_refresh:
+            return
+
         # Keep quick syntax/notation feedback responsive while deferring heavy checks.
         self._compliance_revision += 1
         self._compliance_light_timer.start(300)
         self._compliance_heavy_timer.start(1200)
+
+    def _begin_compliance_batch(self):
+        """Suspend debounced compliance refreshes for a batch editor operation."""
+        self._suppress_compliance_refresh += 1
+
+    def _end_compliance_batch(self):
+        """Resume compliance refreshes and run one refresh for the final state."""
+        if self._suppress_compliance_refresh > 0:
+            self._suppress_compliance_refresh -= 1
+        if self._suppress_compliance_refresh == 0:
+            self._refresh_compliance_status()
 
     def _refresh_compliance_status_light(self):
         """Run only quick syntax and notation checks used by typing feedback."""

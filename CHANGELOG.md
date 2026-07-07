@@ -3,7 +3,7 @@
 All notable changes to CIVET are documented in this file. Dates are release dates; entries are grouped by
 theme rather than strict chronological commit order.
 
-## [1.3] - 2026-07-01
+## [1.3] - 2026-07-06
 
 ### Added
 - **CIF Syntax Compliance dialog**: dedicated tabbed dialog (CIF 2.0 / CIF 1.1 / all) covering syntax-version
@@ -31,7 +31,6 @@ theme rather than strict chronological commit order.
   (including a distinct "modern-only" category) via Editor Settings, with a `Help → Syntax Highlighting
   Guide...` reference; configurable per-dialog interaction modes with editor (allow editing / browse read-only /
   modal-lock).
-- **
 - **Absolute structure check** generalised from 3D-ED-only to any Sohncke space group, plus a check for the
   presence of a z-score for electron diffraction data.
 
@@ -52,8 +51,7 @@ theme rather than strict chronological commit order.
 - Sequential `.cif_rules` processing now applies each rule immediately (e.g. a `RENAME` followed by a
   `CHECK` for the old name correctly prompts to re-add it), and repeated `APPEND` runs no longer duplicate
   content already present in a semicolon-block value.
-- Various fixes to deprecated-field checks, dictionary search line-mapping/highlighting, and multiline-value
-  deletion edge cases.
+- Various fixes to deprecated-field checks, dictionary search line-mapping/highlighting, and multiline-value deletion edge cases.
 
 ### Testing
 - Continued expansion of the workflow-oriented automated test suite (parsing, format conversion, data-name

@@ -158,7 +158,7 @@ class DataNameIntegrityMixin:
 
         resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
         if changes:
-            self.text_editor.setText(resolved_content)
+            self._set_editor_text(resolved_content)
             self.modified = True
 
         remaining_conflicts, _ = get_data_name_conflicts_requiring_resolution(

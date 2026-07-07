@@ -720,11 +720,26 @@ class CIFSyntaxHighlighter(QSyntaxHighlighter):
         return -1
     
     def _apply_background_to_range(self, start: int, length: int, bg_color: QColor):
-        """Apply a background colour to a character range, preserving existing foreground formats."""
-        for i in range(start, start + length):
-            fmt = self.format(i)
-            fmt.setBackground(bg_color)
-            self.setFormat(i, 1, fmt)
+        """Apply a background colour to a character range, preserving existing foreground formats.
+
+        Rather than reapplying the format one character at a time (which issues two
+        Qt calls per character and dominates re-highlight time on large loops), this
+        coalesces runs of characters that already share the same format and applies
+        the background to each run in a single setFormat() call. For typical loop
+        lines - where the whole line uses one or two formats - this collapses dozens
+        or hundreds of calls into just a few, with identical visual output.
+        """
+        end = start + length
+        i = start
+        while i < end:
+            base_fmt = self.format(i)
+            j = i + 1
+            while j < end and self.format(j) == base_fmt:
+                j += 1
+            run_fmt = QTextCharFormat(base_fmt)
+            run_fmt.setBackground(bg_color)
+            self.setFormat(i, j - i, run_fmt)
+            i = j
 
     def _apply_standard_rules(self, text: str, stripped_text: str):
         """Apply standard highlighting rules without validation (backwards compatible)."""
