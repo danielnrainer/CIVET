@@ -26,13 +26,20 @@ class DataNameIntegrityMixin:
     ) -> int:
         raise NotImplementedError()
 
-    def _auto_resolve_conflicts(
-        self,
-        conflicts: Dict[str, List[str]],
-        cif_content: str,
-        cif_format: str = "modern",
-    ) -> Dict[str, tuple]:
-        raise NotImplementedError()
+    if TYPE_CHECKING:
+        # Declared for static type checkers only. The real implementation
+        # lives in FormatHandlersMixin, which comes later than this mixin
+        # in CIFEditor's MRO. Defining a runtime stub here (even one that
+        # raises NotImplementedError) would shadow that implementation and
+        # break auto-resolve for every caller, since Python resolves
+        # self._auto_resolve_conflicts to the first match in MRO order.
+        def _auto_resolve_conflicts(
+            self,
+            conflicts: Dict[str, List[str]],
+            cif_content: str,
+            cif_format: str = "modern",
+        ) -> Dict[str, tuple]:
+            ...
 
     def _format_data_name_conflict_summary(
         self,
