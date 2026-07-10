@@ -1,4 +1,5 @@
 #\#CIF_2.0
+# SPDX-License-Identifier: CC-BY-4.0
 ##############################################################################
 #                                                                            #
 #                    CIF Twinning Dictionary                                 #
@@ -14,30 +15,32 @@ data_CIF_TWIN
     _dictionary.title             CIF_TWIN
     _dictionary.class             Instance
     _dictionary.version           3.1.0
-    _dictionary.date              2024-11-29
+    _dictionary.date              2026-05-01
     _dictionary.uri
         https://github.com/COMCIFS/Twinning_Dictionary/blob/main/cif_twin.dic
     _dictionary.ddl_conformance   4.2.0
+    _dictionary.licensing_SPDX    CC-BY-4.0
     _dictionary.namespace         CifCore
     _description.text
 ;
-    The DICTIONARY group defines the data items used to specify
+    The CIF_TWIN dictionary defines the data items used to specify
     the twinning aspects of crystals in a crystallographic study.
 ;
 
-save_TWIN_GROUP
+save_CIF_TWIN_HEAD
 
-    _definition.id                TWIN_GROUP
+    _definition.id                CIF_TWIN_HEAD
     _definition.scope             Category
     _definition.class             Head
-    _definition.update            2024-05-15
+    _definition.update            2025-11-24
     _description.text
 ;
-     The TWIN_GROUP data items describe atomic information
-     used in crystallographic structure studies.
+     The CIF_TWIN_HEAD category is the top-level category for all categories
+     in the CIF_TWIN dictionary.  Definitions in this dictionary are used to
+     describe crystal twinning.
 ;
     _name.category_id             CIF_TWIN
-    _name.object_id               TWIN_GROUP
+    _name.object_id               CIF_TWIN_HEAD
 
     _import.get
         [
@@ -57,13 +60,13 @@ save_TWIN
 
      Data items in the TWIN category record general details about
      the nature of the twinning in the sample.
-     Terminology for twin dataname definitions was taken directly from:
+     Terminology for twin data name definitions was taken directly from:
      'International Union of Crystallography Commission on Mathematical
      and Theoretical Crystallography Research themes: Crystal twinning'
      by Massimo Nespolo, February 3, 2009.
-     https://www.crystallography.fr/mathcryst/twins.htm .
+     https://www.crystallography.fr/mathcryst/twins.htm.
 ;
-    _name.category_id             TWIN_GROUP
+    _name.category_id             CIF_TWIN_HEAD
     _name.object_id               TWIN
     _description_example.case
 ;
@@ -72,7 +75,8 @@ save_TWIN
     _twin.morphology                  polysynthetic
     _twin.special_details
     ;        This is an example of a twin in space group P 32
-             by the 2 x,x,0 twin operation.
+             where individuals are related by the
+             2 x,x,0 twin symmetry.
     ;
 
     loop_
@@ -128,16 +132,16 @@ save_TWIN
     a trigonal crystal system. The simulated space group is P 32 2 1, but
     the true space group is P 32. The twin operation chosen is 2: x, x, 0 in
     P 32 2 1 corresponding to operation (by rows) 0, 1, 0 / 1, 0, 0 / 0, 0, -1
-    [see Table 11.2.2.1 of International Tables for Crystallography
-    (2005), Vol. A].
+    [see Table 1.2.2.1 of International Tables for Crystallography
+    (2016), Vol. A].
 
     The TWIN_REFLN loop gives the properties of each diffraction peak
     (identified by _twin_refln.datum_id) which is indexed
     to both the twin individuals.
 
-    In each of the loops shown in this example the first items on a line
+    In each of the loops shown in this example, the first items on a line
     are the list reference.  While the list reference must be present
-    in every loop, it is not necessary that it should be declared as the
+    in every loop, it is not necessary that it be declared as the
     first item in the loop.
 ;
 
@@ -267,7 +271,7 @@ save_TWIN_INDIVIDUAL
 ;
 
      Data items in the TWIN_INDIVIDUAL category describe properties
-     of each twinned individual, and the symmetry relationships
+     of each twinned individual and the symmetry relationships
      between the individuals.
 ;
     _name.category_id             TWIN
@@ -603,7 +607,7 @@ save_TWIN_REFLN
      Items in the TWIN_REFLN category tabulate the calculated values of F^2^
      for each peak observed in the diffraction pattern, together with the
      measured value of F^2^.  The calculated F^2^ for an observed peak is
-     a weighted sum of the contribution of all the twin components.  The
+     a weighted sum of the contributions of all the twin components.  The
      calculated structure factor for each twin contribution can also be given.
 ;
     _name.category_id             TWIN
@@ -648,7 +652,7 @@ save_TWIN_REFLN
 ;
          This partial listing describes seven observed diffraction peaks
          in a four-individual twin by non-merohedry. The reference individual
-         is 1. Reflections from the other three individuals 2, 3 and 4 are
+         is 1. Reflections from the other three individuals, 2, 3 and 4, are
          present only if these cannot be experimentally separated from the
          reference individual.
 ;
@@ -691,7 +695,7 @@ save_TWIN_REFLN
          in space group I2.
 
          The individuals are enantiomorphic as a result of the phase
-         transition.  In the listing it is clear that reflections with
+         transition.  In the listing, it is clear that reflections with
          _twin_refln.datum_id 620-624 do not contain overlapping
          reflections, whereas those with _twin_refln.datum_id 625-629
          contain contributions from both twins.
@@ -744,7 +748,7 @@ save_twin_refln.f_squared_calc
      _twin_refln.F_squared_calc = osf * Sum (mf * _refln.F_squared_calc)
 
      where osf is the overall scale factor,
-     mf is the mass fraction,
+     mf is the mass fraction
      and the sum is taken over all the twin components that contribute
      to this diffraction peak.
 
@@ -808,8 +812,8 @@ save_twin_refln.f_squared_calc_individual
 
      _twin_refln.F_squared_calc_individual = osf * mf * _refln.F_squared_calc
 
-     where osf is the overall scale factor, mf is the mass factor.
-     For X-ray diffraction the units are electrons squared.
+     where osf is the overall scale factor and mf is the mass factor.
+     For X-ray diffraction, the units are electrons squared.
 ;
     _name.category_id             twin_refln
     _name.object_id               F_squared_calc_individual
@@ -1095,6 +1099,19 @@ save_twin_refln.individual_id
 
 save_
 
+#=============================================================================
+#  The dictionary's creation history.
+#============================================================================
+
+    loop_
+      _dictionary_author.id
+      _dictionary_author.name
+      _dictionary_author.id_orcid
+      _dictionary_author.email
+         1     'Young Jr, V. G.'     0000-0003-4238-0032     vyoung@umn.edu
+         2     'Brown, I. D.'        0000-0002-6267-2692     .
+         3     'Hester, J. R.'       0000-0002-2004-8672     jxh@ansto.gov.au
+
     loop_
       _dictionary_audit.version
       _dictionary_audit.date
@@ -1175,7 +1192,7 @@ save_
                    Added r to enumeration list of _twin_refln_include_status.
        2014-02-14  BMcM and NJA: minor editing for clean release version
 ;
-         3.1.0                    2024-11-29
+         3.1.0                    2026-05-01
 ;
        2014-06-20  Converted to DDLm (SRH/JRH)
        2024-11-21  Examples and history returned to main dictionary (JRH)
@@ -1184,4 +1201,7 @@ save_
        2024-11-29  Fix and improve text formatting in several definitions (JRH).
                    Further fix and improve text formatting and correct some
                    typos/style points (BMcM).
+       2025-11-24  Changed Head category name for this dictionary (BMcM).
+       2026-04-07  Added dictionary author details; updated International
+                   Tables reference; minor style tweaks (BMcM).
 ;

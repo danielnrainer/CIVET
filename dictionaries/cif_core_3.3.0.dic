@@ -11,7 +11,7 @@ data_CIF_CORE
     _dictionary.title             CIF_CORE
     _dictionary.class             Instance
     _dictionary.version           3.3.0
-    _dictionary.date              2026-04-20
+    _dictionary.date              2026-07-10
     _dictionary.uri
         https://raw.githubusercontent.com/COMCIFS/cif_core/master/cif_core.dic
     _dictionary.ddl_conformance   4.2.0
@@ -389,10 +389,12 @@ save_
 save_diffrn.flux_density
 
     _definition.id                '_diffrn.flux_density'
-    _definition.update            2025-02-07
+    _definition.update            2026-06-19
     _description.text
 ;
-    Flux density of radiation incident at the crystal.
+    Flux density of radiation incident at the crystal. If flux is a
+    characteristic of the source that does not change between measurements,
+    _diffrn_radiation.beam_flux should be used instead.
 
     Reference: Dickerson, J. L., McCubbin, P. T. N., Brooks-Bartlett,
     J. C. & Garman, E. F. (2024). Doses for X-ray and electron
@@ -2488,6 +2490,117 @@ save_diffrn_attenuator.scale
 
 save_
 
+save_DIFFRN_COMPONENT_PID
+
+    _definition.id                DIFFRN_COMPONENT_PID
+    _definition.scope             Category
+    _definition.class             Loop
+    _definition.update            2026-04-29
+    _description.text
+;
+    The category of data items providing persistent identifiers for
+    instrumentation associated with data collection. These identifiers
+    will generally be registered with independent organisations.
+;
+    _name.category_id             DIFFRN
+    _name.object_id               DIFFRN_COMPONENT_PID
+    loop_
+      _category_key.name
+         '_diffrn_component_pid.PID'
+         '_diffrn_component_pid.framework'
+
+    _description_example.case
+;
+       _diffrn_component_pid.PID        10.5442/ni000019
+       _diffrn_component_pid.framework  DataCite
+       _diffrn_component_pid.details    "EMIL beamline"
+;
+    _description_example.detail
+;
+        Data were collected at the hard X-ray EMIL beamline at the BESSY
+        synchrotron. Metadata for this DOI conform to the RDA recommended
+        schema at https://doi.org/10.15497/RDA00070.
+;
+
+save_
+
+save_diffrn_component_pid.details
+
+    _definition.id                '_diffrn_component_pid.details'
+    _definition.update            2026-04-29
+    _description.text
+;
+    The part of the instrumentation to which the PID refers. This
+    value is purely descriptive; the metadata obtained via the PID
+    should be used for rigorous classification and identification.
+;
+    _name.category_id             diffrn_component_pid
+    _name.object_id               details
+    _type.purpose                 Describe
+    _type.source                  Recorded
+    _type.container               Single
+    _type.contents                Text
+
+    loop_
+      _description_example.case
+         'Mo X-ray target'
+         '9-module CCD detector'
+         'Lab diffractometer with Mo source and custom detector'
+
+save_
+
+save_diffrn_component_pid.framework
+
+    _definition.id                '_diffrn_component_pid.framework'
+    _definition.update            2026-04-29
+    _description.text
+;
+    The framework to which the metadata for the PID conform. A framework
+    includes both the PID type and a metadata schema.
+;
+    _name.category_id             diffrn_component_pid
+    _name.object_id               framework
+    _type.purpose                 Encode
+    _type.source                  Assigned
+    _type.container               Single
+    _type.contents                Text
+
+    loop_
+      _enumeration_set.state
+      _enumeration_set.detail
+         DataCite
+;
+         DOI resolving to metadata described in the RDA PIDINST white paper
+         at DOI 10.15497/RDA00070 and using the DataCite schema.
+;
+         ePIC
+;
+         An ePIC handle resolving to metadata matching the RDA PIDINST schema
+         defined at DOI 10.15497/RDA00070.
+;
+
+save_
+
+save_diffrn_component_pid.pid
+
+    _definition.id                '_diffrn_component_pid.PID'
+    _definition.update            2026-04-29
+    _description.text
+;
+    A persistent identifier (PID) for a component of the instrumentation
+    used during the experiment, which may include the entire instrument.
+    The PID should be registered with an external body and be resolvable
+    to a resource providing further metadata about the object.
+;
+    _name.category_id             diffrn_component_pid
+    _name.object_id               PID
+    _type.purpose                 Encode
+    _type.source                  Assigned
+    _type.container               Single
+    _type.contents                Text
+
+save_
+
 save_DIFFRN_DETECTOR
 
     _definition.id                DIFFRN_DETECTOR
@@ -2629,13 +2742,13 @@ save_DIFFRN_MEASUREMENT
     _definition.id                DIFFRN_MEASUREMENT
     _definition.scope             Category
     _definition.class             Set
-    _definition.update            2012-11-26
+    _definition.update            2026-04-30
     _description.text
 ;
-    The category of data items which specify the details of the
-    diffraction measurement.
+    The category of data items used to describe the sample mounting,
+    positioning, and measurement strategy.
 ;
-    _name.category_id             DIFFRN
+    _name.category_id             DIFFRACTION
     _name.object_id               DIFFRN_MEASUREMENT
 
 save_
@@ -3454,16 +3567,45 @@ save_DIFFRN_RADIATION
     _definition.id                DIFFRN_RADIATION
     _definition.scope             Category
     _definition.class             Set
-    _definition.update            2023-10-15
+    _definition.update            2026-06-30
     _description.text
 ;
-    The category of data items which specify the wavelength of the
-    radiation used in measuring diffraction intensities. To identify
-    and assign weights to distinct wavelength components from a
-    polychromatic beam, see DIFFRN_RADIATION_WAVELENGTH.
+    The category of data items which describe the radiation used
+    in measuring diffraction intensities. To identify and assign
+    weights to distinct wavelength components from a beam,
+    see DIFFRN_RADIATION_WAVELENGTH.
 ;
     _name.category_id             DIFFRN
     _name.object_id               DIFFRN_RADIATION
+
+save_
+
+save_diffrn_radiation.beam_flux
+
+    _definition.id                '_diffrn_radiation.beam_flux'
+    _definition.update            2026-06-25
+    _description.text
+;
+     The average flux integrated over the beam incident on the sample.
+     If flux varies for individual measurements using the same source,
+     _diffrn.flux_density is preferred.
+;
+    _name.category_id             diffrn_radiation
+    _name.object_id               beam_flux
+    _type.purpose                 Number
+    _type.source                  Recorded
+    _type.container               Single
+    _type.contents                Real
+    _enumeration.range            0.0:
+    _method.purpose               Definition
+    _method.expression
+;
+         If (_diffrn_radiation.probe == "neutron")
+                                _units.code = "neutrons_per_second"
+         Else If (_diffrn_radiation.probe == "electron")
+                                _units.code = "electrons_per_second"
+         Else                   _units.code = "photons_per_second"
+;
 
 save_
 
@@ -3743,11 +3885,11 @@ save_diffrn_radiation_wavelength.details
          '_diffrn_radiation_wavelength_details'
          '_diffrn_radiation.wavelength_details'
 
-    _definition.update            2012-11-26
+    _definition.update            2026-06-30
     _description.text
 ;
     Information about the determination of the radiation
-    diffrn_radiation_wavelength that is not conveyed completely by an
+    _diffrn_radiation_wavelength.value that is not conveyed completely by an
     enumerated value of _diffrn_radiation_wavelength.determination.
 ;
     _name.category_id             diffrn_radiation_wavelength
@@ -5816,7 +5958,7 @@ save_
 save_diffrn_source.device
 
     _definition.id                '_diffrn_source.device'
-    _definition.update            2018-02-26
+    _definition.update            2026-06-22
     _description.text
 ;
     Enumerated code for the device providing the source of radiation.
@@ -5835,7 +5977,7 @@ save_diffrn_source.device
          nuclear                  'Nuclear reactor.'
          spallation               'Spallation source.'
          elect-micro              'Electron microscope.'
-         rot_anode                'Rotating-anode X-ray tube.'
+         rot-anode                'Rotating-anode X-ray tube.'
          synch                    'Synchrotron.'
 
 save_
@@ -11805,23 +11947,21 @@ save_space_group.bravais_type
 
     loop_
       _enumeration_set.state
-         aP
-         mP
-         mS
-         oP
-         oS
-         oI
-         oF
-         tP
-         tI
-         hP
-         hR
-         cP
-         cI
-         cF
-
-    _description_example.case     aP
-    _description_example.detail   'Triclinic (anorthic) primitive lattice.'
+      _enumeration_set.detail
+         aP                       'Triclinic primitive'
+         mP                       'Monoclinic primitive'
+         mS                       'Monoclinic centred'
+         oP                       'Orthorhombic primitive'
+         oS                       'Orthorhombic single-face centred'
+         oI                       'Orthorhombic body-centred'
+         oF                       'Orthorhombic all faces centred'
+         tP                       'Tetragonal primitive'
+         tI                       'Tetragonal body-centred'
+         hP                       'Hexagonal primitive'
+         hR                       'Rhombohedral'
+         cP                       'Cubic primitive'
+         cI                       'Cubic body-centred'
+         cF                       'Cubic face-centred'
 
 save_
 
@@ -14716,7 +14856,7 @@ save_
 save_model_site.adp_eigenvectors
 
     _definition.id                '_model_site.ADP_eigenvectors'
-    _definition.update            2021-09-24
+    _definition.update            2026-07-10
     _description.text
 ;
     The set of three ADP eigenvectors corresponding to the values
@@ -14730,7 +14870,7 @@ save_model_site.adp_eigenvectors
     _name.object_id               ADP_eigenvectors
     _type.purpose                 Measurand
     _type.source                  Derived
-    _type.container               Array
+    _type.container               Matrix
     _type.dimension               '[3,3]'
     _type.contents                Real
     _units.code                   angstrom_squared
@@ -14747,7 +14887,7 @@ save_
 save_model_site.adp_eigenvectors_su
 
     _definition.id                '_model_site.ADP_eigenvectors_su'
-    _definition.update            2023-07-01
+    _definition.update            2026-07-10
     _description.text
 ;
     Standard uncertainty of _model_site.ADP_eigenvectors.
@@ -14757,7 +14897,7 @@ save_model_site.adp_eigenvectors_su
     _name.linked_item_id          '_model_site.ADP_eigenvectors'
     _type.purpose                 SU
     _type.source                  Related
-    _type.container               Array
+    _type.container               Matrix
     _type.dimension               '[3,3]'
     _type.contents                Real
     _units.code                   angstrom_squared
@@ -16035,7 +16175,14 @@ save_AUDIT_CONTACT_AUTHOR
     _definition.update            2021-06-29
     _description.text
 ;
-    The category of data items used for contact author(s) details.
+    The category of data items used for details of the author(s) of the
+    dataset to whom correspondence about crystallographic details
+    should be addressed.
+    This audit contact author list may include authors from
+    the PUBL_CONTACT_AUTHOR category, i.e. author(s) submitting
+    and responsible for the manuscript associated with the dataset.
+    Authors associated with individual data blocks within
+    this dataset can be declared using the AUDIT_AUTHOR category.
 ;
     _name.category_id             AUDIT
     _name.object_id               AUDIT_CONTACT_AUTHOR
@@ -16050,8 +16197,8 @@ save_audit_contact_author.address
     _definition.update            2019-01-09
     _description.text
 ;
-    The mailing address of the author of the data block to whom
-    correspondence should be addressed.
+    The mailing address of the author of the dataset to whom
+    correspondence about crystallographic details should be addressed.
 ;
     _name.category_id             audit_contact_author
     _name.object_id               address
@@ -16077,12 +16224,14 @@ save_audit_contact_author.email
     _definition.update            2012-11-29
     _description.text
 ;
-    The electronic mail address of the author of the data block
-    to whom correspondence should be addressed, in a form
-    recognizable to international networks. The format of e-mail
-    addresses is given in Section 3.4, Address Specification, of
-    Internet Message Format, RFC 2822, P. Resnick (Editor),
-    Network Standards Group, April 2001.
+    The electronic mail (e-mail) address of the author of the dataset
+    to whom correspondence about crystallographic details should be
+    addressed.
+    The email address should be given in a form recognizable to
+    international networks. The format of e-mail addresses is given
+    in Section 3.4, Address Specification, of Internet Message
+    Format, RFC 2822, P. Resnick (Editor), Network Standards Group,
+    April 2001.
 ;
     _name.category_id             audit_contact_author
     _name.object_id               email
@@ -16105,12 +16254,13 @@ save_audit_contact_author.fax
     _definition.update            2012-11-29
     _description.text
 ;
-    Facsimile telephone number of the author submitting the manuscript
-    and data block.
-    The recommended style is the international dialing prefix, followed
-    by the area code in parentheses, followed by the local number with
-    no spaces. The earlier convention of including the international
-    dialing prefix in parentheses is no longer recommended.
+    Facsimile telephone number of the author of the dataset to whom
+    correspondence about crystallographic details should be addressed.
+    The recommended style is the international dialing prefix,
+    followed by the area code in parentheses, followed by the local
+    number with no spaces. The earlier convention of including the
+    international dialing prefix in parentheses is no longer
+    recommended.
 ;
     _name.category_id             audit_contact_author
     _name.object_id               fax
@@ -16132,7 +16282,8 @@ save_audit_contact_author.id
     _definition.update            2025-07-31
     _description.text
 ;
-    Arbitrary identifier for this author.
+    Arbitrary identifier for the author of the dataset to whom
+    correspondence about crystallographic details should be addressed.
 ;
     _name.category_id             audit_contact_author
     _name.object_id               id
@@ -16163,6 +16314,52 @@ save_audit_contact_author.id
 
 save_
 
+save_audit_contact_author.id_iucr
+
+    _definition.id                '_audit_contact_author.id_IUCr'
+    _alias.definition_id          '_audit_contact_author_id_IUCr'
+    _definition.update            2026-06-17
+    _description.text
+;
+    Identifier in the IUCr contact database of the author of the
+    dataset to whom correspondence about crystallographic details
+    should be addressed.
+    This is the person contacted by the journal editorial staff.
+    This identifier may be available from the World Directory of
+    Crystallographers (https://wdc.iucr.org/).
+;
+    _name.category_id             audit_contact_author
+    _name.object_id               id_IUCr
+    _type.purpose                 Encode
+    _type.source                  Recorded
+    _type.container               Single
+    _type.contents                Word
+
+save_
+
+save_audit_contact_author.id_orcid
+
+    _definition.id                '_audit_contact_author.id_ORCID'
+    _alias.definition_id          '_audit_contact_author_id_ORCID'
+    _definition.update            2026-06-17
+    _description.text
+;
+    Identifier in the ORCID registry of the author of the dataset
+    to whom correspondence about crystallographic details should be
+    addressed.
+    ORCID is an open, non-profit, community-driven service to provide
+    a registry of unique researcher identifiers (https://orcid.org/).
+;
+    _name.category_id             audit_contact_author
+    _name.object_id               id_ORCID
+    _type.purpose                 Encode
+    _type.source                  Recorded
+    _type.container               Single
+    _type.contents                Code
+    _description_example.case     0000-0002-3272-3161
+
+save_
+
 save_audit_contact_author.name
 
     _definition.id                '_audit_contact_author.name'
@@ -16175,11 +16372,12 @@ save_audit_contact_author.name
     _definition.update            2023-01-10
     _description.text
 ;
-    The name of the author of the data block to whom correspondence
-    should be addressed. The family name(s), followed by a comma and
-    including any dynastic components, precedes the first name(s) or
-    initial(s). For authors with only one name, provide the full name
-    without abbreviation.
+    The name of the author of the dataset to whom correspondence
+    about crystallographic details should be addressed.
+    The family name(s), followed by a comma and including any
+    dynastic components, precedes the first name(s) or initial(s).
+    For authors with only one name, provide the full name without
+    abbreviation.
 ;
     _name.category_id             audit_contact_author
     _name.object_id               name
@@ -16204,7 +16402,8 @@ save_audit_contact_author.phone
     _definition.update            2012-11-29
     _description.text
 ;
-    Telephone number of author submitting the manuscript and data block.
+    Telephone number of the author of the dataset to whom
+    correspondence about crystallographic details should be addressed.
     The recommended style is the international dialing prefix,
     followed by the area code in parentheses, followed by the
     local number and any extension number prefixed by 'x', with
@@ -16223,6 +16422,158 @@ save_audit_contact_author.phone
          12(34)9477330
          12()349477330
          12(34)9477330x5543
+
+save_
+
+save_AUDIT_DATASET
+
+    _definition.id                AUDIT_DATASET
+    _definition.scope             Category
+    _definition.class             Loop
+    _definition.update            2025-04-14
+    _description.text
+;
+    The CATEGORY of data items used for linking data blocks to aid in grouping
+    blocks which contain information which are interrelated.
+
+    Data blocks which should be interpreted together are identified with the
+    same unique _audit_dataset.id.
+;
+    _name.category_id             AUDIT
+    _name.object_id               AUDIT_DATASET
+    _category_key.name            '_audit_dataset.id'
+
+    loop_
+      _description_example.case
+      _description_example.detail
+;
+         data_structure1
+         _audit_dataset.id  82c0a1e2-29ad-47b8-ace1-01e653e1cae8
+         _pd_phase.name "First phase"
+         #cell parameters and atom positions
+         #...
+
+         data_structure2
+         _audit_dataset.id  82c0a1e2-29ad-47b8-ace1-01e653e1cae8
+         _pd_phase.id "Second phase"
+         #cell parameters and atom positions
+         #...
+
+         data_diffraction_data1
+         _audit_dataset.id  82c0a1e2-29ad-47b8-ace1-01e653e1cae8
+         _pd_diffractogram.id "First dataset"
+         #diffracted intensities vs angle
+         #...
+
+         data_information
+         _audit_dataset.id  82c0a1e2-29ad-47b8-ace1-01e653e1cae8
+         #wavelength, specimen preparation, temperature, pressure...
+         #...
+;
+;
+         Four data blocks for a powder diffraction experiment.
+         By the presence of an identical _audit_dataset.id value, it is made
+         clear that all four data blocks are to be interpreted together as
+         a whole. It is clear that there are two crystal structures, one
+         diffractogram, and a block containing other experimental information.
+
+         These blocks may be contained in the same file, or many files, but
+         the presence of an _audit_dataset.id value removes doubt as to their
+         relationship to each other.
+;
+;
+         data_structure1
+         _pd_phase.name "First phase"
+         #cell parameters and atom positions
+         #...
+
+         data_structure2
+         _pd_phase.id "Second phase"
+         #cell parameters and atom positions
+         #...
+
+         data_diffraction_data1
+         _pd_diffractogram.id "First dataset"
+         #diffracted intensities vs angle
+         #...
+
+         data_information
+         #wavelength, specimen preparation, temperature, pressure...
+         #...
+;
+;
+         Four data blocks for a powder diffraction experiment.
+         The absence of an _audit_dataset.id value does not preclude
+         interpreting these data blocks together. The
+         consumer of the information may be able to infer that they belong
+         together due to contextual information.
+;
+;
+         data_structure1
+         _audit_dataset.id  34e58dee-900c-47cf-8f8c-1f52e5a9a3b9
+         _pd_phase.name "First phase"
+         #cell parameters and atom positions
+         #...
+
+         data_calibration_structure
+         loop_
+           _audit_dataset.id
+           34e58dee-900c-47cf-8f8c-1f52e5a9a3b9
+           2d7ee621-d916-4302-9045-ec68f56add45
+           255bb051-a3d5-43f0-8384-fa8ccb2ce3c7
+         _pd_phase.id "Calibration phase"
+         #cell parameters and atom positions
+         #...
+
+         data_diffraction_data
+         _audit_dataset.id  34e58dee-900c-47cf-8f8c-1f52e5a9a3b9
+         _pd_diffractogram.id "First dataset"
+         #diffracted intensities vs angle
+         #...
+;
+;
+         Three data blocks for a powder diffraction experiment.
+         The identical _audit_dataset.id value makes it
+         clear that all data blocks are to be interpreted together as
+         a whole. The presence of multiple _audit_dataset.id values for the
+         second data block indicates it is included in more than one dataset.
+
+         Because they have different
+         _audit_dataset.id values, the diffractogram _pd_diffractogram.id
+         "First dataset" in the first example is different to the diffractogram
+         _pd_diffractogram.id "First dataset" in this example.
+;
+
+save_
+
+save_audit_dataset.id
+
+    _definition.id                '_audit_dataset.id'
+    _definition.update            2025-04-14
+    _description.text
+;
+    Globally unique identifier for data blocks that are meant to be interpreted
+    together as a whole.
+
+    Data blocks which belong together, for instance, as they form part of the
+    same experiment, are given an identical _audit_dataset.id value.
+
+    Data blocks, such as calibration information, can be designated with more
+    than one _audit_dataset.id value.
+
+    Data blocks which do not contain an _audit_dataset.id may still be related,
+    depending on the presence of other data names and values. Data blocks which
+    contain different _audit_dataset.id values are not related in a CIF-sense,
+    even if other data names and values are common.
+
+    To ensure global uniqueness, a UUID-like identifier is suggested.
+;
+    _name.category_id             audit_dataset
+    _name.object_id               id
+    _type.purpose                 Key
+    _type.source                  Related
+    _type.container               Single
+    _type.contents                Word
 
 save_
 
@@ -16308,19 +16659,19 @@ save_AUDIT_SUPPORT
     _audit_support.award_recipient
 
     1 'Engineering and Physical Sciences Research Council'
-    'https://doi.org/10.13039/501100000266'
+    10.13039/501100000266
     studentship 'EP-M506515-1' 'E. T. Broadhurst'
     2 'Swedish Funding Council'
     ?
     grant '2017-05333' 'M. Lightowler'
     3 'Wellcome Trust'
-    'https://doi.org/10.13039/100004440'
+    10.13039/100004440
     grant 'WT087658' 'University of Edinburgh EM facility'
     4 'Scottish Universities Life Sciences Alliance (SULSA)'
     ?
     other ? 'University of Edinburgh EM facility'
     5 'Harvard Medical School'
-    'https://doi.org/10.13039/100006691'
+    10.13039/100006691
     ? ? ?
 ;
     _description_example.detail
@@ -16445,27 +16796,24 @@ save_
 save_audit_support.funding_organization_doi
 
     _definition.id                '_audit_support.funding_organization_DOI'
-    _definition.update            2025-12-10
+    _definition.update            2026-06-10
     _description.text
 ;
     The Digital Object Identifier (DOI) associated with the
     Organization providing funding support for
-    the data collected and analysed in the data block. In
-    accordance with CrossRef guidelines, the full URI of
-    the resolved page describing the funding organization
-    should be given (i.e. including the https://doi.org/
-    DOI resolver prefix). Note that it may be necessary to
-    URL-encode certain special characters in the DOI suffix
-    for the URI to resolve correctly through CrossRef
-    (e.g. the number sign '#' must be encoded as '%23').
+    the data collected and analysed in the data block.
+
+    The display form of the DOI may differ from the
+    DOI itself; see, for example, the Crossref guidelines
+    (https://www.crossref.org/display-guidelines/).
 ;
     _name.category_id             audit_support
     _name.object_id               funding_organization_DOI
     _type.purpose                 Encode
     _type.source                  Recorded
     _type.container               Single
-    _type.contents                Word
-    _description_example.case     https://doi.org/10.13039/100000064
+    _type.contents                Text
+    _description_example.case     10.13039/100000064
 
 save_
 
@@ -19277,7 +19625,8 @@ save_PUBL_AUTHOR
     _definition.update            2021-06-29
     _description.text
 ;
-    Category of data items recording the author information.
+    Category of data items recording information of an author of the
+    publication (for example the manuscript).
 ;
     _name.category_id             PUBL
     _name.object_id               PUBL_AUTHOR
@@ -19477,8 +19826,7 @@ save_publ_author.phone
     _definition.update            2014-06-12
     _description.text
 ;
-    Telephone number of the author submitting the manuscript and
-    data block.
+    Telephone number of a manuscript author.
 
     The recommended style starts with the international dialing
     prefix, followed by the area code in parentheses, followed by the
@@ -19653,7 +20001,12 @@ save_PUBL_CONTACT_AUTHOR
     _definition.update            2021-06-29
     _description.text
 ;
-    Category of items describing contact author(s) details.
+    The category of data items used for details of the contact author(s)
+    of the associated manuscript, to whom general correspondence should
+    be addressed.
+    This is the person contacted by the journal editorial staff.
+    This may or may not be the same person as _audit_contact_author,
+    which is the person responsible for the dataset.
 ;
     _name.category_id             PUBL
     _name.object_id               PUBL_CONTACT_AUTHOR
@@ -19673,9 +20026,9 @@ save_publ_contact_author.address
     _definition.update            2012-11-29
     _description.text
 ;
-    The address of the author submitting the manuscript and
-    data block. This is the person contacted by the journal
-    editorial staff.
+    The address of the contact author of the associated manuscript to
+    whom general correspondence should be addressed.
+    This is the person contacted by the journal editorial staff.
 ;
     _name.category_id             publ_contact_author
     _name.object_id               address
@@ -19748,10 +20101,15 @@ save_publ_contact_author.email
     _definition.update            2014-06-12
     _description.text
 ;
-    E-mail address in a form recognizable to international networks.
-    The format of e-mail addresses is given in Section 3.4, Address
-    Specification, of Internet Message Format, RFC 2822, P. Resnick
-    (Editor), Network Standards Group, April 2001.
+    The electronic mail (e-mail) address of the contact author of the
+    associated manuscript to whom general correspondence should be
+    addressed.
+    This is the person contacted by the journal editorial staff.
+    The e-mail address should be given in a form recognizable to
+    international networks. The format of e-mail addresses is given
+    in Section 3.4, Address Specification, of Internet Message
+    Format, RFC 2822, P. Resnick (Editor), Network Standards Group,
+    April 2001.
 ;
     _name.category_id             publ_contact_author
     _name.object_id               email
@@ -19779,8 +20137,10 @@ save_publ_contact_author.fax
     _definition.update            2012-11-29
     _description.text
 ;
-    Facsimile telephone number of the author submitting the manuscript
-    and data block.
+    Facsimile telephone number of the contact author(s) of the contact
+    author of the associated manuscript to whom general correspondence
+    should be addressed.
+    This is the person contacted by the journal editorial staff.
     The recommended style is the international dialing prefix, followed
     by the area code in parentheses, followed by the local number with
     no spaces. The earlier convention of including the international
@@ -19801,7 +20161,9 @@ save_publ_contact_author.id
     _definition.update            2025-07-31
     _description.text
 ;
-    Arbitrary identifier for this author.
+    Arbitrary identifier for the contact author of the associated
+    manuscript to whom general correspondence should be addressed.
+    This is the person contacted by the journal editorial staff.
 ;
     _name.category_id             publ_contact_author
     _name.object_id               id
@@ -19839,9 +20201,12 @@ save_publ_contact_author.id_iucr
     _definition.update            2023-02-02
     _description.text
 ;
-    Identifier in the IUCr contact database of the author submitting
-    the manuscript and data block. This identifier may be available
-    from the World Directory of Crystallographers (https://wdc.iucr.org/).
+    Identifier in the IUCr contact database of the contact author of
+    the associated manuscript to whom general correspondence should be
+    addressed.
+    This is the person contacted by the journal editorial staff.
+    This identifier may be available from the World Directory of
+    Crystallographers (https://wdc.iucr.org/).
 ;
     _name.category_id             publ_contact_author
     _name.object_id               id_IUCr
@@ -19859,10 +20224,12 @@ save_publ_contact_author.id_orcid
     _definition.update            2023-02-02
     _description.text
 ;
-    Identifier in the ORCID Registry of the author submitting
-    the manuscript and data block. ORCID is an open, non-profit,
-    community-driven service to provide a registry of unique
-    researcher identifiers (https://orcid.org/).
+    Identifier in the ORCID Registry of the contact author of the
+    associated manuscript to whom general correspondence should be
+    addressed.
+    This is the person contacted by the journal editorial staff.
+    ORCID is an open, non-profit, community-driven service to provide
+    a registry of unique researcher identifiers (https://orcid.org/).
 ;
     _name.category_id             publ_contact_author
     _name.object_id               id_ORCID
@@ -19886,9 +20253,9 @@ save_publ_contact_author.name
     _definition.update            2012-11-29
     _description.text
 ;
-    The name of the author(s) submitting the manuscript and
-    data block. This is the person contacted by the journal
-    editorial staff.
+    The name of the contact author of the associated manuscript to
+    whom general correspondence should be addressed.
+    This is the person contacted by the journal editorial staff.
 ;
     _name.category_id             publ_contact_author
     _name.object_id               name
@@ -19912,7 +20279,9 @@ save_publ_contact_author.phone
     _definition.update            2012-11-29
     _description.text
 ;
-    Telephone number of author submitting the manuscript and data block.
+    Telephone number of the contact author of the associated
+    manuscript to whom general correspondence should be addressed.
+    This is the person contacted by the journal editorial staff.
     The recommended style is the international dialing prefix,
     followed by the area code in parentheses, followed by the
     local number and any extension number prefixed by 'x', with
@@ -21574,7 +21943,7 @@ save_atom_site.b_iso_or_equiv
 
     _definition.id                '_atom_site.B_iso_or_equiv'
     _alias.definition_id          '_atom_site_B_iso_or_equiv'
-    _definition.update            2023-01-16
+    _definition.update            2025-09-21
     _description.text
 ;
     Isotropic atomic displacement parameter, or equivalent isotropic
@@ -21584,7 +21953,7 @@ save_atom_site.b_iso_or_equiv
         B(equiv) = (1/3) sum~i~[sum~j~(B^ij^ a*~i~ a*~j~ a~i~.a~j~)]
 
     a     = the real-space cell vectors
-    a*    = the reciprocal-space cell lengths
+    a*    = the reciprocals of the direct-space cell lengths
     B^ij^ = 8 π^2^ U^ij^
     Ref: Fischer, R. X. & Tillmanns, E. (1988). Acta Cryst. C44, 775-776.
 
@@ -22599,7 +22968,7 @@ save_atom_site.u_iso_or_equiv
 
     _definition.id                '_atom_site.U_iso_or_equiv'
     _alias.definition_id          '_atom_site_U_iso_or_equiv'
-    _definition.update            2023-01-13
+    _definition.update            2025-09-21
     _description.text
 ;
     Isotropic atomic displacement parameter, or equivalent isotropic
@@ -22609,7 +22978,7 @@ save_atom_site.u_iso_or_equiv
        U(equiv) = (1/3) sum~i~[sum~j~(U^ij^ a*~i~ a*~j~ a~i~.a~j~)]
 
     a  = the real-space cell vectors
-    a* = the reciprocal-space cell lengths
+    a* = the reciprocals of the direct-space cell lengths
     Ref: Fischer, R. X. & Tillmanns, E. (1988). Acta Cryst. C44, 775-776.
 ;
     _name.category_id             atom_site
@@ -26875,10 +27244,16 @@ save_refine_ls.abs_structure_z-score
     determination as described by Klar et al. (2023), based on the
     method of Le Page et al. (1990). For centrosymmetric structures,
     the only permitted value, if the data item is present, is
-    'inapplicable', represented by '.' .
+    'inapplicable', represented by '.' . Details on how the here
+    reported z-score value was calculated (for example if it is
+    a noise-adjusted value or raw value) should be provided in
+    _refine_ls.abs_structure_details.
+
     Ref:  Klar, P. B. et al. (2023). Nature Chem. 15, 848-855.
+            https://www.doi.org/10.1038/s41557-023-01186-1
           Le Page, Y., Gabe, E. J. & Gainsford, G. J. (1990). J. Appl. Cryst.
           23, 406-411.
+            https://doi.org/10.1107/S0021889890005775
 ;
     _name.category_id             refine_ls
     _name.object_id               abs_structure_z_score
@@ -28861,10 +29236,12 @@ save_
          jxh@ansto.gov.au
          6               'Vaitkus, Antanas'                 0000-0002-5944-1391
          antanas.vaitkus@bti.vu.lt
-         7               'Rowles, Matthew'                  .
+         7               'Rowles, Matthew R.'               0000-0002-7448-6774
          .
          8               'Bollinger, John C.'               .
          .
+         9               'Rainer, Daniel N.'                0000-0002-3272-3161
+         d.n.rainer@soton.ac.uk
 
     loop_
       _dictionary_audit.version
@@ -29007,99 +29384,27 @@ save_
        Changed the purpose of the _diffrn_radiation_wavelength.id data item
        from 'Encode' to 'Key'.
 ;
-         3.3.0                    2026-04-20
+         3.3.0                    2026-07-10
 ;
-       # Please update the date above and describe the change below until
-       # ready for the next release
+       Expanded available form factor parameterisations, added support for
+       isotopes and symmforms for atom sites. More details can be added
+       regarding organisational funding.
 
-       Added _atom_type_scat.exponential_polynomial_coefs, Gaussian_coefs, and
-       inv_Mott_Bethe_coefs to allow for an arbitrary number of coefficients in
-       the definition of form factors.
+       Added the 'BIncStrDB' database code.
 
-       Added a dREL definition method for the _citation.id data item.
+       Deprecated _publ_contact_author.contact_details, replaced by
+       _publ_contact_author.name and _publ_contact_author.address.
 
-       Rewrote the _atom_type.radius_contact evaluation method as a definition
-       method.
+       Added a new ATOM_SCAT_VERSUS_STOL category to tabulate scattering
+       factors.
 
-       Added _atom_type.mass_number to record specific isotope identities.
+       Added new data items to provide more details in the AUDIT_AUTHOR
+       category.
 
-       Changed enumeration of _atom_type.atomic_number,
-       _atom_type_scat.dispersion_real_Cu, _atom_type_scat.dispersion_imag_Cu,
-       _atom_type_scat.dispersion_real_Mo, _atom_type_scat.dispersion_imag_Mo
-       to be defaulted on _atom_type.element_symbol.
+       Reflections now have opaque identifiers instead of using hkl.
 
-       Expanded AUDIT_AUTHOR to include email, phone, and fax contact details.
-
-       Corrected the content type of the _refln.F_complex_su attribute.
-
-       Updated description of _space_group_wyckoff.letter.
-
-       Added a dREL definition method that determines the units of measure to
-       the definition of the _refln.form_factor_table data item. Changed the
-       units of several data items to 'unspecified'.
-
-       Added the default value of '1_555' to the site symmetry data items.
-
-       Redefined _exptl_absorpt.coefficient_mu as a derived measurand item.
-
-       Added the _exptl_absorpt.coefficient_mu_su data item.
-
-       Renamed _atom_site.tensor_beta to _atom_site_aniso.matrix_beta and
-       updated the associated dREL evaluation methods. The old data name was
-       retained as an alias. Added the _atom_site_aniso.beta_* data items.
-
-       Reverted _atom_type_scat.versus_stol_list to a text-type to regain
-       compatibility with DDL1 dictionary.
-
-       Added ATOM_SCAT_VERSUS_STOL to allow for the explicit listing of
-       scattering factor values with respect to sin theta over lambda.
-       Deprecated the _atom_type_scat.versus_stol_list data item.
-
-       Changed the _type.source attribute of all SU data items to 'Related'.
-
-       Updated dREL evaluation method of the ATOM_TYPE category.
-
-       Changed the purpose of _space_group_Wyckoff.id and _valence_ref.id
-       from 'Encode' to 'Key'.
-
-       Corrected examples of the _chemical.identifier_InChI and
-       _chemical.identifier_InChI_key data items.
-
-       Updated description of DIFFRN_RADIATION to remove looping reference.
-
-       Updated the definitions of _diffrn_refln.scale_group_code and
-       _diffrn_scale_group.code definitions to better reflect that
-       _diffrn_scale_group.code is the main data item.
-
-       Added the deprecation date for multiple aliases that were originally
-       deprecated in the DDL1 version of the dictionary.
-
-       Added the _atom_site_fract.symmform and _atom_site_aniso.symmform
-       data items.
-
-       Added _database_code.BIncStrDB (bm).
-
-       Changed the title of the dictionary to 'CIF_CORE'.
-
-       Renamed the Head category from 'CIF_CORE' to 'CIF_CORE_HEAD'.
-
-       Updated the dictionary description.
-
-       Redefined the _cell_measurement.wavelength data item as a measurand.
-       Added and immediately deprecated the _cell_measurement.wavelength_su
-       data item.
-
-       Moved the definition of _publ_contact_author data name into a
-       separate data item definition and deprecated it in favour of the
-       _publ_contact_author.name and _publ_contact_author.address data items.
-
-       Added the _audit_support.funding_organization_url and
-       _audit_support.special_details data items.
-
-       Added opaque identifiers for diffrn_refln and refln categories.
-
-       Added definitions and updated some existing ones with material
-       relating to electron diffraction (bm, on behalf of NanED group):
+       Added definitions to support electron diffraction (collaboration with
+       NanED group):
          Added 'dyn' to _chemical.absolute_configuration.
          Added two examples to _diffrn_source.size for NBED and SAED.
          New items:
@@ -29122,65 +29427,36 @@ save_
            _refine_ls.sample_shape_expression
            _refine_ls.sample_thickness (and *_su)
 
-       Added _diffrn.flux_density, _diffrn.total_dose and
-       _diffrn.total_exposure_time as first step towards characterizing
-       radiation damage (bm).
+       Added _diffrn.flux_density, _diffrn_radiation.beam_flux,
+       _diffrn.total_dose and _diffrn.total_exposure_time as first
+       step towards characterizing radiation damage.
 
-       Made _journal.data_validation_number a proper alias of
-       _journal.validation_number and deleted save frame for the former (bm).
+       Following determination of Nomenclature Commission, modified range and
+       extended definition of _cell.formula_units_Z and added
+       _cell.formula_units_Z_details.
 
-       Removed the _atom_type.key data item. Renamed _space_group_generator.key
-       to _space_group_generator.id for consistency. (av)
-
-       Added reference to _atom_sites_cartn_transform.matrix,
-       _atom_sites_fract_transform.matrix, _cell.orthogonal_matrix
-       and _atom_type_scat.inv_mott_bethe_coefs; also minor editorial
-       changes to many definitions in the style of International Tables (bm).
-
-       Updated _refln.symmetry_multiplicity (reference to newer version
-       of ITC) and _reflns_class.r_factor_gt (fixed the formula notation),
-       plus many minor editorial changes to International Tables style (bm).
-
-       Updated _refln.symmetry_multiplicity and other references to
-       International Tables Volume A to latest edition (bm).
-
-       Corrected the usage of unknown or missing values in several dREL code
-       snippets. (av)
-
-       Modified range and extended definition of _cell.formula_units_Z
-       and added _cell.formula_units_Z_details. (bm)
-
-       Removed the _cell_angle.beta_su and _cell_angle.gamma_su aliases.
-
-       Added _cell.formula_units_Z_prime and *_details. (bm)
+       Added _cell.formula_units_Z_prime and *_details.
 
        Renamed _geom.bond_distance_min and _geom.contact_distance_min to
        _geom.min_bond_distance_cutoff and _geom.min_contact_distance_cutoff
        respectively. The original names were not retained as aliases to avoid
        name clashes with data names from the msCIF dictionary.
 
-       Updated definitions relating to the bond valence model
-       (_geom_bond.valence, categories VALENCE and VALENCE_REF) (bm).
+       Added _audit_conform.dict_DOI.
 
-       Added _audit_conform.dict_DOI. (bm)
+       Added _database_code.AMCSD.
 
-       Changed the content type of _audit_support.funding_organization_doi
-       from 'Text' to 'Word' and added a note on the escaping special
-       characters.
+       Added data item for PaNET experimental method identifier.
 
-       Added _database_code.AMCSD
-
-       Changed the purpose of _valence_param.id from 'Number' to 'Key'.
-
-       _chemical.identifier_InChI_version refers to the software release
-       version.
-
-       Add data item for PaNET experimental method identifier.
+       Added data items to capture persistent identifiers (PIDs) of experimental
+       equipment.
 
        Added the _dictionary.licensing_SPDX dictionary attribute.
+       Renamed the Head category from 'CIF_CORE' to 'CIF_CORE_HEAD'.
 
-       Corrected the _name.object_id attribute of _atom_site.fract_symmform
-       and _atom_analytical_mass_loss.temperature_su.
+       Corrected the definition of a* in _atom_site.B_iso_or_equiv and
+       _atom_site.U_iso_or_equiv. [bm, after Nespolo, M. (2024).
+       J. Appl. Cryst. 57, 1733-1746]
 
-       Moved to ENUMERATION_DEFAULTS for default values.
+       Added AUDIT_DATASET for identifying datasets.
 ;
