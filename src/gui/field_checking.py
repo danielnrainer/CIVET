@@ -20,7 +20,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING
 
 from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
 
-from utils.CIF_field_parsing import safe_eval_expr
+from utils.CIF_field_parsing import safe_eval_expr, evaluate_condition
 from utils.CIF_parser import CIFField, update_audit_creation_method
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
@@ -913,6 +913,146 @@ class FieldCheckingMixin:
             )
             return True  # Continue despite error
 
+    def _execute_rule(self, field_def, config, initial_state, ensure_parser_current,
+                       operations_applied, is_custom_or_user):
+        """Execute a single parsed rule: an action (DELETE/EDIT/APPEND/RENAME), a
+        CHECK/CALCULATE prompt, or an IF/THEN conditional block.
+
+        Called once per top-level rule by _process_single_field_set, and recursively
+        for each nested rule inside an IF block's then_fields.
+
+        Returns:
+            'continue' to proceed to the next rule,
+            'stop' to stop the run while keeping changes made so far (RESULT_STOP_SAVE),
+            'abort' if the run was aborted (editor already restored to initial_state).
+        """
+        action = getattr(field_def, 'action', 'CHECK')
+
+        # --- Action rules (custom/user sets only) ---
+        if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
+            if not is_custom_or_user:
+                return 'continue'  # Action rules are only applied for custom/user sets
+            lines = self.text_editor.toPlainText().splitlines()
+            done = False
+            if action == 'DELETE':
+                lines, done = self.field_checker._delete_field(lines, field_def.name)
+                if done:
+                    operations_applied.append(f"DELETED: {field_def.name}")
+            elif action == 'EDIT':
+                lines, done = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
+                if done:
+                    operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
+            elif action == 'APPEND':
+                lines, done = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
+                if done:
+                    operations_applied.append(f"APPENDED to {field_def.name}")
+            elif action == 'RENAME':
+                lines, done = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
+                if done:
+                    operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
+            if done:
+                self._set_editor_text('\n'.join(lines))
+                ensure_parser_current()
+            return 'continue'
+
+        # --- IF / THEN conditional block ---
+        if action == 'IF':
+            ensure_parser_current()
+            condition = getattr(field_def, 'condition', None)
+            if condition is None or not evaluate_condition(condition, self.cif_parser.get_field_value):
+                return 'continue'
+
+            for nested_def in getattr(field_def, 'then_fields', None) or []:
+                signal = self._execute_rule(
+                    nested_def, config, initial_state, ensure_parser_current,
+                    operations_applied, is_custom_or_user
+                )
+                if signal != 'continue':
+                    return signal
+            return 'continue'
+
+        # --- CHECK / CALCULATE ---
+        suggested_value = field_def.default_value
+        description = field_def.description
+        suggestions = getattr(field_def, 'suggestions', None)
+
+        if action == 'CALCULATE' and hasattr(field_def, 'expression'):
+            # Re-parse only if content changed since the last CALCULATE evaluation.
+            ensure_parser_current()
+
+            # Extract field references from expression
+            field_refs = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', field_def.expression)
+            field_values = {}
+            missing_fields = []
+
+            for ref in field_refs:
+                value = self.cif_parser.get_field_value(ref)
+                if value is not None:
+                    # Try to convert to number
+                    try:
+                        # Handle values with uncertainties like "1.234(5)"
+                        clean_value = re.sub(r'\([^)]*\)', '', str(value))
+                        field_values[ref] = float(clean_value)
+                    except (ValueError, TypeError):
+                        missing_fields.append(f"{ref} (non-numeric: {value})")
+                else:
+                    missing_fields.append(ref)
+
+            if missing_fields:
+                # Can't calculate - skip this field with warning
+                if config.get('show_warnings', True):
+                    QMessageBox.warning(self, "CALCULATE Warning",
+                        f"Cannot calculate {field_def.name}:\n"
+                        f"Missing or non-numeric fields: {', '.join(missing_fields)}\n\n"
+                        f"Expression: {field_def.expression}")
+                return 'continue'
+
+            # Evaluate the expression
+            calculated = safe_eval_expr(field_def.expression, field_values)
+            if calculated is not None:
+                # Format to reasonable precision
+                if abs(calculated) < 0.01 or abs(calculated) >= 10000:
+                    suggested_value = f"{calculated:.4e}"
+                else:
+                    suggested_value = f"{calculated:.4f}".rstrip('0').rstrip('.')
+
+                # Add calculation info to description
+                current_val = self.cif_parser.get_field_value(field_def.name)
+                description = (f"{field_def.description}\n" if field_def.description else "") + \
+                             f"Calculated: {field_def.expression}"
+                if current_val:
+                    description += f"\nCurrent value: {current_val}"
+
+                # Add current value as an option in suggestions
+                if current_val:
+                    suggestions = [suggested_value]
+                    if str(current_val) != suggested_value:
+                        suggestions.append(str(current_val))
+            else:
+                if config.get('show_warnings', True):
+                    QMessageBox.warning(self, "CALCULATE Warning",
+                        f"Failed to evaluate expression for {field_def.name}:\n"
+                        f"{field_def.expression}")
+                return 'continue'
+
+        result = self.check_line_with_config(
+            field_def.name,
+            suggested_value,
+            False,
+            description,
+            config,
+            suggestions
+        )
+
+        if result == RESULT_ABORT:
+            self._set_editor_text(initial_state)
+            self.update_window_title()
+            QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+            return 'abort'
+        if result == RESULT_STOP_SAVE:
+            return 'stop'
+        return 'continue'
+
     def _process_single_field_set(self, config, initial_state):
         """Process a single field set (Built-in, User, or Custom)."""
         try:
@@ -960,113 +1100,13 @@ class FieldCheckingMixin:
             operations_applied = []
 
             for field_def in fields:
-                action = getattr(field_def, 'action', 'CHECK')
-
-                # --- Action rules (custom/user sets only) ---
-                if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
-                    if not is_custom_or_user:
-                        continue  # Action rules are only applied for custom/user sets
-                    lines = self.text_editor.toPlainText().splitlines()
-                    done = False
-                    if action == 'DELETE':
-                        lines, done = self.field_checker._delete_field(lines, field_def.name)
-                        if done:
-                            operations_applied.append(f"DELETED: {field_def.name}")
-                    elif action == 'EDIT':
-                        lines, done = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
-                        if done:
-                            operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
-                    elif action == 'APPEND':
-                        lines, done = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
-                        if done:
-                            operations_applied.append(f"APPENDED to {field_def.name}")
-                    elif action == 'RENAME':
-                        lines, done = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
-                        if done:
-                            operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
-                    if done:
-                        self._set_editor_text('\n'.join(lines))
-                    continue
-
-                # --- CHECK / CALCULATE ---
-                suggested_value = field_def.default_value
-                description = field_def.description
-                suggestions = getattr(field_def, 'suggestions', None)
-
-                if action == 'CALCULATE' and hasattr(field_def, 'expression'):
-                    # Re-parse only if content changed since the last CALCULATE evaluation.
-                    ensure_parser_current()
-
-                    # Extract field references from expression
-                    field_refs = re.findall(r'_[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)*', field_def.expression)
-                    field_values = {}
-                    missing_fields = []
-
-                    for ref in field_refs:
-                        value = self.cif_parser.get_field_value(ref)
-                        if value is not None:
-                            # Try to convert to number
-                            try:
-                                # Handle values with uncertainties like "1.234(5)"
-                                clean_value = re.sub(r'\([^)]*\)', '', str(value))
-                                field_values[ref] = float(clean_value)
-                            except (ValueError, TypeError):
-                                missing_fields.append(f"{ref} (non-numeric: {value})")
-                        else:
-                            missing_fields.append(ref)
-
-                    if missing_fields:
-                        # Can't calculate - skip this field with warning
-                        if config.get('show_warnings', True):
-                            QMessageBox.warning(self, "CALCULATE Warning",
-                                f"Cannot calculate {field_def.name}:\n"
-                                f"Missing or non-numeric fields: {', '.join(missing_fields)}\n\n"
-                                f"Expression: {field_def.expression}")
-                        continue
-
-                    # Evaluate the expression
-                    calculated = safe_eval_expr(field_def.expression, field_values)
-                    if calculated is not None:
-                        # Format to reasonable precision
-                        if abs(calculated) < 0.01 or abs(calculated) >= 10000:
-                            suggested_value = f"{calculated:.4e}"
-                        else:
-                            suggested_value = f"{calculated:.4f}".rstrip('0').rstrip('.')
-
-                        # Add calculation info to description
-                        current_val = self.cif_parser.get_field_value(field_def.name)
-                        description = (f"{field_def.description}\n" if field_def.description else "") + \
-                                     f"Calculated: {field_def.expression}"
-                        if current_val:
-                            description += f"\nCurrent value: {current_val}"
-
-                        # Add current value as an option in suggestions
-                        if current_val:
-                            suggestions = [suggested_value]
-                            if str(current_val) != suggested_value:
-                                suggestions.append(str(current_val))
-                    else:
-                        if config.get('show_warnings', True):
-                            QMessageBox.warning(self, "CALCULATE Warning",
-                                f"Failed to evaluate expression for {field_def.name}:\n"
-                                f"{field_def.expression}")
-                        continue
-
-                result = self.check_line_with_config(
-                    field_def.name,
-                    suggested_value,
-                    False,
-                    description,
-                    config,
-                    suggestions
+                signal = self._execute_rule(
+                    field_def, config, initial_state, ensure_parser_current,
+                    operations_applied, is_custom_or_user
                 )
-
-                if result == RESULT_ABORT:
-                    self._set_editor_text(initial_state)
-                    self.update_window_title()
-                    QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+                if signal == 'abort':
                     return False
-                elif result == RESULT_STOP_SAVE:
+                if signal == 'stop':
                     break
 
             # Show summary of any silent operations that were applied

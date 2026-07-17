@@ -12,10 +12,11 @@ Provides automated fixes and detailed issue reporting for user resolution.
 """
 
 import re
-from typing import Dict, List, Set, Optional, Tuple, NamedTuple
+from typing import Dict, List, Set, Optional, Tuple
 from dataclasses import dataclass
-from pathlib import Path
 from enum import Enum
+
+from .CIF_field_parsing import parse_field_rules_content
 
 
 class IssueType(Enum):
@@ -25,6 +26,7 @@ class IssueType(Enum):
     UNKNOWN_FIELD = "unknown_field"
     FORMAT_INCONSISTENCY = "format_inconsistency"
     DEPRECATED_FIELD = "deprecated_field"
+    MALFORMED_RULE = "malformed_rule"
 
 
 class IssueCategory(Enum):
@@ -33,6 +35,7 @@ class IssueCategory(Enum):
     DUPLICATE_ALIAS = "Duplicate/Alias Fields"
     UNKNOWN_FIELD = "Unknown Fields"
     DEPRECATED_FIELD = "Deprecated Fields"
+    MALFORMED_RULE = "Malformed Rules"
 
 
 class AutoFixType(Enum):
@@ -101,11 +104,11 @@ class CIFFormatAnalyzer:
                 continue  # Skip empty lines and comments
                 
             # Look for fields at the start of the line or after action prefixes
-            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
+            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:|IF NOT:|IF:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
             match = re.match(field_pattern, line)
             if match:
                 matches.append(match.group(1))
-        
+
         if not matches:
             return "legacy"  # Default if no fields found
         
@@ -207,7 +210,14 @@ class FieldRulesValidator:
         
         # Find all issues
         issues = []
-        
+
+        # 0. Check for structurally malformed rules (e.g. an IF block with no
+        # matching ENDIF, or a malformed RENAME/CALCULATE line). These are
+        # dropped silently by the actual rules loader, so they must be
+        # surfaced here or "no errors found" would be misleading.
+        malformed_issues = self._find_malformed_rule_issues(field_rules_content)
+        issues.extend(malformed_issues)
+
         # 1. Check for mixed format issues
         mixed_format_issues = self._find_mixed_format_issues(def_fields, target_format)
         issues.extend(mixed_format_issues)
@@ -250,16 +260,40 @@ class FieldRulesValidator:
                 continue  # Skip empty lines and comments
                 
             # Look for fields at the start of the line or after action prefixes
-            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
+            field_pattern = r'^(?:DELETE:|EDIT:|APPEND:|CHECK:|RENAME:|CALCULATE:|IF NOT:|IF:)?\s*(_[a-zA-Z][a-zA-Z0-9_\-]*(?:\.[a-zA-Z][a-zA-Z0-9_\-]*)*)'
             match = re.match(field_pattern, line)
             if match:
                 field = match.group(1)
                 if field not in seen:
                     fields.append(field)
                     seen.add(field)
-        
+
         return fields
-    
+
+    def _find_malformed_rule_issues(self, content: str) -> List[ValidationIssue]:
+        """Find structurally malformed rules that the actual rules loader
+        (parse_field_rules_content / load_cif_field_rules) silently drops -
+        e.g. an IF/IF NOT block with no matching ENDIF, a malformed condition,
+        or a malformed RENAME/CALCULATE/DELETE/CHECK line. None of these are
+        auto-fixable; they require the user to correct the rule by hand.
+        """
+        issues: List[Tuple[int, str, Optional[str]]] = []
+        parse_field_rules_content(content, issues=issues)
+
+        validation_issues = []
+        for line_no, message, field_name in issues:
+            validation_issues.append(ValidationIssue(
+                issue_type=IssueType.MALFORMED_RULE,
+                category=IssueCategory.MALFORMED_RULE,
+                field_names=[field_name] if field_name else [],
+                description=f"Line {line_no}: {message}",
+                suggested_fix="Fix this rule manually - it will otherwise be silently "
+                              "skipped (or its guarded rules will never run) when the "
+                              "file is actually loaded",
+                auto_fix_type=AutoFixType.NO,
+            ))
+        return validation_issues
+
     def _find_mixed_format_issues(self, fields: List[str], target_format: str) -> List[ValidationIssue]:
         """Find fields that don't match the target format"""
         issues = []

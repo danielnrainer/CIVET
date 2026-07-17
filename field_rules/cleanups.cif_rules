@@ -1,7 +1,7 @@
 # Custom Field Definitions for cleanup
 # This file demonstrates keyword operations to clean up problematic CIF fields
 # Without a keyword, a standard check is performed
-# Available keywords: DELETE/EDIT/APPEND/RENAME/CALCULATE
+# Available keywords: DELETE/EDIT/APPEND/RENAME/CALCULATE/IF/IF NOT/ENDIF
 # Examples below:
 # =============================================================================
 # DELETE: _diffrn_radiation_monochromator    # Don't want the field in the CIF
@@ -16,6 +16,14 @@
 # CALCULATE: _diffrn.flux_density = _diffrn.flux_density / (_diffrn.total_exposure_time * 60)
 #   Use mathematical expressions to calculate values including referencing other CIF fields.
 #   Supported operators: + - * / ** (power) and parentheses for grouping
+
+# IF: _diffrn_radiation.probe electron   # Only run the nested rules when this condition holds
+#     CHECK: _diffrn_radiation_wavelength 0.0251
+# ENDIF
+#   Conditions: "IF: _field" (field exists, any value), "IF: _field value" (exists and equals
+#   value), "IF: _field != value" (exists and differs), "IF NOT: _field" (field absent).
+#   Nested rules use the same DELETE/EDIT/APPEND/RENAME/CALCULATE/CHECK syntax as top-level
+#   rules, and IF blocks may be nested inside one another.
 
 # _chemical_oxdiff_usercomment ?  # edit this field manually
 
@@ -46,5 +54,12 @@
 # =============================================================================
 # CALCULATE Operations - Compute values from other fields using expressions
 # =============================================================================
+
+
+
+# =============================================================================
+# IF/THEN Conditional Blocks - Run nested rules only when a condition holds
+# =============================================================================
+
 
 

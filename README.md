@@ -21,7 +21,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 
 - **CIF Editing and Validation**: Syntax highlighting, guided dialogs, smart field checks, and duplicate/alias-aware workflows.
 - **Command-Line File Opening**: Launch CIVET with an optional CIF file path argument to open it on startup (unknown arguments are ignored, so Qt flags can be passed through safely).
-- **Flexible Field Rules Engine**: Supports `CHECK`, `DELETE`, `EDIT`, `RENAME`, `CALCULATE`, and `APPEND` actions in `.cif_rules` files.
+- **Flexible Field Rules Engine**: Supports `CHECK`, `DELETE`, `EDIT`, `RENAME`, `CALCULATE`, and `APPEND` actions, plus `IF`/`IF NOT` ... `ENDIF` conditional blocks, in `.cif_rules` files.
 - **Legacy/Modern CIF Handling**: Detects legacy, modern, and mixed notation; includes conversion plus integrated malformed-field detection and correction.
 - **`.cif_rules` Notation Converter**: Converts a field-rules file between legacy and modern notation from the main menu; when a loaded CIF's notation doesn't match the active rule set, **Start Checks** offers to convert the rules, convert the CIF, run as-is, or cancel.
 - **CIF Syntax Compliance Dialog**: Dedicated tabbed dialog (CIF 2.0 / CIF 1.1 / all) for syntax-version compliance issues, with line navigation, scoped **Fix All** actions, refresh, and a non-ASCII character conversion entry point.
@@ -103,7 +103,30 @@ APPEND: _publ_section_references Allen, F.H. (2010), Acta Cryst B66, 380-386.  #
 # CALCULATE example - convert fluence to flux density:
 # CrysAlisPRO reports fluence (e/Å²) as _diffrn.flux_density, but flux density is e/Å²/s
 CALCULATE: _diffrn.flux_density = _diffrn.flux_density / (_diffrn.total_exposure_time * 60) 
+
+# IF/THEN conditional blocks: run nested rules only when a condition holds
+IF: _diffrn_radiation.probe electron   # field exists and equals "electron"
+    CHECK: _diffrn_radiation_wavelength 0.02508
+    CHECK: _diffrn.ambient_temperature 293
+ENDIF
+
+IF: _exptl_crystal.colour_lustre        # field exists (any value)
+    DELETE: _exptl_crystal.colour_lustre_note
+ENDIF
+
+IF NOT: _cell_measurement.temperature   # field is absent
+    CHECK: _cell_measurement.temperature 293
+ENDIF
 ```
+
+Conditions support `IF: _field` (field present, any value), `IF: _field value` (present and
+equal to value), `IF: _field != value` (present and not equal), and `IF NOT: _field` (field absent).
+There is no `exists` keyword - `IF: _field exists` is parsed as an equals-check against the
+literal value `"exists"`, not as an existence test. Use the bare `IF: _field` form for that.
+Nested rules use the same `CHECK:`/`DELETE:`/`EDIT:`/`APPEND:`/`RENAME:`/`CALCULATE:` syntax as
+top-level rules (an explicit `CHECK:` prefix is optional at any nesting level); `DELETE:`/`EDIT:`/
+`APPEND:`/`RENAME:` inside a block still only run for Custom/User rule sets. IF blocks may be
+nested inside one another to any depth - each `ENDIF` closes the innermost still-open block.
 
 Built-in sets include packaged `.cif_rules` files from `field_rules/` (for example 3DED modern and 3DED legacy).
 

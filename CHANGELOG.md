@@ -3,6 +3,11 @@
 All notable changes to CIVET are documented in this file. Dates are release dates; entries are grouped by
 theme rather than strict chronological commit order.
 
+## since 1.3
+
+### Added
+- **IF / IF NOT checks**: keywords for .cif_rules files extended to include if / if not logic
+
 ## [1.3] - 2026-07-06
 
 ### Added
