@@ -7,6 +7,21 @@ theme rather than strict chronological commit order.
 
 ### Added
 - **IF / IF NOT checks**: keywords for .cif_rules files extended to include if / if not logic
+- **Multi-Data-Block Support**: CIF files containing several `data_` blocks (e.g. multiple crystals
+  or a variable-temperature series) are now checked block-by-block.
+  - **Start Checks** detects multiple data blocks and lets you choose which ones to check, plus a
+    **Shared** (default) or **Independent** check mode. Shared mode prompts once for a field when
+    all selected blocks agree on its value, and only opens a per-block resolution table when values
+    genuinely differ - so a variable-temperature file needs no extra configuration to get one
+    shared prompt for common metadata and a per-block prompt for temperature.
+  - Check dialogs show which data block(s) they apply to in a bold banner.
+  - **Data Name Validation** lists every block a field occurs in and lets you apply a fix to all
+  - blocks or scope it to just one.
+  - Duplicate/alias-conflict detection, the legacy-compatibility-fields action, and the refinement
+    special-details editor now all run per data block.
+  - The **File Status** panel's first row reports the data-block count, with a new scope selector
+    to show syntax/notation/data-name/data-value status for the whole file or a single block; a
+    tooltip explains the combined "all blocks" issue count against the per-block breakdown.
 
 ## [1.3] - 2026-07-06
 

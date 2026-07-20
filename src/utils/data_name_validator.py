@@ -73,6 +73,11 @@ class FieldValidationResult:
     prefix: str = ""                   # Extracted prefix if applicable
     suggested_format: str = ""         # Suggested correct format (for embedded local prefixes)
     embedded_prefix: str = ""          # If local prefix is embedded in category extension
+    block_name: str = ""               # data_ block the field was (first) found in ("" if single-block)
+    # Every data_ block the field occurs in, as (block_code, line_number)
+    # pairs in file order. Only populated for multi-block files; drives the
+    # per-block action scoping in the validation dialog.
+    block_occurrences: List = field(default_factory=list)
 
 
 @dataclass
@@ -348,15 +353,19 @@ class DataNameValidator:
 
         report = ValidationReport()
         seen_fields: Set[str] = set()
-        parsed_fields: List[tuple[str, int]] = []
-        
+        parsed_fields: List[tuple[str, int, str]] = []  # (name, line, block)
+        # All (block, line) occurrences per field, first line per block
+        occurrences: Dict[str, List[tuple]] = {}
+
         # Detect file format once so we can choose the right successor name
         cif_format = self.dict_manager.detect_cif_format(content)  # "legacy"/"modern"/"mixed"
         prefer_legacy = str(cif_format).upper() in ("LEGACY", "MIXED")
-        
+
         # Parse CIF content to extract field names and line numbers
         lines = content.split('\n')
         text_block_tracker = TextBlockTracker()
+        current_block = ""      # data_ block currently being scanned
+        block_count = 0
 
         for line_num, line in enumerate(lines, start=1):
             line_stripped = line.strip()
@@ -370,6 +379,9 @@ class DataNameValidator:
 
             # Skip empty lines, comments, and headers
             if not line_stripped or line_stripped.startswith('#') or line_stripped.startswith('data_'):
+                if line_stripped.lower().startswith('data_'):
+                    current_block = line_stripped[5:]
+                    block_count += 1
                 continue
 
             # Skip loop_ headers
@@ -384,18 +396,31 @@ class DataNameValidator:
                 if match:
                     field_name = match
                     field_name_lower = field_name.lower()
-                    
-                    # Skip if we've already seen this field (avoid duplicates in report)
+
+                    # One report entry per field name; further occurrences in
+                    # OTHER blocks are recorded so the dialog can offer
+                    # per-block actions (same-block repeats are duplicate
+                    # detection's job, not validation's)
                     if field_name_lower in seen_fields:
+                        field_occurrences = occurrences.get(field_name_lower, [])
+                        if not any(block == current_block for block, _ in field_occurrences):
+                            field_occurrences.append((current_block, line_num))
                         continue
                     seen_fields.add(field_name_lower)
-                    parsed_fields.append((field_name, line_num))
+                    parsed_fields.append((field_name, line_num, current_block))
+                    occurrences[field_name_lower] = [(current_block, line_num)]
 
-        all_field_names = {field_name.lower() for field_name, _ in parsed_fields}
+        all_field_names = {field_name.lower() for field_name, _, _ in parsed_fields}
+        multi_block = block_count > 1
 
-        for field_name, line_num in parsed_fields:
+        for field_name, line_num, block_name in parsed_fields:
             # Validate the field
             result = self.validate_field(field_name, line_num)
+            # Only attach block context when there is more than one block -
+            # single-block reports stay unchanged
+            if multi_block:
+                result.block_name = block_name
+                result.block_occurrences = list(occurrences.get(field_name.lower(), []))
             report.total_fields += 1
 
             # Add to appropriate category list

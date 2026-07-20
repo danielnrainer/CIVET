@@ -13,7 +13,9 @@ import re
 import hashlib
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker, safe_eval_expr
-from utils.CIF_parser import CIFParser, CIFField, update_audit_creation_method, update_audit_creation_date
+from utils.CIF_parser import (CIFParser, CIFField, update_audit_creation_method,
+                              update_audit_creation_date, count_data_blocks,
+                              list_data_block_names)
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
@@ -434,6 +436,21 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         status_form = QFormLayout(status_group)
         status_form.setContentsMargins(8, 6, 8, 6)
         status_form.setSpacing(6)
+
+        self._status_blocks_label = QLabel("\u2013")
+        self._status_blocks_label.setStyleSheet("color: gray;")
+        status_form.addRow("Data blocks:", self._status_blocks_label)
+
+        # Scope selector for the status rows below: whole file or a single
+        # data block. Only shown for multi-block files.
+        self._status_scope_block = None  # None = all blocks
+        self._status_scope_combo = QComboBox()
+        self._status_scope_combo.addItem("All blocks")
+        self._status_scope_combo.currentTextChanged.connect(self._on_status_scope_changed)
+        self._status_scope_row_label = QLabel("Show status for:")
+        status_form.addRow(self._status_scope_row_label, self._status_scope_combo)
+        self._status_scope_row_label.setVisible(False)
+        self._status_scope_combo.setVisible(False)
 
         self._status_syntax_label = QLabel("\u2013")
         self._status_syntax_label.setStyleSheet("color: gray;")
@@ -980,12 +997,31 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self.update_status_bar()
             self.add_to_recent_files(filepath)
             self.update_window_title(filepath)
-            
+
+            self._warn_if_multiple_data_blocks(content)
+
             # Prompt for dictionary suggestions after opening CIF file
             self.prompt_for_dictionary_suggestions(content)
-                
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open file:\n{e}")
+
+    def _warn_if_multiple_data_blocks(self, content: str) -> None:
+        """Notify when a file contains more than one data_ block.
+
+        Field checks run separately for each data block (selectable in the
+        check configuration dialog); see .github/multi_data_block_plan.md.
+        """
+        block_count = count_data_blocks(content)
+        if block_count > 1:
+            QMessageBox.information(
+                self,
+                "Multiple Data Blocks",
+                f"This file contains {block_count} data blocks.\n\n"
+                "Field checks will run separately for each data block, in "
+                "file order. You can choose which blocks to check in the "
+                "check configuration dialog."
+            )
 
     def reload_file(self):
         """Reload the current file from disk, discarding all unsaved changes."""
@@ -1402,11 +1438,16 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self._update_status_panel_values(None)
             return
 
+        # Honour the status panel's scope selector (whole file or one block)
+        scoped_content = self._status_scoped_content(content)
+        scope_block = getattr(self, '_status_scope_block', None)
+        block_names = list_data_block_names(content)
+
         self._submit_background_task(
             task_name="status_names",
             revision=run_revision,
-            compute=lambda: DataNameValidator(self.dict_manager).validate_cif_content(content),
-            on_success=self._update_status_panel_names,
+            compute=lambda: self._compute_names_status(content, scoped_content, scope_block, block_names),
+            on_success=lambda result: self._update_status_panel_names(*result),
             on_failure=self._set_names_status_error,
             require_latest_revision=True,
         )
@@ -1414,8 +1455,8 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         self._submit_background_task(
             task_name="status_values",
             revision=run_revision,
-            compute=lambda: self._compute_data_value_issues(content),
-            on_success=self._update_status_panel_values,
+            compute=lambda: self._compute_values_status(content, scoped_content, scope_block, block_names),
+            on_success=lambda result: self._update_status_panel_values(*result),
             on_failure=self._set_values_status_error,
             require_latest_revision=True,
         )
@@ -1428,17 +1469,95 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self._update_status_panel_values(None)
             return
 
+        # Honour the status panel's scope selector (whole file or one block)
+        scoped_content = self._status_scoped_content(content)
+        scope_block = getattr(self, '_status_scope_block', None)
+        block_names = list_data_block_names(content)
+
         try:
-            names_report = self.data_name_validator.validate_cif_content(content)
-            self._update_status_panel_names(names_report)
+            names_report, names_breakdown = self._compute_names_status(
+                content, scoped_content, scope_block, block_names,
+                validate_fn=self.data_name_validator.validate_cif_content)
+            self._update_status_panel_names(names_report, names_breakdown)
         except Exception:
             self._set_names_status_error("heavy_sync")
 
         try:
-            issues = self._validate_data_values_for_content(content)
-            self._update_status_panel_values(issues)
+            issues, values_breakdown = self._compute_values_status(
+                content, scoped_content, scope_block, block_names,
+                compute_fn=self._validate_data_values_for_content)
+            self._update_status_panel_values(issues, values_breakdown)
         except Exception:
             self._set_values_status_error("heavy_sync")
+
+    def _compute_block_issue_breakdown(self, content, block_names, count_fn):
+        """Return {block_code: issue_count} for each data block via count_fn.
+
+        Powers the "All blocks" status-row tooltip, so it's clear why the
+        combined count can be less than the sum of the per-block figures: a
+        field whose issue is shared between blocks is one distinct issue
+        (counted once in the combined total) but shows up in each block's
+        own count.
+        """
+        lines = content.splitlines()
+        breakdown = {}
+        for name in block_names:
+            start, end = self._locate_block_span(lines, name)
+            block_content = '\n'.join(lines[start:end])
+            breakdown[name] = count_fn(block_content)
+        return breakdown
+
+    def _compute_names_status(self, content, scoped_content, scope_block, block_names,
+                              validate_fn=None):
+        """Compute the names ValidationReport for the selected scope, plus a
+        per-block breakdown when scope is "All blocks" on a multi-block file.
+
+        validate_fn defaults to a fresh DataNameValidator per call (safe to
+        run on a background thread); explicit-refresh callers may pass
+        self.data_name_validator.validate_cif_content to reuse its cache.
+        """
+        if validate_fn is None:
+            validate_fn = lambda text: DataNameValidator(self.dict_manager).validate_cif_content(text)
+
+        report = validate_fn(scoped_content)
+        breakdown = None
+        if scope_block is None and len(block_names) > 1:
+            def _count(text):
+                r = validate_fn(text)
+                return len(r.unknown_fields) + len(r.deprecated_fields) + len(r.malformed_fields)
+            breakdown = self._compute_block_issue_breakdown(content, block_names, _count)
+        return report, breakdown
+
+    def _compute_values_status(self, content, scoped_content, scope_block, block_names,
+                               compute_fn=None):
+        """Compute data-value issues for the selected scope, plus a per-block
+        breakdown when scope is "All blocks" on a multi-block file.
+
+        compute_fn defaults to the uncached computation (safe to run on a
+        background thread); explicit-refresh callers may pass
+        self._validate_data_values_for_content to reuse its cache.
+        """
+        if compute_fn is None:
+            compute_fn = self._compute_data_value_issues
+
+        issues = compute_fn(scoped_content)
+        breakdown = None
+        if scope_block is None and len(block_names) > 1:
+            breakdown = self._compute_block_issue_breakdown(
+                content, block_names, lambda text: len(compute_fn(text)))
+        return issues, breakdown
+
+    def _format_breakdown_tooltip(self, total: int, breakdown) -> str:
+        """Build the status-row tooltip explaining a combined count against
+        its per-block breakdown ('' when there is no breakdown to show)."""
+        if not breakdown:
+            return ""
+        per_block_lines = "\n".join(f"data_{name}: {count}" for name, count in breakdown.items())
+        overlap = max(0, sum(breakdown.values()) - total)
+        tooltip = f"{total} distinct issue(s) across all blocks:\n{per_block_lines}"
+        if overlap:
+            tooltip += f"\n({overlap} shared between blocks, counted once above)"
+        return tooltip
 
     def _set_names_status_error(self, _message: str) -> None:
         self._update_status_panel_names(None)
@@ -1584,6 +1703,57 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         """Update the CIF version display in the status bar"""
         pass
 
+    def _status_scoped_content(self, content: str) -> str:
+        """Return the content the status rows should describe.
+
+        The whole document by default; the selected data block's slice when
+        the user picked one in the status panel's scope selector.
+        """
+        scope = getattr(self, '_status_scope_block', None)
+        if not scope:
+            return content
+        lines = content.splitlines()
+        start, end = self._locate_block_span(lines, scope)
+        return '\n'.join(lines[start:end])
+
+    def _on_status_scope_changed(self, text: str) -> None:
+        """Re-run the status refresh when the scope selection changes."""
+        new_scope = text[len("data_"):] if text.startswith("data_") else None
+        if new_scope == getattr(self, '_status_scope_block', None):
+            return
+        self._status_scope_block = new_scope
+        self._refresh_compliance_status()
+
+    def _refresh_status_scope_combo(self, block_names) -> None:
+        """Keep the scope selector in sync with the file's data blocks."""
+        combo = getattr(self, '_status_scope_combo', None)
+        row_label = getattr(self, '_status_scope_row_label', None)
+        if combo is None:
+            return
+
+        multi_block = len(block_names) > 1
+        combo.setVisible(multi_block)
+        if row_label is not None:
+            row_label.setVisible(multi_block)
+
+        desired = ["All blocks"] + [f"data_{name}" for name in block_names]
+        current = [combo.itemText(i) for i in range(combo.count())]
+        if current != desired:
+            selected = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(desired)
+            if selected in desired:
+                combo.setCurrentText(selected)
+            else:
+                combo.setCurrentIndex(0)
+                self._status_scope_block = None
+            combo.blockSignals(False)
+
+        if not multi_block and getattr(self, '_status_scope_block', None) is not None:
+            # Selected block disappeared (or file became single-block)
+            self._status_scope_block = None
+
     def _update_compliance_status(self, content: str) -> None:
         """Run a quick compliance check and update the status-bar label and status panel.
 
@@ -1649,42 +1819,75 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self._compliance_label.setText("")
             _panel('_status_syntax_label',   "\u2013", "color: gray;")
             _panel('_status_notation_label', "\u2013", "color: gray;")
+            _panel('_status_blocks_label',   "\u2013", "color: gray;")
+            self._refresh_status_scope_combo([])
             return
         try:
             from utils.cif_syntax_compliance import check_compliance
+
+            # Data blocks row (always whole-file) and scope selector
+            block_names = list_data_block_names(content)
+            self._refresh_status_scope_combo(block_names)
+            blocks_widget = getattr(self, '_status_blocks_label', None)
+            if len(block_names) > 1:
+                _panel('_status_blocks_label', f"{len(block_names)} blocks",
+                       "color: #7B1FA2; font-weight: bold;")
+                if blocks_widget is not None:
+                    blocks_widget.setToolTip(
+                        "\n".join(f"data_{name}" for name in block_names))
+            else:
+                _panel('_status_blocks_label', str(len(block_names)), "color: gray;")
+                if blocks_widget is not None:
+                    blocks_widget.setToolTip("")
+
+            # The rows below describe the selected scope: whole file, or one
+            # data block picked in the scope selector
+            scoped_content = self._status_scoped_content(content)
+
             results = check_compliance(content)
             cif2_errors = [i for i in results['cif2'] if i.severity == 'error']
             cif1_errors = [i for i in results['cif1'] if i.severity == 'error']
 
+            # Status-bar label stays whole-file
             if not cif2_errors:
                 self._compliance_label.setText("CIF 2.0 \u2714")
                 self._compliance_label.setStyleSheet("color: green; font-weight: bold;")
-                _panel('_status_syntax_label', "\u2714 CIF 2.0",
-                       "color: green; font-weight: bold;")
             elif not cif1_errors:
                 self._compliance_label.setText("CIF 1.1 \u2714")
                 self._compliance_label.setStyleSheet("color: blue; font-weight: bold;")
-                _panel('_status_syntax_label', "\u2714 CIF 1.1",
-                       "color: blue; font-weight: bold;")
             else:
                 all_issues = results['cif1'] + results['cif2']
-                has_error_sev = any(i.severity == 'error' for i in all_issues)
                 n = len(all_issues)
-                if has_error_sev:
+                if any(i.severity == 'error' for i in all_issues):
                     self._compliance_label.setText(f"\u2716 {n} compliance error(s)")
                     self._compliance_label.setStyleSheet("color: red; font-weight: bold;")
-                    _panel('_status_syntax_label', "\u2717 Not compliant",
-                           "color: red; font-weight: bold;")
                 else:
                     self._compliance_label.setText(f"\u26a0 {n} warning(s)")
                     self._compliance_label.setStyleSheet(
                         "color: darkorange; font-weight: bold;"
                     )
-                    _panel('_status_syntax_label', f"\u26a0 Warnings ({n})",
+
+            # Panel syntax row follows the scope
+            panel_results = results if scoped_content is content else check_compliance(scoped_content)
+            panel_cif2_errors = [i for i in panel_results['cif2'] if i.severity == 'error']
+            panel_cif1_errors = [i for i in panel_results['cif1'] if i.severity == 'error']
+            if not panel_cif2_errors:
+                _panel('_status_syntax_label', "\u2714 CIF 2.0",
+                       "color: green; font-weight: bold;")
+            elif not panel_cif1_errors:
+                _panel('_status_syntax_label', "\u2714 CIF 1.1",
+                       "color: blue; font-weight: bold;")
+            else:
+                panel_issues = panel_results['cif1'] + panel_results['cif2']
+                if any(i.severity == 'error' for i in panel_issues):
+                    _panel('_status_syntax_label', "\u2717 Not compliant",
+                           "color: red; font-weight: bold;")
+                else:
+                    _panel('_status_syntax_label', f"\u26a0 Warnings ({len(panel_issues)})",
                            "color: darkorange; font-weight: bold;")
 
-            # Notation row
-            notation = self.dict_manager.detect_notation(content)
+            # Notation row follows the scope
+            notation = self.dict_manager.detect_notation(scoped_content)
             if notation == FieldNotation.MODERN:
                 _panel('_status_notation_label', "\u2714 Modern (dot)",
                        "color: green; font-weight: bold;")
@@ -1692,7 +1895,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 _panel('_status_notation_label', "Legacy (underscore)",
                        "color: blue; font-weight: bold;")
             elif notation == FieldNotation.MIXED:
-                if _has_only_modern_only_fields(content):
+                if _has_only_modern_only_fields(scoped_content):
                     _panel('_status_notation_label', "Legacy (except un-aliased modern fields)",
                            "color: steelblue; font-weight: bold;")
                 else:
@@ -1703,11 +1906,14 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         except Exception:
             self._compliance_label.setText("")
 
-    def _update_status_panel_names(self, report) -> None:
+    def _update_status_panel_names(self, report, breakdown=None) -> None:
         """Update the 'Data names' row in the status panel.
 
         Pass *report* (a ValidationReport) after running data-name validation,
-        or None to reset the row to 'Not run'.
+        or None to reset the row to 'Not run'. *breakdown*, when given, is a
+        {block_code: issue_count} dict shown as a tooltip explaining why the
+        combined "All blocks" count can be less than the sum of per-block
+        counts (an issue shared between blocks is one distinct issue).
         """
         w = getattr(self, '_status_names_label', None)
         if w is None:
@@ -1715,6 +1921,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         if report is None:
             w.setText("\u2013 Not run")
             w.setStyleSheet("color: gray;")
+            w.setToolTip("")
             return
         n_issues = (len(report.unknown_fields)
                     + len(report.deprecated_fields)
@@ -1725,12 +1932,14 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         else:
             w.setText(f"\u2717 {n_issues} issue(s)")
             w.setStyleSheet("color: red; font-weight: bold;")
+        w.setToolTip(self._format_breakdown_tooltip(n_issues, breakdown))
 
-    def _update_status_panel_values(self, issues) -> None:
+    def _update_status_panel_values(self, issues, breakdown=None) -> None:
         """Update the 'Data values' row in the status panel.
 
         Pass a list of ValidationIssue objects after running data-value
-        validation, or None to reset the row to 'Not run'.
+        validation, or None to reset the row to 'Not run'. *breakdown* is as
+        described in _update_status_panel_names.
         """
         w = getattr(self, '_status_values_label', None)
         if w is None:
@@ -1738,6 +1947,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         if issues is None:
             w.setText("\u2013 Not run")
             w.setStyleSheet("color: gray;")
+            w.setToolTip("")
             return
         n = len(issues)
         if n == 0:
@@ -1746,6 +1956,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         else:
             w.setText(f"\u2717 {n} issue(s)")
             w.setStyleSheet("color: red; font-weight: bold;")
+        w.setToolTip(self._format_breakdown_tooltip(n, breakdown))
 
     def load_custom_dictionary(self):
         """Load a custom CIF dictionary file."""
@@ -2111,37 +2322,36 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         """
         content = self.text_editor.toPlainText()
         modified = False
-        
+
         # Get fields to delete
-        fields_to_delete = dialog.get_fields_to_delete()
-        
+        fields_to_delete = set(dialog.get_fields_to_delete())
+
         # Get deprecated updates (old_name -> new_name) - now we ADD modern alongside deprecated
         deprecated_updates = dialog.get_deprecated_updates()
 
         # Get deprecated replacements (old_name -> new_name) - replace old name directly
         deprecated_replacements = dialog.get_deprecated_replacements()
-        
+
         # Get format corrections (old_name -> corrected_name)
         format_corrections = dialog.get_format_corrections()
-        
+
         # Get malformed fixes (old_name -> correct_name) - these are renames, same as format corrections
         malformed_fixes = dialog.get_malformed_fixes()
         # Merge malformed fixes into format_corrections since they are handled identically
         format_corrections.update(malformed_fixes)
-        
-        # First, check which modern fields already exist (to avoid duplicates)
-        existing_fields = set()
-        for line in content.split('\n'):
-            stripped = line.strip()
-            if stripped.startswith('_'):
-                parts = stripped.split(None, 1)
-                if parts:
-                    existing_fields.add(parts[0].lower())
-        
-        # Filter deprecated_updates to only add successor fields that don't already exist.
-        # Compare using notation/alias-equivalent names as well as exact spelling.
-        deprecated_to_add = {}
-        present_or_planned_fields = set(existing_fields)
+
+        # Block scopes chosen for actions on multi-block files: field -> block
+        # code the action is limited to; fields not present apply everywhere
+        action_scopes = getattr(dialog, 'get_action_block_scopes', lambda: {})()
+
+        # Safety net: never remove a field that checkCIF still requires kept
+        # (e.g. _cell_measurement_temperature for PLAT197) - the dialog should
+        # already prevent this, but this guard covers any other call path.
+        deprecated_replacements = {
+            old_name: new_name
+            for old_name, new_name in deprecated_replacements.items()
+            if not self.dict_manager.is_checkcif_compatibility_field(old_name)
+        }
 
         def _equivalent_names(field_name: str) -> set[str]:
             """Return known equivalent data-name spellings for duplicate checks."""
@@ -2175,49 +2385,48 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
 
             return names
 
-        for old_name, new_name in deprecated_updates.items():
-            old_name_lower = old_name.lower()
-            successor_equivalents = _equivalent_names(new_name)
-            already_present = any(
-                eq_name in present_or_planned_fields and eq_name != old_name_lower
-                for eq_name in successor_equivalents
-            )
-            if not already_present:
-                deprecated_to_add[old_name] = new_name
-                present_or_planned_fields.update(successor_equivalents)
+        # Per-data-block view of which names exist, so successor-presence
+        # decisions (add vs skip, replace vs remove) are made against the
+        # block being edited rather than the whole file
+        presence_parser = CIFParser()
+        presence_parser.parse_file(content)
+        whole_file_fields = {name.lower() for name in presence_parser.fields}
+        fields_by_block = {
+            block.name: {name.lower() for name in block.fields}
+            for block in presence_parser.blocks
+        }
 
-        # Determine which deprecated replacements are true renames vs safe removals
-        # (when successor already exists under any equivalent alias).
-        deprecated_to_replace = {}
-        deprecated_replace_to_delete = set()
-        for old_name, new_name in deprecated_replacements.items():
-            old_name_lower = old_name.lower()
-            # Safety net: never remove a field that checkCIF still requires kept
-            # (e.g. _cell_measurement_temperature for PLAT197), even if a
-            # replacement action was queued for it - the dialog should already
-            # prevent this, but this guard covers any other call path.
-            if self.dict_manager.is_checkcif_compatibility_field(old_name):
-                continue
-            successor_equivalents = _equivalent_names(new_name)
-            successor_already_present = any(
-                eq_name in present_or_planned_fields and eq_name != old_name_lower
-                for eq_name in successor_equivalents
-            )
-            if successor_already_present:
-                deprecated_replace_to_delete.add(old_name_lower)
-            else:
-                deprecated_to_replace[old_name_lower] = new_name
-                present_or_planned_fields.update(successor_equivalents)
+        def _block_fields(block_code):
+            if block_code is not None and block_code in fields_by_block:
+                return fields_by_block[block_code]
+            return whole_file_fields
 
-        effective_fields_to_delete = set(fields_to_delete) | deprecated_replace_to_delete
+        def _successor_present(block_code, successor, own_name):
+            names_here = _block_fields(block_code)
+            return any(
+                eq_name in names_here and eq_name != own_name
+                for eq_name in _equivalent_names(successor)
+            )
+
+        def _mark_successor_present(block_code, successor):
+            _block_fields(block_code).add(successor.lower())
+
+        counts = {'deleted': 0, 'replaced': 0, 'removed_existing': 0,
+                  'added': 0, 'corrected': 0, 'malformed_fixed': 0}
         
-        if effective_fields_to_delete or deprecated_to_add or deprecated_to_replace or format_corrections:
+        if fields_to_delete or deprecated_updates or deprecated_replacements or format_corrections:
             lines = content.split('\n')
             new_lines = []
             in_multiline = False
             skip_until_semicolon = False
             awaiting_semicolon_block = False  # True after skipping a field name with no inline value
-            
+            current_block = None  # data_ block the walk is currently inside
+
+            def _in_scope(name):
+                """True when the action on this field applies in the current block."""
+                scope = action_scopes.get(name)
+                return scope is None or scope == current_block
+
             for line in lines:
                 # Handle semicolon-delimited multiline values
                 stripped = line.strip()
@@ -2235,28 +2444,65 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     in_multiline = not in_multiline
                     new_lines.append(line)
                     continue
-                
+
                 if skip_until_semicolon:
                     # Skip lines that are part of a deleted multiline field
                     continue
-                
+
                 if awaiting_semicolon_block:
                     # We skipped a field name expecting a semicolon block, but this line
                     # isn't a semicolon — unexpected in valid CIF; stop waiting and
                     # process this line normally
                     awaiting_semicolon_block = False
-                
+
                 if in_multiline:
                     new_lines.append(line)
                     continue
-                
+
+                # Track which data block we're in for block-scoped actions
+                if stripped.lower().startswith('data_'):
+                    current_block = stripped[5:]
+                    new_lines.append(line)
+                    continue
+
                 # Check if this line contains a field
                 if stripped.startswith('_'):
                     parts = stripped.split(None, 1)
                     field_name = parts[0].lower() if parts else ''
-                    
-                    # Check if field should be deleted
-                    if field_name in effective_fields_to_delete:
+
+                    # Decide what happens to this occurrence (block-scoped)
+                    delete_this = False
+                    rename_to = None
+                    add_successor = None
+
+                    if field_name in fields_to_delete and _in_scope(field_name):
+                        delete_this = True
+                        counts['deleted'] += 1
+                    elif field_name in deprecated_replacements and _in_scope(field_name):
+                        successor = deprecated_replacements[field_name]
+                        if _successor_present(current_block, successor, field_name):
+                            # Successor already in this block: removing the
+                            # deprecated field is enough
+                            delete_this = True
+                            counts['removed_existing'] += 1
+                        else:
+                            rename_to = successor
+                            counts['replaced'] += 1
+                            _mark_successor_present(current_block, successor)
+                    elif field_name in deprecated_updates and _in_scope(field_name):
+                        successor = deprecated_updates[field_name]
+                        if not _successor_present(current_block, successor, field_name):
+                            add_successor = successor
+                            counts['added'] += 1
+                            _mark_successor_present(current_block, successor)
+                    elif field_name in format_corrections and _in_scope(field_name):
+                        rename_to = format_corrections[field_name]
+                        if field_name in malformed_fixes:
+                            counts['malformed_fixed'] += 1
+                        else:
+                            counts['corrected'] += 1
+
+                    if delete_this:
                         modified = True
                         # Check if this is a multiline value
                         if len(parts) == 1:
@@ -2272,74 +2518,55 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                             # Single line value, skip this line
                             continue
 
-                    # Check if deprecated field should be replaced directly
-                    if field_name in deprecated_to_replace:
-                        new_name = deprecated_to_replace[field_name]
+                    if rename_to is not None:
                         if len(parts) > 1:
                             # Field has value on same line
-                            new_lines.append(f"{new_name} {parts[1]}")
+                            new_lines.append(f"{rename_to} {parts[1]}")
                         else:
                             # Field name only (value on next line)
-                            new_lines.append(new_name)
+                            new_lines.append(rename_to)
                         modified = True
                         continue
-                    
-                    # Check if we should add modern equivalent after deprecated field
-                    if field_name in deprecated_to_add:
-                        new_name = deprecated_to_add[field_name]
+
+                    if add_successor is not None:
                         # Keep the original deprecated line
                         new_lines.append(line)
-                        # Add the modern equivalent with the same value after it
+                        # Add the successor with the same value after it
                         if len(parts) > 1:
-                            # Field has value on same line
-                            new_lines.append(f"{new_name} {parts[1]}")
+                            new_lines.append(f"{add_successor} {parts[1]}")
                         else:
-                            # Field name only (value on next line) - just add the name
-                            new_lines.append(new_name)
+                            new_lines.append(add_successor)
                         modified = True
                         continue
-                    
-                    # Check if field should have format corrected (embedded local prefix)
-                    if field_name in format_corrections:
-                        corrected_name = format_corrections[field_name]
-                        if len(parts) > 1:
-                            # Field has value on same line
-                            new_lines.append(f"{corrected_name} {parts[1]}")
-                        else:
-                            # Field name only
-                            new_lines.append(corrected_name)
-                        modified = True
-                        continue
-                
+
                 new_lines.append(line)
-            
+
             if modified:
                 new_content = '\n'.join(new_lines)
                 self.text_editor.setText(new_content)
                 self.modified = True
                 self.update_status_bar()
-                
-                # Show summary of changes
+
+                # Show summary of changes (occurrence counts, so block-scoped
+                # actions on multi-block files report what actually happened)
                 changes_summary = []
-                if fields_to_delete:
-                    changes_summary.append(f"Deleted {len(fields_to_delete)} field(s)")
-                if deprecated_to_replace:
-                    changes_summary.append(f"Replaced {len(deprecated_to_replace)} deprecated field name(s)")
-                if deprecated_replace_to_delete:
+                if counts['deleted']:
+                    changes_summary.append(f"Deleted {counts['deleted']} field occurrence(s)")
+                if counts['replaced']:
+                    changes_summary.append(f"Replaced {counts['replaced']} deprecated field name(s)")
+                if counts['removed_existing']:
                     changes_summary.append(
-                        f"Removed {len(deprecated_replace_to_delete)} deprecated field(s) because successor already existed"
+                        f"Removed {counts['removed_existing']} deprecated field(s) because successor already existed"
                     )
-                if deprecated_to_add:
-                    changes_summary.append(f"Added successors for {len(deprecated_to_add)} deprecated field(s)")
-                # format_corrections now includes both embedded prefix fixes and malformed fixes
-                num_format = len(format_corrections) - len(malformed_fixes)
-                if num_format > 0:
-                    changes_summary.append(f"Corrected format of {num_format} field(s)")
-                if malformed_fixes:
-                    changes_summary.append(f"Fixed {len(malformed_fixes)} malformed field name(s)")
-                
+                if counts['added']:
+                    changes_summary.append(f"Added successors for {counts['added']} deprecated field(s)")
+                if counts['corrected']:
+                    changes_summary.append(f"Corrected format of {counts['corrected']} field(s)")
+                if counts['malformed_fixed']:
+                    changes_summary.append(f"Fixed {counts['malformed_fixed']} malformed field name(s)")
+
                 QMessageBox.information(
-                    self, 
+                    self,
                     "Changes Applied",
                     "The following changes were applied:\n• " + "\n• ".join(changes_summary)
                 )

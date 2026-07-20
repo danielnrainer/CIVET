@@ -604,15 +604,30 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
             
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            
-            # Add compatibility fields
-            report = self.cif_parser.add_legacy_compatibility_fields(self.dict_manager)
-            
-            # Generate the updated CIF content
-            updated_content = self.cif_parser.generate_cif_content()
-            
-            # Update the editor
-            self.text_editor.setText(updated_content)
+
+            # Add compatibility fields. For multi-block files each block gets
+            # its own pass (and its own deprecated section), based on the
+            # modern fields present in that block.
+            if self.cif_parser.has_multiple_blocks():
+                from utils.CIF_parser import CIFParser as _BlockParser
+                block_reports = []
+                for block_name in self.cif_parser.get_block_names():
+                    self._active_check_block = block_name
+                    try:
+                        block_parser = _BlockParser()
+                        block_parser.parse_file(self._get_check_text())
+                        block_report = block_parser.add_legacy_compatibility_fields(self.dict_manager)
+                        # Trailing blank line keeps the blocks visually separated
+                        # (generate_cif_content trims trailing empties)
+                        self._set_check_text(block_parser.generate_cif_content() + '\n')
+                    finally:
+                        self._active_check_block = None
+                    block_reports.append(f"data_{block_name}:\n{block_report}")
+                report = "\n\n".join(block_reports)
+            else:
+                report = self.cif_parser.add_legacy_compatibility_fields(self.dict_manager)
+                updated_content = self.cif_parser.generate_cif_content()
+                self.text_editor.setText(updated_content)
             self.modified = True
             self._check_duplicate_data_names("adding legacy compatibility data names", block_on_conflicts=False)
             

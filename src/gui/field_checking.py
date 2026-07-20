@@ -21,11 +21,12 @@ from typing import Dict, List, Tuple, TYPE_CHECKING
 from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.CIF_field_parsing import safe_eval_expr, evaluate_condition
-from utils.CIF_parser import CIFField, update_audit_creation_method
+from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
+                              TextBlockTracker)
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog,
-                      RESULT_ABORT, RESULT_STOP_SAVE)
+                      MultiBlockValueDialog, RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.data_name_validation_dialog import DataNameValidationDialog
 from .dialogs.field_conflict_dialog import FieldConflictDialog
 from .dialogs.critical_issues_dialog import CriticalIssuesDialog
@@ -61,6 +62,102 @@ class FieldCheckingMixin:
             editor_widget.replace_contents_incrementally(text)
         else:
             self.text_editor.setText(text)
+
+    # ------------------------------------------------------------------
+    # Data-block scoping
+    #
+    # When a multi-block file is checked, the run loops over the selected
+    # blocks with `_active_check_block` set to the current block's code.
+    # The helpers below then present the check pipeline with a virtual
+    # document containing only that block's lines; writes are spliced back
+    # into the full document. With no active block (single-block files,
+    # and all non-check editing) they are transparent pass-throughs.
+    # See .github/multi_data_block_plan.md.
+    # ------------------------------------------------------------------
+
+    @property
+    def _check_block_scope(self):
+        """Code of the data block checks are currently scoped to, or None."""
+        return getattr(self, '_active_check_block', None)
+
+    @staticmethod
+    def _locate_block_span(lines, block_name):
+        """Return the [start, end) line range of ``data_<block_name>``.
+
+        The span includes the data_ header line and runs to the line before
+        the next data_ header (or EOF). data_ tokens inside multiline text
+        values and comments are ignored. Falls back to the whole document
+        if the block is not found (so a stale scope can never corrupt
+        content outside the file).
+        """
+        tracker = TextBlockTracker()
+        start = None
+        for i, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if tracker.consume(line):
+                continue
+            if line.startswith('#'):
+                continue
+            if line.lower().startswith('data_'):
+                if start is not None:
+                    return start, i
+                if line[5:].lower() == block_name.lower():
+                    start = i
+        if start is None:
+            return 0, len(lines)
+        return start, len(lines)
+
+    def _get_check_lines(self):
+        """Return (lines, offset) for the current check scope.
+
+        ``lines`` is the scoped document as a line list; ``offset`` is the
+        absolute line number of its first line in the full document (0 when
+        unscoped), for user-facing line references.
+        """
+        all_lines = self.text_editor.toPlainText().splitlines()
+        scope = self._check_block_scope
+        if not scope:
+            return all_lines, 0
+        start, end = self._locate_block_span(all_lines, scope)
+        return all_lines[start:end], start
+
+    def _get_check_text(self) -> str:
+        """Return the text of the current check scope (whole document if unscoped)."""
+        lines, _ = self._get_check_lines()
+        return '\n'.join(lines)
+
+    def _set_check_lines(self, lines) -> None:
+        """Write scoped lines back, splicing into the full document if scoped."""
+        scope = self._check_block_scope
+        if not scope:
+            self._set_editor_text('\n'.join(lines))
+            return
+        all_lines = self.text_editor.toPlainText().splitlines()
+        start, end = self._locate_block_span(all_lines, scope)
+        self._set_editor_text('\n'.join(all_lines[:start] + list(lines) + all_lines[end:]))
+
+    def _set_check_text(self, text: str) -> None:
+        """Text counterpart of _set_check_lines."""
+        self._set_check_lines(text.splitlines())
+
+    def _get_scoped_field_value(self, field_name):
+        """Field lookup honouring the active block scope.
+
+        Used by IF conditions and CALCULATE so they see only the block being
+        checked; falls back to the parser's flat whole-file view when
+        unscoped. The caller is responsible for keeping the parser current
+        (ensure_parser_current).
+        """
+        scope = self._check_block_scope
+        if scope:
+            block = self.cif_parser.get_block(scope)
+            return block.get_field_value(field_name) if block else None
+        return self.cif_parser.get_field_value(field_name)
+
+    def _check_block_label(self):
+        """Banner text naming the scoped block for input dialogs (None when unscoped)."""
+        scope = self._check_block_scope
+        return f"Data block: data_{scope}" if scope else None
 
     def _get_active_field_rules_path(self) -> str:
         """Return the currently selected .cif_rules source path, if any."""
@@ -344,13 +441,13 @@ class FieldCheckingMixin:
     def check_line(self, prefix, default_value=None, multiline=False, description="", suggestions=None):
         """Check and potentially update a CIF field value."""
         removable_chars = "'"
-        lines = self.text_editor.toPlainText().splitlines()
-        
+        lines, line_offset = self._get_check_lines()
+
         for i, line in enumerate(lines):
             parts = line.split(None, 1)
             if parts and parts[0] == prefix:
                 current_value = self.extract_field_value(lines, i, prefix)
-                
+
                 # Determine operation type based on whether value differs from default
                 operation_type = "edit"
                 if default_value:
@@ -359,21 +456,22 @@ class FieldCheckingMixin:
                     clean_default = str(default_value).strip().strip("'\"")
                     if clean_current and clean_current != clean_default:
                         operation_type = "different"
-                
+
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
-                    f"Line {i + 1}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    f"Line {i + 1 + line_offset}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
                     current_value, default_value, operation_type=operation_type, suggestions=suggestions,
                     show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                         d, "dialogs.field_check_edit_mode"
-                    ))
+                    ),
+                    block_label=self._check_block_label())
 
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
                     # Update the field value properly
                     self.update_field_value(lines, i, prefix, value)
-                    self._set_editor_text("\n".join(lines))
+                    self._set_check_lines(lines)
                 return result
 
         QMessageBox.warning(self, "Line Not Found",
@@ -388,7 +486,8 @@ class FieldCheckingMixin:
             default_value if default_value else "", default_value, operation_type="add", suggestions=suggestions,
             show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                 d, "dialogs.field_check_edit_mode"
-            ))
+            ),
+            block_label=self._check_block_label())
 
         if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
             return result
@@ -415,9 +514,9 @@ class FieldCheckingMixin:
             else:
                 formatted_value = stripped_value
             lines.append(f"{prefix} {formatted_value}")
-        
-        self._set_editor_text("\n".join(lines))
-        return result    
+
+        self._set_check_lines(lines)
+        return result
     
     def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None, suggestions=None):
         """Check and potentially update a CIF field value with configuration options."""
@@ -449,8 +548,8 @@ class FieldCheckingMixin:
                     )
         
         removable_chars = "'"
-        lines = self.text_editor.toPlainText().splitlines()
-        
+        lines, line_offset = self._get_check_lines()
+
         # Check if field exists
         field_found = False
         for i, line in enumerate(lines):
@@ -479,18 +578,19 @@ class FieldCheckingMixin:
                 
                 value, result = CIFInputDialog.getText(
                     self, "Edit Line",
-                    f"Line {i + 1}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
+                    f"Line {i + 1 + line_offset}:\n{line}\n\nDescription: {description}\n\nSuggested value: {default_value}\n\n",
                     current_value, default_value, operation_type=operation_type, suggestions=suggestions,
                     show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                         d, "dialogs.field_check_edit_mode"
-                    ))
+                    ),
+                    block_label=self._check_block_label())
 
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
                 elif result == QDialog.DialogCode.Accepted and value:
                     # Update the field value properly
                     self.update_field_value(lines, i, prefix, value)
-                    self._set_editor_text("\n".join(lines))
+                    self._set_check_lines(lines)
                 return result
 
         # Field not found - handle missing field
@@ -523,10 +623,10 @@ class FieldCheckingMixin:
                 else:
                     formatted_value = stripped_value
                 lines.append(f"{prefix} {formatted_value}")
-            
-            self._set_editor_text("\n".join(lines))
+
+            self._set_check_lines(lines)
             return QDialog.DialogCode.Accepted
-        
+
         # Otherwise, use the normal missing line dialog
         return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
     
@@ -547,33 +647,38 @@ class FieldCheckingMixin:
             QDialog.DialogCode.Accepted if successful, Rejected otherwise
         """
         content = self.text_editor.toPlainText()
-        
+
         # Parse the CIF content using the CIF parser
         self.cif_parser.parse_file(content)
-        
+
+        # With an active block scope, look the fields up in (and insert into)
+        # that data block only; unscoped, use the flat whole-file view.
+        block_view = self.cif_parser.get_block(self._check_block_scope) if self._check_block_scope else None
+        fields_view = block_view.fields if block_view else self.cif_parser.fields
+
         # Check if the deprecated field exists
-        if deprecated_field not in self.cif_parser.fields:
+        if deprecated_field not in fields_view:
             QMessageBox.warning(
-                self, 
-                "Field Not Found", 
+                self,
+                "Field Not Found",
                 f"Could not find deprecated field '{deprecated_field}'"
             )
             return QDialog.DialogCode.Rejected
-        
+
         # Check if modern field already exists
-        if modern_field in self.cif_parser.fields:
+        if modern_field in fields_view:
             QMessageBox.information(
-                self, 
-                "Already Present", 
+                self,
+                "Already Present",
                 f"The modern equivalent '{modern_field}' is already present in the CIF.\n\n"
                 f"Both the deprecated field '{deprecated_field}' and its modern equivalent exist."
             )
             return QDialog.DialogCode.Accepted
-        
+
         # Get the current value of the deprecated field
-        deprecated_field_obj = self.cif_parser.fields[deprecated_field]
+        deprecated_field_obj = fields_view[deprecated_field]
         field_value = deprecated_field_obj.value
-        
+
         # Create the modern field with the same value
         modern_field_obj = CIFField(
             name=modern_field,
@@ -582,19 +687,21 @@ class FieldCheckingMixin:
             line_number=None,  # Will be placed after the deprecated field
             raw_lines=[]
         )
-        
+
         # Add the modern field to the parser's fields
-        self.cif_parser.fields[modern_field] = modern_field_obj
-        
-        # Find the deprecated field in content_blocks and insert modern field after it
-        for i, block in enumerate(self.cif_parser.content_blocks):
-            if block['type'] == 'field' and hasattr(block['content'], 'name') and block['content'].name == deprecated_field:
-                # Insert the modern field block right after the deprecated field
-                new_block = {
-                    'type': 'field',
-                    'content': modern_field_obj
-                }
-                self.cif_parser.content_blocks.insert(i + 1, new_block)
+        fields_view[modern_field] = modern_field_obj
+        if block_view is not None:
+            self.cif_parser.fields.setdefault(modern_field, modern_field_obj)
+
+        # Find the deprecated field's entry (searching only the scoped block's
+        # entries when scoped - the entry dicts are shared with the parser's
+        # flat list, so the index lookup below targets the right occurrence)
+        search_entries = block_view.content_blocks if block_view else self.cif_parser.content_blocks
+        for entry in search_entries:
+            if entry['type'] == 'field' and getattr(entry['content'], 'name', None) == deprecated_field:
+                insert_at = self.cif_parser.content_blocks.index(entry) + 1
+                self.cif_parser.content_blocks.insert(
+                    insert_at, {'type': 'field', 'content': modern_field_obj})
                 break
         
         # Generate updated CIF content and update the text editor
@@ -611,31 +718,50 @@ class FieldCheckingMixin:
         return QDialog.DialogCode.Accepted
     
     def check_refine_special_details(self):
-        """Check and edit _refine_special_details field, creating it if needed."""
-        content = self.text_editor.toPlainText()
-        
-        # Parse the CIF content using the new parser
-        self.cif_parser.parse_file(content)
-        
+        """Check and edit _refine_special_details, block by block for multi-block files."""
+        self.cif_parser.parse_file(self.text_editor.toPlainText())
+        if not self.cif_parser.has_multiple_blocks():
+            return self._check_refine_special_details_in_scope()
+
+        for block_name in self.cif_parser.get_block_names():
+            self._active_check_block = block_name
+            try:
+                result = self._check_refine_special_details_in_scope()
+            finally:
+                self._active_check_block = None
+            if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
+                return result
+        return QDialog.DialogCode.Accepted
+
+    def _check_refine_special_details_in_scope(self):
+        """Edit _refine_special_details within the current check scope (one
+        data block during scoped runs, the whole document otherwise)."""
+        content = self._get_check_text()
+
+        # Parse only the scoped content, so field lookup and rewriting are
+        # confined to the block being edited
+        scope_parser = CIFParser()
+        scope_parser.parse_file(content)
+
         # Detect data name notation to determine the correct data name
         detected_version = self.dict_manager.detect_notation(content)
-        
+
         # Determine the appropriate field name based on notation
         if detected_version == FieldNotation.MODERN:
             field_name = '_refine.special_details'
         elif detected_version == FieldNotation.MIXED:
             # For MIXED format, check which field actually exists in the content
-            if self.cif_parser.get_field_value('_refine.special_details') is not None:
+            if scope_parser.get_field_value('_refine.special_details') is not None:
                 field_name = '_refine.special_details'
-            elif self.cif_parser.get_field_value('_refine_special_details') is not None:
+            elif scope_parser.get_field_value('_refine_special_details') is not None:
                 field_name = '_refine_special_details'
             else:
                 # Neither exists, so decide based on the predominant format
                 # Check if this looks more like modern format by counting modern vs legacy fields
-                all_fields = list(self.cif_parser.fields.keys())
+                all_fields = list(scope_parser.fields.keys())
                 modern_fields = [f for f in all_fields if '.' in f]
                 legacy_fields = [f for f in all_fields if '.' not in f]
-                
+
                 # If more modern fields, use modern naming
                 if len(modern_fields) >= len(legacy_fields):
                     field_name = '_refine.special_details'
@@ -644,40 +770,45 @@ class FieldCheckingMixin:
         else:
             # Default to legacy format (covers legacy, UNKNOWN)
             field_name = '_refine_special_details'
-        
+
         template = (
             "STRUCTURE REFINEMENT\n"
             "- Refinement method\n"
             "- Special constraints and restraints\n"
             "- Special treatments"
         )
-        
+
         # Get current value from the appropriate field name, or use template
-        current_value = self.cif_parser.get_field_value(field_name)
+        current_value = scope_parser.get_field_value(field_name)
         if current_value is None:
             current_value = template
-        
+
         # Open dialog for editing
-        dialog = MultilineInputDialog(current_value, self)
+        dialog = MultilineInputDialog(current_value, self,
+                                      block_label=self._check_block_label())
         dialog.setWindowTitle("Edit Refinement Special Details")
         result = self._show_dialog_with_configured_interaction(dialog)
-        
+
         if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
             return result
         elif result == QDialog.DialogCode.Accepted:
             updated_content = dialog.getText()
-            
+
             # Update the field in the parser using the appropriate field name
-            self.cif_parser.set_field_value(field_name, updated_content)
-            
-            # Generate updated CIF content and update the text editor
-            updated_cif = self.cif_parser.generate_cif_content()
-            self._set_editor_text(updated_cif)
+            scope_parser.set_field_value(field_name, updated_content)
+
+            # Regenerate the scoped content and write it back (trailing blank
+            # line keeps blocks visually separated in scoped runs, since
+            # generate_cif_content trims trailing empties)
+            updated_cif = scope_parser.generate_cif_content()
+            if self._check_block_scope:
+                updated_cif += '\n'
+            self._set_check_text(updated_cif)
             self.modified = True
             self.update_status_bar()
-            
+
             return QDialog.DialogCode.Accepted
-        
+
         return QDialog.DialogCode.Rejected
 
     def start_checks(self):
@@ -715,16 +846,21 @@ class FieldCheckingMixin:
 
         if not self._resolve_rules_cif_notation_mismatch_before_checks():
             return
-        
+
         # Mandatory validation before starting checks (if not done already)
         if not self._ensure_field_rules_validated():
             return  # User cancelled or validation failed
-        
+
+        # Detect data blocks so multi-block files get block selection in the
+        # config dialog (checks then run per selected block, in file order)
+        self.cif_parser.parse_file(self.text_editor.toPlainText())
+        block_names = self.cif_parser.get_block_names() if self.cif_parser.has_multiple_blocks() else None
+
         # Show configuration dialog first
-        config_dialog = CheckConfigDialog(self)
+        config_dialog = CheckConfigDialog(self, block_names=block_names)
         if self._show_dialog_with_configured_interaction(config_dialog) != QDialog.DialogCode.Accepted:
             return  # User cancelled
-        
+
         # Get configuration settings
         config = config_dialog.get_config()
 
@@ -749,19 +885,31 @@ class FieldCheckingMixin:
             if not success:
                 return
 
-            # Check for duplicates and aliases LAST (if enabled)
+            # Check for duplicates and aliases LAST (if enabled), per selected
+            # block: duplicates matter within a block, not across blocks
             if config.get('check_duplicates_aliases', True):
-                duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
-                if not duplicate_check_success:
-                    return  # User aborted or there was an error
+                for scope in self._check_scopes(config):
+                    self._active_check_block = scope
+                    try:
+                        duplicate_check_success = self._check_duplicates_and_aliases(initial_state)
+                    finally:
+                        self._active_check_block = None
+                    if not duplicate_check_success:
+                        return  # User aborted or there was an error
 
-            # Update _audit_creation_method to include CIVET info after successful checks
-            content = self.text_editor.toPlainText()
-            cif_format = self.dict_manager.detect_cif_format(content)
-            updated_content = update_audit_creation_method(content, cif_format)
-            if updated_content != content:
-                self._set_editor_text(updated_content)
-                self.modified = True
+            # Update _audit_creation_method to include CIVET info after
+            # successful checks, in every block that was checked
+            for scope in self._check_scopes(config):
+                self._active_check_block = scope
+                try:
+                    content = self._get_check_text()
+                    cif_format = self.dict_manager.detect_cif_format(content)
+                    updated_content = update_audit_creation_method(content, cif_format)
+                    if updated_content != content:
+                        self._set_check_text(updated_content)
+                        self.modified = True
+                finally:
+                    self._active_check_block = None
 
             # If we get here, checks completed successfully
             if config.get('reformat_after_checks', False):
@@ -771,6 +919,16 @@ class FieldCheckingMixin:
 
         self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
+
+    def _check_scopes(self, config):
+        """Return the block scopes a check run iterates over.
+
+        A list of block codes for multi-block runs (the blocks selected in
+        the config dialog), or ``[None]`` meaning "whole document" for
+        single-block files.
+        """
+        selected = config.get('selected_blocks')
+        return list(selected) if selected else [None]
 
     def _validate_data_names_before_checks(self) -> bool:
         """
@@ -913,6 +1071,274 @@ class FieldCheckingMixin:
             )
             return True  # Continue despite error
 
+    def _apply_action_rule(self, field_def, action, operations_applied):
+        """Apply one DELETE/EDIT/APPEND/RENAME rule within the current scope.
+
+        Returns True if the document was modified. Operation-summary entries
+        are prefixed with the block name during scoped runs.
+        """
+        scope = self._check_block_scope
+        op_prefix = f"data_{scope}: " if scope else ""
+        lines, _ = self._get_check_lines()
+        done = False
+        if action == 'DELETE':
+            lines, done = self.field_checker._delete_field(lines, field_def.name)
+            if done:
+                operations_applied.append(f"{op_prefix}DELETED: {field_def.name}")
+        elif action == 'EDIT':
+            lines, done = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
+            if done:
+                operations_applied.append(f"{op_prefix}EDITED: {field_def.name} → {field_def.default_value}")
+        elif action == 'APPEND':
+            lines, done = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
+            if done:
+                operations_applied.append(f"{op_prefix}APPENDED to {field_def.name}")
+        elif action == 'RENAME':
+            lines, done = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
+            if done:
+                operations_applied.append(f"{op_prefix}RENAMED: {field_def.name} → {field_def.rename_to}")
+        if done:
+            self._set_check_lines(lines)
+        return done
+
+    # ------------------------------------------------------------------
+    # Shared (divergence-driven) multi-block execution
+    #
+    # In shared mode one rule pass covers all selected blocks: each field's
+    # current value is collected from every block first, and a single prompt
+    # is shown when they all agree (the resolution is applied to every
+    # block). When values differ, the per-block MultiBlockValueDialog is
+    # shown instead - one value is never silently applied over diverging
+    # ones. See .github/multi_data_block_plan.md, sections 2.3/2.4.
+    # ------------------------------------------------------------------
+
+    def _blocks_banner(self, blocks):
+        """Dialog banner naming the blocks a shared prompt applies to."""
+        if len(blocks) == 1:
+            return f"Data block: data_{blocks[0]}"
+        names = ", ".join(f"data_{block}" for block in blocks)
+        if len(names) > 70:
+            names = names[:67] + "…"
+        return f"All {len(blocks)} selected blocks: {names}"
+
+    def _abort_run(self, initial_state):
+        """Revert everything and report the abort; returns the 'abort' signal."""
+        self._set_editor_text(initial_state)
+        self.update_window_title()
+        QMessageBox.information(self, "Checks Aborted", "All changes have been reverted.")
+        return 'abort'
+
+    def _apply_value_in_block(self, block, field_name, value):
+        """Set a field's value inside one data block (update in place, or
+        append at the end of the block if the field is missing there)."""
+        saved_scope = self._check_block_scope
+        self._active_check_block = block
+        try:
+            lines, _ = self._get_check_lines()
+            for i, line in enumerate(lines):
+                parts = line.split(None, 1)
+                if parts and parts[0] == field_name:
+                    self.update_field_value(lines, i, field_name, value)
+                    self._set_check_lines(lines)
+                    return
+            value_str = str(value).strip("'")
+            if '\n' in value_str:
+                lines.append(f"{field_name} \n;\n{value_str}\n;")
+            else:
+                if ' ' in value_str or ',' in value_str:
+                    value_str = f"'{value_str}'"
+                lines.append(f"{field_name} {value_str}")
+            self._set_check_lines(lines)
+        finally:
+            self._active_check_block = saved_scope
+
+    def _run_rule_per_block(self, field_def, blocks, config, initial_state,
+                            ensure_parser_current, operations_applied, is_custom_or_user):
+        """Fall back to scoped per-block execution of one rule (used by shared
+        mode for CALCULATE, deprecated fields, and multiline divergence)."""
+        for block in blocks:
+            self._active_check_block = block
+            try:
+                signal = self._execute_rule(
+                    field_def, config, initial_state, ensure_parser_current,
+                    operations_applied, is_custom_or_user
+                )
+            finally:
+                self._active_check_block = None
+            if signal != 'continue':
+                return signal
+        return 'continue'
+
+    def _execute_rule_shared(self, field_def, blocks, config, initial_state,
+                             ensure_parser_current, operations_applied, is_custom_or_user):
+        """Execute one rule across several data blocks in shared mode.
+
+        Returns the same 'continue'/'stop'/'abort' signals as _execute_rule.
+        """
+        action = getattr(field_def, 'action', 'CHECK')
+
+        # Action rules apply to every block, silently (same result as
+        # running them independently per block)
+        if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
+            if not is_custom_or_user:
+                return 'continue'
+            modified = False
+            for block in blocks:
+                self._active_check_block = block
+                try:
+                    modified = self._apply_action_rule(field_def, action, operations_applied) or modified
+                finally:
+                    self._active_check_block = None
+            if modified:
+                ensure_parser_current()
+            return 'continue'
+
+        # IF: evaluate the condition per block; nested rules run shared
+        # across the subset of blocks where it holds
+        if action == 'IF':
+            ensure_parser_current()
+            condition = getattr(field_def, 'condition', None)
+            if condition is None:
+                return 'continue'
+            matching = []
+            for block in blocks:
+                block_view = self.cif_parser.get_block(block)
+                get_value = block_view.get_field_value if block_view else (lambda _name: None)
+                if evaluate_condition(condition, get_value):
+                    matching.append(block)
+            if not matching:
+                return 'continue'
+            for nested_def in getattr(field_def, 'then_fields', None) or []:
+                signal = self._execute_rule_shared(
+                    nested_def, matching, config, initial_state,
+                    ensure_parser_current, operations_applied, is_custom_or_user
+                )
+                if signal != 'continue':
+                    return signal
+            return 'continue'
+
+        # CALCULATE always runs per block: its inputs (and hence results)
+        # legitimately differ between blocks
+        if action == 'CALCULATE':
+            return self._run_rule_per_block(
+                field_def, blocks, config, initial_state,
+                ensure_parser_current, operations_applied, is_custom_or_user)
+
+        # CHECK - deprecated fields keep their special add-modern-equivalent
+        # flow, which is inherently per block
+        if self.dict_manager.is_field_deprecated(field_def.name):
+            return self._run_rule_per_block(
+                field_def, blocks, config, initial_state,
+                ensure_parser_current, operations_applied, is_custom_or_user)
+
+        ensure_parser_current()
+        values = {}
+        for block in blocks:
+            block_view = self.cif_parser.get_block(block)
+            values[block] = block_view.get_field_value(field_def.name) if block_view else None
+
+        # Multiline values don't fit the per-row divergence dialog; use the
+        # normal scoped prompts per block instead
+        if any(value is not None and '\n' in str(value) for value in values.values()):
+            return self._run_rule_per_block(
+                field_def, blocks, config, initial_state,
+                ensure_parser_current, operations_applied, is_custom_or_user)
+
+        distinct_values = set(values.values())
+        if len(distinct_values) == 1:
+            common_value = next(iter(distinct_values))
+            if common_value is None:
+                return self._shared_add_missing(field_def, blocks, config, initial_state)
+            return self._shared_check_common(field_def, blocks, common_value, config, initial_state)
+        return self._shared_resolve_divergent(field_def, blocks, values, initial_state)
+
+    def _shared_check_common(self, field_def, blocks, common_value, config, initial_state):
+        """One prompt for a field whose value agrees across all blocks; the
+        resolution is applied to every block."""
+        default_value = field_def.default_value
+        clean_current = str(common_value).strip().strip("'\"")
+        clean_default = str(default_value).strip().strip("'\"") if default_value else ""
+
+        if config.get('skip_matching_defaults', False) and default_value and clean_current == clean_default:
+            return 'continue'
+
+        operation_type = "edit"
+        if default_value and clean_current and clean_current != clean_default:
+            operation_type = "different"
+
+        value, result = CIFInputDialog.getText(
+            self, "Edit Line",
+            f"'{field_def.name}' has the same value in all selected data blocks.\n\n"
+            f"Current value: {common_value}\n\nDescription: {field_def.description}\n\n"
+            f"Suggested value: {default_value}\n\n",
+            clean_current, default_value, operation_type=operation_type,
+            suggestions=getattr(field_def, 'suggestions', None),
+            show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                d, "dialogs.field_check_edit_mode"
+            ),
+            block_label=self._blocks_banner(blocks))
+
+        if result == RESULT_ABORT:
+            return self._abort_run(initial_state)
+        if result in (QDialog.DialogCode.Accepted, RESULT_STOP_SAVE) and value:
+            for block in blocks:
+                self._apply_value_in_block(block, field_def.name, value)
+        if result == RESULT_STOP_SAVE:
+            return 'stop'
+        return 'continue'
+
+    def _shared_add_missing(self, field_def, blocks, config, initial_state):
+        """One prompt for a field missing from every selected block; the value
+        is added to each of them."""
+        default_value = field_def.default_value
+
+        if config.get('auto_fill_missing', False) and default_value:
+            for block in blocks:
+                self._apply_value_in_block(block, field_def.name, str(default_value).strip("'"))
+            return 'continue'
+
+        value, result = CIFInputDialog.getText(
+            self, "Add Missing Line",
+            f"Data name '{field_def.name}' is missing in all selected data blocks.\n\n"
+            f"Description: {field_def.description}\nSuggested value: {default_value}",
+            default_value if default_value else "", default_value, operation_type="add",
+            suggestions=getattr(field_def, 'suggestions', None),
+            show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                d, "dialogs.field_check_edit_mode"
+            ),
+            block_label=self._blocks_banner(blocks))
+
+        if result == RESULT_ABORT:
+            return self._abort_run(initial_state)
+        if result in (QDialog.DialogCode.Accepted, RESULT_STOP_SAVE):
+            for block in blocks:
+                self._apply_value_in_block(block, field_def.name, value if value else "?")
+        if result == RESULT_STOP_SAVE:
+            return 'stop'
+        return 'continue'
+
+    def _shared_resolve_divergent(self, field_def, blocks, values, initial_state):
+        """Per-block resolution for a field whose values differ between blocks."""
+        values_dict, result = MultiBlockValueDialog.getValues(
+            self, field_def.name, values, field_def.default_value, field_def.description,
+            show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
+                d, "dialogs.field_check_edit_mode"
+            ))
+
+        if result == RESULT_ABORT:
+            return self._abort_run(initial_state)
+        if result in (QDialog.DialogCode.Accepted, RESULT_STOP_SAVE) and values_dict:
+            for block, new_value in values_dict.items():
+                if not str(new_value).strip():
+                    continue  # empty entry: leave this block unchanged/missing
+                old_value = values.get(block)
+                if old_value is not None and str(new_value) == str(old_value):
+                    continue  # unchanged
+                self._apply_value_in_block(block, field_def.name, new_value)
+        if result == RESULT_STOP_SAVE:
+            return 'stop'
+        return 'continue'
+
     def _execute_rule(self, field_def, config, initial_state, ensure_parser_current,
                        operations_applied, is_custom_or_user):
         """Execute a single parsed rule: an action (DELETE/EDIT/APPEND/RENAME), a
@@ -932,26 +1358,7 @@ class FieldCheckingMixin:
         if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
             if not is_custom_or_user:
                 return 'continue'  # Action rules are only applied for custom/user sets
-            lines = self.text_editor.toPlainText().splitlines()
-            done = False
-            if action == 'DELETE':
-                lines, done = self.field_checker._delete_field(lines, field_def.name)
-                if done:
-                    operations_applied.append(f"DELETED: {field_def.name}")
-            elif action == 'EDIT':
-                lines, done = self.field_checker._edit_field(lines, field_def.name, field_def.default_value)
-                if done:
-                    operations_applied.append(f"EDITED: {field_def.name} → {field_def.default_value}")
-            elif action == 'APPEND':
-                lines, done = self.field_checker._append_field(lines, field_def.name, field_def.default_value)
-                if done:
-                    operations_applied.append(f"APPENDED to {field_def.name}")
-            elif action == 'RENAME':
-                lines, done = self.field_checker._rename_field(lines, field_def.name, field_def.rename_to)
-                if done:
-                    operations_applied.append(f"RENAMED: {field_def.name} → {field_def.rename_to}")
-            if done:
-                self._set_editor_text('\n'.join(lines))
+            if self._apply_action_rule(field_def, action, operations_applied):
                 ensure_parser_current()
             return 'continue'
 
@@ -959,7 +1366,7 @@ class FieldCheckingMixin:
         if action == 'IF':
             ensure_parser_current()
             condition = getattr(field_def, 'condition', None)
-            if condition is None or not evaluate_condition(condition, self.cif_parser.get_field_value):
+            if condition is None or not evaluate_condition(condition, self._get_scoped_field_value):
                 return 'continue'
 
             for nested_def in getattr(field_def, 'then_fields', None) or []:
@@ -986,7 +1393,7 @@ class FieldCheckingMixin:
             missing_fields = []
 
             for ref in field_refs:
-                value = self.cif_parser.get_field_value(ref)
+                value = self._get_scoped_field_value(ref)
                 if value is not None:
                     # Try to convert to number
                     try:
@@ -1017,7 +1424,7 @@ class FieldCheckingMixin:
                     suggested_value = f"{calculated:.4f}".rstrip('0').rstrip('.')
 
                 # Add calculation info to description
-                current_val = self.cif_parser.get_field_value(field_def.name)
+                current_val = self._get_scoped_field_value(field_def.name)
                 description = (f"{field_def.description}\n" if field_def.description else "") + \
                              f"Calculated: {field_def.expression}"
                 if current_val:
@@ -1088,7 +1495,7 @@ class FieldCheckingMixin:
                 return current_content
 
             ensure_parser_current()
-            
+
             # Process rules in file order (fully sequential).
             # Action rules (DELETE/EDIT/APPEND/RENAME) are applied immediately when
             # encountered and the editor is updated before moving to the next rule.
@@ -1096,18 +1503,68 @@ class FieldCheckingMixin:
             # state, so a RENAME followed by a CHECK for the old name will find the
             # field missing and prompt to add it, and a CHECK for the new name will
             # find the renamed value and show it for confirmation.
+            #
+            # For multi-block files the full rule pass (and the absolute-
+            # structure checks) runs once per selected data block, with all
+            # reads and writes scoped to that block.
             is_custom_or_user = self.current_field_set == 'Custom' or self.current_field_set.startswith('User:')
             operations_applied = []
+            scopes = self._check_scopes(config)
+            shared_mode = len(scopes) > 1 and (config.get('block_mode') or 'independent') == 'shared'
+            stopped = False
 
-            for field_def in fields:
-                signal = self._execute_rule(
-                    field_def, config, initial_state, ensure_parser_current,
-                    operations_applied, is_custom_or_user
-                )
-                if signal == 'abort':
-                    return False
-                if signal == 'stop':
-                    break
+            try:
+                if shared_mode:
+                    # One rule pass covering all selected blocks: shared
+                    # prompts where values agree, per-block resolution where
+                    # they diverge
+                    self.setWindowTitle(
+                        f"CIVET{filename_part} - Checking {len(scopes)} data blocks "
+                        f"(shared) with {field_set_display_name} fields")
+                    for field_def in fields:
+                        signal = self._execute_rule_shared(
+                            field_def, list(scopes), config, initial_state,
+                            ensure_parser_current, operations_applied, is_custom_or_user
+                        )
+                        if signal == 'abort':
+                            return False
+                        if signal == 'stop':
+                            stopped = True
+                            break
+
+                    # Absolute-structure checks stay per block (each block
+                    # has its own space group); skipped after stop-and-save
+                    if not stopped:
+                        for scope in scopes:
+                            self._active_check_block = scope
+                            if not self._apply_absolute_structure_checks(config, initial_state):
+                                return False
+                else:
+                    for scope_index, scope in enumerate(scopes):
+                        self._active_check_block = scope
+                        if scope is not None:
+                            self.setWindowTitle(
+                                f"CIVET{filename_part} - Checking data_{scope} "
+                                f"({scope_index + 1}/{len(scopes)}) with {field_set_display_name} fields")
+
+                        for field_def in fields:
+                            signal = self._execute_rule(
+                                field_def, config, initial_state, ensure_parser_current,
+                                operations_applied, is_custom_or_user
+                            )
+                            if signal == 'abort':
+                                return False
+                            if signal == 'stop':
+                                stopped = True
+                                break
+
+                        if not self._apply_absolute_structure_checks(config, initial_state):
+                            return False
+
+                        if stopped:
+                            break  # Stop-and-save ends the whole run, later blocks included
+            finally:
+                self._active_check_block = None
 
             # Show summary of any silent operations that were applied
             if operations_applied:
@@ -1115,11 +1572,8 @@ class FieldCheckingMixin:
                 QMessageBox.information(self, "Operations Applied",
                                       f"Applied {len(operations_applied)} operations:\n\n{ops_summary}")
 
-            if not self._apply_absolute_structure_checks(config, initial_state):
-                return False
-            
             return True
-            
+
         except Exception as e:
             self._set_editor_text(initial_state)
             self.update_window_title()
@@ -1137,9 +1591,13 @@ class FieldCheckingMixin:
         return "_chemical_absolute_configuration", "_refine_ls.abs_structure_z-score"
 
     def _get_space_group_number(self):
-        """Return the IT space-group number from the current CIF, if present."""
+        """Return the IT space-group number from the current CIF, if present.
+
+        Honours the active check-block scope: in per-block runs each data
+        block's own space group is used.
+        """
         SG_number = None
-        lines = self.text_editor.toPlainText().splitlines()
+        lines, _ = self._get_check_lines()
 
         # Find space group number
         for line in lines:
@@ -1160,8 +1618,12 @@ class FieldCheckingMixin:
         return space_group_number in SOHNCKE_SPACE_GROUPS
 
     def _get_inline_field_value(self, field_name):
-        """Return the first inline value found for a field, stripped of quotes."""
-        lines = self.text_editor.toPlainText().splitlines()
+        """Return the first inline value found for a field, stripped of quotes.
+
+        Honours the active check-block scope, so per-block runs only see the
+        block being checked.
+        """
+        lines, _ = self._get_check_lines()
 
         for index, line in enumerate(lines):
             if line.startswith(field_name):
@@ -1210,7 +1672,7 @@ class FieldCheckingMixin:
             return None
 
         abs_config_field, _ = self._get_absolute_configuration_fields()
-        lines = self.text_editor.toPlainText().splitlines()
+        lines, _ = self._get_check_lines()
 
         found = False
         for line in lines:
@@ -1250,7 +1712,7 @@ class FieldCheckingMixin:
             if result == RESULT_STOP_SAVE:
                 return None
 
-        lines = self.text_editor.toPlainText().splitlines()
+        lines, _ = self._get_check_lines()
         for line in lines:
             if line.startswith(abs_config_field):
                 parts = line.split()
@@ -1263,7 +1725,7 @@ class FieldCheckingMixin:
     def _apply_abs_structure_z_score_check(self, config, initial_state):
         """Check the z-score field for electron-diffraction dynamical refinement."""
         _, z_score_field = self._get_absolute_configuration_fields()
-        lines = self.text_editor.toPlainText().splitlines()
+        lines, _ = self._get_check_lines()
         found_z_score = False
         for line in lines:
             if line.startswith(z_score_field):
@@ -1339,8 +1801,11 @@ class FieldCheckingMixin:
             True if check passed or conflicts were resolved, False if user aborted
         """
         try:
-            content = self.text_editor.toPlainText()
-            
+            # Scoped to the active data block during per-block runs: duplicates
+            # are a problem within a block, not across blocks (each block
+            # legitimately repeats the same data names).
+            content = self._get_check_text()
+
             # Detect CIF format to determine if we should check for deprecated fields
             cif_format = self.dict_manager.detect_cif_format(content)
             is_legacy = cif_format.lower() == 'legacy'
@@ -1528,7 +1993,7 @@ class FieldCheckingMixin:
                     if not success:
                         return False
                     # Update content after conflict resolution
-                    content = self.text_editor.toPlainText()
+                    content = self._get_check_text()
                 
                 # Handle deprecated fields
                 if deprecated_fields and success:
@@ -1625,9 +2090,9 @@ class FieldCheckingMixin:
             # Apply the resolutions
             if resolutions:
                 resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
-                
+
                 if changes:
-                    self._set_editor_text(resolved_content)
+                    self._set_check_text(resolved_content)
                     self.modified = True
                     
                     change_summary = f"✅ Successfully resolved {len(conflicts)} conflict(s):\n\n"

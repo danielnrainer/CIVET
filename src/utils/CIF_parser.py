@@ -127,6 +127,77 @@ class CIFLoop:
         return f"CIFLoop(fields={len(self.field_names)}, rows={len(self.data_rows)})"
 
 
+class CIFDataBlock:
+    """One data_ block of a parsed CIF file (or the preamble before the first).
+
+    Groups the fields, loops, and ordered content entries that belong to a
+    single ``data_xxxx`` block, so callers can address blocks individually
+    instead of relying on CIFParser's flat, whole-file field dict (in which
+    a later block silently shadows an earlier one).
+
+    The preamble pseudo-block (``header_line is None``) holds anything that
+    appears before the first ``data_`` line: the ``#\\#CIF_2.0`` magic
+    comment, leading comments, and blank lines.
+
+    ``content_blocks`` holds references to the same entry dicts as
+    ``CIFParser.content_blocks``; like the rest of the parsed model it is a
+    snapshot of the last ``parse_file()`` call and becomes stale if the
+    document is mutated afterwards (e.g. via ``set_field_value``) - reparse
+    to refresh the per-block view.
+    """
+
+    def __init__(self, name: Optional[str], header_line: Optional[str] = None):
+        self.name = name  # Block code without the 'data_' prefix; None for the preamble
+        self.header_line = header_line  # Full 'data_xxxx' line; None for the preamble
+        self.fields: Dict[str, CIFField] = {}
+        self.loops: List[CIFLoop] = []
+        self.content_blocks: List[Dict] = []
+
+    @property
+    def is_preamble(self) -> bool:
+        return self.header_line is None
+
+    def get_field(self, field_name: str) -> Optional[CIFField]:
+        return self.fields.get(field_name)
+
+    def get_field_value(self, field_name: str) -> Optional[str]:
+        field = self.fields.get(field_name)
+        return field.value if field else None
+
+    def has_field(self, field_name: str) -> bool:
+        return field_name in self.fields
+
+    def __repr__(self):
+        label = 'preamble' if self.is_preamble else f"data_{self.name}"
+        return f"CIFDataBlock({label}, fields={len(self.fields)}, loops={len(self.loops)})"
+
+
+def list_data_block_names(content: str) -> List[str]:
+    """Return the ``data_`` block codes in raw CIF content, in file order.
+
+    Ignores ``data_`` strings inside multiline text values (semicolon or
+    triple-quoted blocks) and comment lines, so echoed CIF fragments in
+    e.g. _iucr_refine_fcf_details do not count as blocks. Cheap enough to
+    run on every file open without a full parse.
+    """
+    tracker = TextBlockTracker()
+    names: List[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if tracker.consume(line):
+            continue
+        if line.startswith('#'):
+            continue
+        if line.lower().startswith('data_'):
+            names.append(line[5:])
+    return names
+
+
+def count_data_blocks(content: str) -> int:
+    """Count the ``data_`` blocks in raw CIF content (see list_data_block_names)."""
+    return len(list_data_block_names(content))
+
+
 class CIFParser:
     """Main parser class for processing CIF file content."""
     
@@ -135,6 +206,13 @@ class CIFParser:
         self.loops: List[CIFLoop] = []
         self.content_blocks: List[Dict] = []  # Ordered list of fields, loops, and header lines
         self.header_lines: List[str] = []  # Store important header lines like data_
+        # Per-data-block view of the same parse. `fields`/`loops` above remain
+        # the flat whole-file view (last block wins on duplicate names) for
+        # backward compatibility; `blocks` lets callers address each data_
+        # block individually. `preamble` collects content before the first
+        # data_ line. Both are rebuilt by parse_file().
+        self.blocks: List[CIFDataBlock] = []
+        self.preamble: CIFDataBlock = CIFDataBlock(None)
 
     @staticmethod
     def _is_comment_line(line: str) -> bool:
@@ -379,30 +457,45 @@ class CIFParser:
             })
         
     def parse_file(self, content: str) -> Dict[str, CIFField]:
-        """Parse CIF content and return a dictionary of fields."""
+        """Parse CIF content and return a dictionary of fields.
+
+        Alongside the flat `fields`/`loops`/`content_blocks` view, this
+        rebuilds the per-data-block view (`preamble` + `blocks`): each
+        data_ line starts a new CIFDataBlock, and every parsed entry is
+        also recorded on the block it belongs to.
+        """
         self.fields = {}
         self.loops = []
         self.content_blocks = []
         self.header_lines = []
+        self.preamble = CIFDataBlock(None)
+        self.blocks = []
+        current_block = self.preamble
+
+        def add_content(entry: Dict) -> None:
+            """Append one content entry to both the flat and per-block views."""
+            self.content_blocks.append(entry)
+            current_block.content_blocks.append(entry)
+
         lines = content.splitlines()
         i = 0
-        
+
         # Track if we're in a deprecated section
         in_deprecated_section = False
-        
+
         while i < len(lines):
             raw_line = lines[i]
             line = raw_line.strip()
             
             # Preserve empty lines
             if not line:
-                self.content_blocks.append({'type': 'empty', 'content': ''})
+                add_content({'type': 'empty', 'content': ''})
                 i += 1
                 continue
-            
+
             # Preserve comment lines
             if self._is_comment_line(line):
-                self.content_blocks.append({'type': 'comment', 'content': line})
+                add_content({'type': 'comment', 'content': line})
                 
                 # Check if this is the start or end of a deprecated section
                 if '# DEPRECATED FIELDS' in line:
@@ -418,25 +511,34 @@ class CIFParser:
                 continue
             
             # Check for data block identifier and other important header lines
-            if (line.lower().startswith('data_') or 
-                line.lower().startswith('save_') or 
+            if (line.lower().startswith('data_') or
+                line.lower().startswith('save_') or
                 line.lower().startswith('global_') or
                 line.lower().startswith('stop_')):
                 self.header_lines.append(line)
-                self.content_blocks.append({'type': 'header', 'content': line})
+                # Only data_ starts a new block; save_/global_/stop_ frames
+                # stay within the current block.
+                if line.lower().startswith('data_'):
+                    current_block = CIFDataBlock(name=line[5:], header_line=line)
+                    self.blocks.append(current_block)
+                add_content({'type': 'header', 'content': line})
                 i += 1
                 continue
-            
+
             # Check for loop structure
             if line.lower().startswith('loop_'):
                 loop, lines_consumed = self._parse_loop(lines, i)
                 if loop:
                     self.loops.append(loop)
-                    self.content_blocks.append({'type': 'loop', 'content': loop})
+                    current_block.loops.append(loop)
+                    add_content({'type': 'loop', 'content': loop})
                     # Add loop fields to main fields dict for compatibility
                     for field_name in loop.field_names:
                         if field_name not in self.fields:
                             self.fields[field_name] = CIFField(name=field_name, value="(in loop)", line_number=i + 1)
+                        if field_name not in current_block.fields:
+                            current_block.fields[field_name] = CIFField(
+                                name=field_name, value="(in loop)", line_number=i + 1)
                 i += lines_consumed
                 continue
             
@@ -446,10 +548,10 @@ class CIFParser:
                 if in_deprecated_section:
                     # This is a deprecated field line with inline comment
                     # Preserve it as-is without parsing
-                    self.content_blocks.append({'type': 'deprecated_field', 'content': line})
+                    add_content({'type': 'deprecated_field', 'content': line})
                     i += 1
                     continue
-                
+
                 # Normal field parsing
                 field_name, value, lines_consumed, value_type = self._parse_field(lines, i)
                 if field_name:
@@ -462,7 +564,8 @@ class CIFParser:
                         value_type=value_type,
                     )
                     self.fields[field_name] = field
-                    self.content_blocks.append({'type': 'field', 'content': field})
+                    current_block.fields[field_name] = field
+                    add_content({'type': 'field', 'content': field})
                 i += lines_consumed
             else:
                 i += 1
@@ -1058,7 +1161,43 @@ class CIFParser:
         """Get a field's value by name."""
         field = self.fields.get(field_name)
         return field.value if field else None
-    
+
+    def has_multiple_blocks(self) -> bool:
+        """Return True if the last parse found more than one data_ block."""
+        return len(self.blocks) > 1
+
+    def get_block_names(self) -> List[str]:
+        """Return the block codes (without the 'data_' prefix) in file order."""
+        return [block.name for block in self.blocks]
+
+    def get_block(self, name: str) -> Optional[CIFDataBlock]:
+        """Get a data block by its code, case-insensitively.
+
+        Accepts the bare block code ('xtal1') or the full header form
+        ('data_xtal1'). Block codes are case-insensitive per the CIF spec.
+        """
+        target = name.lower()
+        if target.startswith('data_'):
+            target = target[5:]
+        for block in self.blocks:
+            if (block.name or '').lower() == target:
+                return block
+        return None
+
+    def get_block_field_value(self, block_name: str, field_name: str) -> Optional[str]:
+        """Get a field's value from a specific data block."""
+        block = self.get_block(block_name)
+        return block.get_field_value(field_name) if block else None
+
+    def get_field_values_by_block(self, field_name: str) -> Dict[str, Optional[str]]:
+        """Collect a field's value from every data block.
+
+        Returns {block_code: value-or-None} in file order - the input for
+        divergence detection in the multi-block check workflow (one prompt
+        when all blocks agree, per-block prompts when they differ).
+        """
+        return {block.name: block.get_field_value(field_name) for block in self.blocks}
+
     def set_field_value(self, field_name: str, value: str):
         """Set a field's value."""
         if field_name in self.fields:

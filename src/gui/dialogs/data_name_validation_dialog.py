@@ -311,6 +311,9 @@ class DataNameValidationDialog(QDialog):
         
         # Track pending actions
         self._pending_actions: Dict[str, FieldAction] = {}
+        # Per-field block scope for actions on multi-block files:
+        # field -> block code the action is limited to. Absent = all blocks.
+        self._action_block_scopes: Dict[str, str] = {}
         self._fields_to_delete: Set[str] = set()
         self._deprecated_updates: Dict[str, str] = {}  # old_name -> new_name
         self._deprecated_replacements: Dict[str, str] = {}  # old_name -> successor_name
@@ -598,8 +601,19 @@ class DataNameValidationDialog(QDialog):
         """
         # Create field item with three columns: field name, details, actions (empty for now)
         details = field_result.description
-        if field_result.line_number > 0:
-            details = f"(line {field_result.line_number}) {details}"
+        occurrences = getattr(field_result, 'block_occurrences', None) or []
+        if len(occurrences) > 1:
+            # Field occurs in several data blocks - list every occurrence
+            occurrence_text = "; ".join(
+                f"data_{block} line {line}" for block, line in occurrences)
+            details = f"({occurrence_text}) {details}"
+        elif field_result.line_number > 0:
+            # Include the data block for multi-block files (block_name is only
+            # set when the file has more than one block)
+            if getattr(field_result, 'block_name', ''):
+                details = f"(data_{field_result.block_name}, line {field_result.line_number}) {details}"
+            else:
+                details = f"(line {field_result.line_number}) {details}"
         if category == FieldCategory.DEPRECATED and field_result.successor_name:
             details += f" → {field_result.successor_name}"
         elif field_result.modern_equivalent:
@@ -887,6 +901,44 @@ class DataNameValidationDialog(QDialog):
         self._mark_field_as_handled(field_name, "Will allow this field")
         self._update_apply_button()
     
+    def _resolve_action_block_scope(self, field_name: str) -> Optional[str]:
+        """Ask which data block(s) an action should apply to.
+
+        For fields occurring in more than one data block, prompts the user to
+        choose between all blocks and a single one. Returns '' for
+        "all blocks" (also for single-block fields, without prompting), a
+        block code to limit the action to that block, or None if the user
+        cancelled the prompt (the action should then not be recorded).
+        """
+        field_result = self._find_field_result(field_name)
+        occurrences = getattr(field_result, 'block_occurrences', None) or []
+        if len(occurrences) <= 1:
+            return ''
+
+        options = ["All blocks"] + [f"Only data_{block}" for block, _ in occurrences]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Apply To Which Data Block?",
+            f"'{field_name}' occurs in {len(occurrences)} data blocks.\n"
+            "Apply this action to:",
+            options, 0, False
+        )
+        if not ok:
+            return None
+        if choice == "All blocks":
+            return ''
+        return choice[len("Only data_"):]
+
+    def _record_action_scope(self, field_name: str, scope: str) -> str:
+        """Store a chosen block scope; returns a status-text suffix."""
+        field_name_lower = field_name.lower()
+        if scope:
+            self._action_block_scopes[field_name_lower] = scope
+            return f" (data_{scope} only)"
+        self._action_block_scopes.pop(field_name_lower, None)
+        occurrences = getattr(self._find_field_result(field_name), 'block_occurrences', None) or []
+        return " (all blocks)" if len(occurrences) > 1 else ""
+
     def _on_delete_field(self, field_name: str) -> None:
         """
         Mark field for deletion.
@@ -900,11 +952,16 @@ class DataNameValidationDialog(QDialog):
             # for checkCIF-required fields, but never delete one regardless.
             return
 
+        scope = self._resolve_action_block_scope(field_name)
+        if scope is None:
+            return  # User cancelled the block-scope prompt
+        scope_suffix = self._record_action_scope(field_name, scope)
+
         self._fields_to_delete.add(field_name.lower())
         self._pending_actions[field_name.lower()] = FieldAction.DELETE
-        
+
         # Update UI to show pending action
-        self._mark_field_as_handled(field_name, "Marked for deletion", color="#c0392b")
+        self._mark_field_as_handled(field_name, f"Marked for deletion{scope_suffix}", color="#c0392b")
         self._update_apply_button()
     
     def _on_ignore_field(self, field_name: str) -> None:
@@ -928,13 +985,18 @@ class DataNameValidationDialog(QDialog):
             field_name: The field with incorrect format
             suggested_format: The corrected field name with proper dot notation
         """
+        scope = self._resolve_action_block_scope(field_name)
+        if scope is None:
+            return  # User cancelled the block-scope prompt
+        scope_suffix = self._record_action_scope(field_name, scope)
+
         self._format_corrections[field_name.lower()] = suggested_format
         self._pending_actions[field_name.lower()] = FieldAction.CORRECT_FORMAT
-        
+
         # Update UI to show pending action
         self._mark_field_as_handled(
-            field_name, 
-            f"Will correct to {suggested_format}", 
+            field_name,
+            f"Will correct to {suggested_format}{scope_suffix}",
             color="#27ae60"
         )
         self._update_apply_button()
@@ -947,12 +1009,17 @@ class DataNameValidationDialog(QDialog):
             field_name: The malformed field name
             correct_name: The correct field name from the dictionary
         """
+        scope = self._resolve_action_block_scope(field_name)
+        if scope is None:
+            return  # User cancelled the block-scope prompt
+        scope_suffix = self._record_action_scope(field_name, scope)
+
         self._malformed_fixes[field_name.lower()] = correct_name
         self._pending_actions[field_name.lower()] = FieldAction.FIX_MALFORMED
-        
+
         self._mark_field_as_handled(
             field_name,
-            f"Will rename to {correct_name}",
+            f"Will rename to {correct_name}{scope_suffix}",
             color="#27ae60"
         )
         self._update_apply_button()
@@ -968,13 +1035,18 @@ class DataNameValidationDialog(QDialog):
             field_name: The deprecated field name (will be kept)
             successor_name: The successor field to add (legacy or modern form)
         """
+        scope = self._resolve_action_block_scope(field_name)
+        if scope is None:
+            return  # User cancelled the block-scope prompt
+        scope_suffix = self._record_action_scope(field_name, scope)
+
         field_name_lower = field_name.lower()
         self._deprecated_updates[field_name_lower] = successor_name
         self._deprecated_replacements.pop(field_name_lower, None)
         self._pending_actions[field_name_lower] = FieldAction.DEPRECATION_UPDATE
-        
+
         # Update UI to show pending action
-        self._mark_field_as_handled(field_name, f"Will add {successor_name}", color="#27ae60")
+        self._mark_field_as_handled(field_name, f"Will add {successor_name}{scope_suffix}", color="#27ae60")
         self._update_apply_button()
 
     def _on_replace_deprecated(self, field_name: str, successor_name: str) -> None:
@@ -995,14 +1067,19 @@ class DataNameValidationDialog(QDialog):
             # for checkCIF-required fields, but never remove one regardless.
             return
 
+        scope = self._resolve_action_block_scope(field_name)
+        if scope is None:
+            return  # User cancelled the block-scope prompt
+        scope_suffix = self._record_action_scope(field_name, scope)
+
         self._deprecated_replacements[field_name_lower] = successor_name
         self._deprecated_updates.pop(field_name_lower, None)
         self._pending_actions[field_name_lower] = FieldAction.DEPRECATION_REPLACE
 
         if field_result and field_result.successor_already_exists:
-            status = f"Will remove (successor {successor_name} exists)"
+            status = f"Will remove (successor {successor_name} exists){scope_suffix}"
         else:
-            status = f"Will replace with {successor_name}"
+            status = f"Will replace with {successor_name}{scope_suffix}"
 
         self._mark_field_as_handled(field_name, status, color="#2980b9")
         self._update_apply_button()
@@ -1067,6 +1144,7 @@ class DataNameValidationDialog(QDialog):
         
         # Remove from pending actions
         self._pending_actions.pop(field_name_lower, None)
+        self._action_block_scopes.pop(field_name_lower, None)
         self._fields_to_delete.discard(field_name_lower)
         self._deprecated_updates.pop(field_name_lower, None)
         self._deprecated_replacements.pop(field_name_lower, None)
@@ -1377,6 +1455,15 @@ class DataNameValidationDialog(QDialog):
         """
         return self._changes_applied
     
+    def get_action_block_scopes(self) -> Dict[str, str]:
+        """Block scopes chosen for pending actions on multi-block files.
+
+        Returns:
+            Dict mapping lowercased field names to the block code the action
+            is limited to. Fields not present apply to all blocks.
+        """
+        return self._action_block_scopes.copy()
+
     def get_pending_actions(self) -> Dict[str, FieldAction]:
         """
         Get all pending actions.

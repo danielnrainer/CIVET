@@ -9,17 +9,18 @@ from . import RESULT_ABORT, RESULT_STOP_SAVE
 class CIFInputDialog(QDialog):
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
-    def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit", suggestions=None):
+    def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit", suggestions=None,
+                 block_label=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.default_value = default_value
         self.suggestions = suggestions or []
-        
+
         # Set background color based on operation type
         self.set_dialog_color(operation_type)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Add operation indicator
         operation_label = QLabel()
         if operation_type == "add":
@@ -31,10 +32,21 @@ class CIFInputDialog(QDialog):
         else:
             operation_label.setText("✏️ EDITING EXISTING FIELD, SAME AS DEFAULT")
             operation_label.setStyleSheet("font-weight: bold; color: #2E7D32; padding: 5px;")
-        
+
         operation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(operation_label)
-        
+
+        # Prominent banner naming the data block(s) this prompt applies to
+        # (multi-block files only)
+        if block_label:
+            block_banner = QLabel(f"📦 {block_label}")
+            block_banner.setStyleSheet(
+                "font-weight: bold; font-size: 13px; color: #4A148C; "
+                "background-color: rgba(156, 39, 176, 0.12); "
+                "border: 1px solid #9C27B0; border-radius: 3px; padding: 5px;")
+            block_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(block_banner)
+
         # Add text label
         label = QLabel(text)
         label.setWordWrap(True)
@@ -185,7 +197,7 @@ class CIFInputDialog(QDialog):
 
     @staticmethod
     def getText(parent, title, text, value="", default_value=None, operation_type="edit",
-                suggestions=None, show_dialog_fn=None):
+                suggestions=None, show_dialog_fn=None, block_label=None):
         """
         Args:
             show_dialog_fn: Optional callable(QDialog) -> int, used to display the
@@ -193,6 +205,8 @@ class CIFInputDialog(QDialog):
                 this to honor the configured dialog-interaction settings (e.g. keep
                 the main editor scrollable while this dialog is open). Defaults to
                 a plain modal ``dialog.exec()``.
+            block_label: Optional text naming the data block(s) the prompt applies
+                to; shown as a prominent banner (multi-block files only).
         """
         if show_dialog_fn is None:
             show_dialog_fn = lambda d: d.exec()
@@ -201,7 +215,7 @@ class CIFInputDialog(QDialog):
         if '\n' in str(value):
             # Use multiline dialog for multiline values
             from .multiline_dialog import MultilineInputDialog
-            
+
             # Update title to indicate operation type
             if operation_type == "add":
                 title = f"🆕 {title}"
@@ -209,8 +223,9 @@ class CIFInputDialog(QDialog):
                 title = f"⚠️ {title}"
             else:
                 title = f"✏️ {title}"
-            
-            dialog = MultilineInputDialog(str(value), parent, text, default_value, operation_type)
+
+            dialog = MultilineInputDialog(str(value), parent, text, default_value, operation_type,
+                                          block_label=block_label)
             dialog.setWindowTitle(title)
             
             # Set background color based on operation type
@@ -265,7 +280,8 @@ class CIFInputDialog(QDialog):
                 return None, QDialog.DialogCode.Rejected
         else:
             # Use single-line dialog for single-line values
-            dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type, suggestions)
+            dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type, suggestions,
+                                    block_label=block_label)
             result = show_dialog_fn(dialog)
 
             if result == QDialog.DialogCode.Accepted:

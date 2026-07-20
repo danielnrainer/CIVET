@@ -41,6 +41,13 @@ class DataNameIntegrityMixin:
         ) -> Dict[str, tuple]:
             ...
 
+        # Block-scope helpers provided by FieldCheckingMixin (later in
+        # CIFEditor's MRO); declared here for static type checkers only —
+        # runtime stubs would shadow the real implementations.
+        def _get_check_text(self) -> str: ...
+
+        def _set_check_text(self, text: str) -> None: ...
+
     def _format_data_name_conflict_summary(
         self,
         conflicts: Dict[str, List[str]],
@@ -91,9 +98,35 @@ class DataNameIntegrityMixin:
         - direct duplicate data names
         - alias groups with mismatched values
 
-        Alias groups with identical values are considered valid and are not flagged.
+        Alias groups with identical values are considered valid and are not
+        flagged. For multi-block files the check runs once per data block:
+        the same data name appearing in several blocks is legitimate, so
+        duplicates only count within a block.
         """
-        content = self.text_editor.toPlainText()
+        # Already inside a scoped per-block run (e.g. during field checks):
+        # check just that block
+        if getattr(self, '_active_check_block', None):
+            return self._check_duplicate_data_names_in_scope(operation_name, block_on_conflicts)
+
+        self.cif_parser.parse_file(self.text_editor.toPlainText())
+        if not self.cif_parser.has_multiple_blocks():
+            return self._check_duplicate_data_names_in_scope(operation_name, block_on_conflicts)
+
+        for block_name in self.cif_parser.get_block_names():
+            self._active_check_block = block_name
+            try:
+                block_ok = self._check_duplicate_data_names_in_scope(
+                    f"{operation_name} (data_{block_name})", block_on_conflicts)
+            finally:
+                self._active_check_block = None
+            if not block_ok:
+                return False
+        return True
+
+    def _check_duplicate_data_names_in_scope(self, operation_name: str, block_on_conflicts: bool = False) -> bool:
+        """Run the integrity check on the current check scope (one data block
+        during scoped runs, the whole document otherwise)."""
+        content = self._get_check_text()
         conflicts, mismatches = get_data_name_conflicts_requiring_resolution(content, self.dict_manager)
 
         if not conflicts:
@@ -165,11 +198,11 @@ class DataNameIntegrityMixin:
 
         resolved_content, changes = self.dict_manager.apply_field_conflict_resolutions(content, resolutions)
         if changes:
-            self._set_editor_text(resolved_content)
+            self._set_check_text(resolved_content)
             self.modified = True
 
         remaining_conflicts, _ = get_data_name_conflicts_requiring_resolution(
-            self.text_editor.toPlainText(),
+            self._get_check_text(),
             self.dict_manager,
         )
         if remaining_conflicts:

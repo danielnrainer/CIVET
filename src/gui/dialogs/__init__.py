@@ -6,6 +6,7 @@ RESULT_STOP_SAVE = 3
 
 from .input_dialog import CIFInputDialog
 from .multiline_dialog import MultilineInputDialog
+from .multi_block_value_dialog import MultiBlockValueDialog
 from .config_dialog import CheckConfigDialog
 from .about_dialog import AboutDialog
 from .data_name_validation_dialog import DataNameValidationDialog
@@ -17,6 +18,7 @@ from .dictionary_search_dialog import DictionarySearchDialog
 __all__ = [
     'CIFInputDialog',
     'MultilineInputDialog',
+    'MultiBlockValueDialog',
     'CheckConfigDialog',
     'AboutDialog',
     'DataNameValidationDialog',

@@ -28,10 +28,11 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values and CIF2 lists/tables).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Dictionary Search**: Search loaded dictionaries by data name, alias, category, and optionally description text; filter to selected dictionaries and cross-check hits against the currently loaded CIF.
-- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting.
-- **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows.
+- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting. On multi-block files, a field's occurrences across all blocks are shown together, and any fix can be applied to all blocks or scoped to just one.
+- **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows. On multi-block files this runs per block, so the same data name legitimately repeated across blocks is never flagged as a duplicate.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
-- **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes.
+- **Multi-Data-Block Support**: Files with several `data_` blocks are checked block-by-block instead of silently mixing them up (see below for details).
+- **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks the data-block count, syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes — for the whole file or a single selected data block.
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
 - **Performance**: Debounced/background compliance checks, content-hash-based reparse avoidance, and caching across dictionary lookups and validation keep the editor responsive on larger files.
@@ -248,6 +249,30 @@ To prevent conflicting aliases and duplicate data names from being written accid
 - **Save** blocks when unresolved duplicate/alias-value conflicts remain.
 - Conversion and automated fix operations prompt to resolve conflicts when detected.
 - Auto-resolution keeps a single recommended field by default; manual resolution can preserve aliases and synchronize values.
+
+### Multi-Data-Block Support
+
+CIF files containing more than one `data_` block (e.g. several crystals, or a variable-temperature
+series) are checked block-by-block rather than treating the file as one document:
+
+- **Block selection**: When **Start Checks** detects more than one data block, the check
+  configuration dialog lists them with checkboxes (default: all selected).
+- **Check mode — Shared (default) or Independent**: In *Shared* mode, a field whose value agrees
+  across all selected blocks is confirmed once and the resolution applied everywhere; a field whose
+  value differs between blocks (e.g. `_diffrn.ambient_temperature` in a variable-temperature study)
+  opens a per-block table instead of silently applying one value to all of them. *Independent* mode
+  runs the full check pass separately for each selected block.
+- **Block-labelled dialogs**: Check prompts show which data block(s) they apply to in a bold banner.
+- **Per-block validation actions**: The Data Name Validation dialog lists every block a field occurs
+  in, and any action (delete, correct, add/replace a deprecated successor) can be applied to all
+  blocks or scoped to just one.
+- **Block-aware duplicate detection and compatibility fields**: duplicate/alias checks and the
+  `add_legacy_compatibility_fields` action run per block, so the same data name repeated across
+  blocks is not a false duplicate, and each block's compatibility fields use that block's own values.
+- **File Status panel**: reports the data-block count first, with a **Show status for** selector to
+  view syntax/notation/data-name/data-value status for the whole file or a single block; when
+  viewing the whole file, a tooltip on the issue counts explains any gap between the combined total
+  and the per-block figures (shared issues are counted once combined).
 
 ### Editing Convenience
 

@@ -90,6 +90,194 @@ def test_main_window_open_file_loads_content(editor, tmp_path):
     assert editor.modified is False
 
 
+def _fake_validation_dialog(**overrides):
+    base = dict(
+        get_fields_to_delete=lambda: [],
+        get_deprecated_updates=lambda: {},
+        get_deprecated_replacements=lambda: {},
+        get_format_corrections=lambda: {},
+        get_malformed_fixes=lambda: {},
+        get_action_block_scopes=lambda: {},
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_apply_validation_actions_delete_scoped_to_one_block(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_unknown_field 1\n\ndata_b\n_unknown_field 2\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+        get_action_block_scopes=lambda: {"_unknown_field": "a"},
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "_unknown_field 1" not in content
+    assert "_unknown_field 2" in content
+
+
+def test_apply_validation_actions_delete_in_all_blocks_by_default(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_unknown_field 1\n\ndata_b\n_unknown_field 2\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    assert "_unknown_field" not in editor.text_editor.toPlainText()
+
+
+def test_apply_validation_actions_successor_presence_checked_per_block(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_old_dep 1\n_new.succ 1\n\ndata_b\n_old_dep 2\n")
+
+    dialog = _fake_validation_dialog(
+        get_deprecated_updates=lambda: {"_old_dep": "_new.succ"},
+    )
+    editor._apply_validation_actions(dialog)
+
+    lines = editor.text_editor.toPlainText().splitlines()
+    split_index = lines.index("data_b")
+    first_block = lines[:split_index]
+    second_block = lines[split_index:]
+    # Block a already had the successor: not added again
+    assert first_block.count("_new.succ 1") == 1
+    # Block b lacked it: successor added with block b's own value
+    assert "_new.succ 2" in second_block
+
+
+def test_status_panel_shows_data_block_count(editor):
+    editor._update_compliance_status("data_a\n_cell_length_a 5.0\n\ndata_b\n_cell_length_a 6.0\n")
+    assert editor._status_blocks_label.text() == "2 blocks"
+    assert "data_a" in editor._status_blocks_label.toolTip()
+    assert "data_b" in editor._status_blocks_label.toolTip()
+
+    editor._update_compliance_status("data_only\n_cell_length_a 5.0\n")
+    assert editor._status_blocks_label.text() == "1"
+    assert editor._status_blocks_label.toolTip() == ""
+
+    editor._update_compliance_status("")
+    assert editor._status_blocks_label.text() == "–"
+
+
+def test_status_scope_combo_lists_blocks_and_hides_for_single_block(editor):
+    editor._update_compliance_status(
+        "data_a\n_cell_length_a 5.0\n\ndata_b\n_cell_length_a 6.0\n")
+    combo = editor._status_scope_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "All blocks", "data_a", "data_b"]
+    assert not combo.isHidden()
+
+    editor._update_compliance_status("data_only\n_cell_length_a 5.0\n")
+    assert combo.isHidden()
+    assert editor._status_scope_block is None
+
+
+def test_status_rows_follow_selected_block_scope(editor):
+    # Block a is legacy notation, block b is modern: whole file reads Mixed,
+    # each block alone reads its own notation
+    content = "data_a\n_cell_length_a 5.0\n\ndata_b\n_cell.length_a 5.0\n"
+
+    editor._status_scope_block = None
+    editor._update_compliance_status(content)
+    assert "Mixed" in editor._status_notation_label.text()
+
+    editor._status_scope_block = "a"
+    editor._update_compliance_status(content)
+    assert "Legacy" in editor._status_notation_label.text()
+
+    editor._status_scope_block = "b"
+    editor._update_compliance_status(content)
+    assert "Modern" in editor._status_notation_label.text()
+
+    editor._status_scope_block = None
+
+
+def test_status_scope_change_handler_triggers_refresh(editor):
+    refreshed = []
+    editor._refresh_compliance_status = lambda: refreshed.append(True)
+
+    editor._on_status_scope_changed("data_xtal2")
+    assert editor._status_scope_block == "xtal2"
+    assert refreshed == [True]
+
+    # Same selection again: no extra refresh
+    editor._on_status_scope_changed("data_xtal2")
+    assert refreshed == [True]
+
+    editor._on_status_scope_changed("All blocks")
+    assert editor._status_scope_block is None
+    assert refreshed == [True, True]
+
+
+def test_heavy_sync_names_breakdown_explains_all_blocks_total(editor):
+    _stub_window_updates(editor)
+    # Shared unknown field in both blocks, plus one block-specific unknown field
+    editor.text_editor.setText(
+        "data_a\n"
+        "_totally_unknown_shared 1\n"
+        "_totally_unknown_only_in_a 1\n"
+        "\n"
+        "data_b\n"
+        "_totally_unknown_shared 2\n"
+    )
+
+    editor._status_scope_block = None
+    editor._refresh_compliance_status_heavy_sync()
+
+    text = editor._status_names_label.text()
+    assert "2 issue(s)" in text  # distinct names: shared + only-in-a
+
+    tooltip = editor._status_names_label.toolTip()
+    assert "data_a: 2" in tooltip
+    assert "data_b: 1" in tooltip
+    assert "1 shared between blocks" in tooltip
+
+
+def test_heavy_sync_names_breakdown_absent_for_single_block_or_block_scope(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_totally_unknown_shared 1\n\ndata_b\n_totally_unknown_shared 2\n")
+
+    # Single-block scope: no breakdown needed
+    editor._status_scope_block = "a"
+    editor._refresh_compliance_status_heavy_sync()
+    assert editor._status_names_label.toolTip() == ""
+
+    editor._status_scope_block = None
+    editor._update_compliance_status("data_only\n_cell_length_a 5.0\n")
+    editor.text_editor.setText("data_only\n_totally_unknown_x 1\n")
+    editor._refresh_compliance_status_heavy_sync()
+    assert editor._status_names_label.toolTip() == ""
+
+    editor._status_scope_block = None
+
+
+def test_heavy_sync_names_status_respects_scope(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_totally_unknown_x 1\n\ndata_b\n_cell_length_a 5.0\n")
+
+    editor._status_scope_block = "a"
+    editor._refresh_compliance_status_heavy_sync()
+    names_text_block_a = editor._status_names_label.text()
+    assert "issue" in names_text_block_a
+
+    editor._status_scope_block = "b"
+    editor._refresh_compliance_status_heavy_sync()
+    names_text_block_b = editor._status_names_label.text()
+    assert names_text_block_b != names_text_block_a
+    assert "issue" not in names_text_block_b
+
+    editor._status_scope_block = None
+
+
 def test_select_initial_file_uses_python_cli_argument(editor, tmp_path, monkeypatch):
     _stub_window_updates(editor)
     cif_path = tmp_path / "cli_open.cif"

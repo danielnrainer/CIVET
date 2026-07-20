@@ -8,13 +8,14 @@ from . import RESULT_ABORT, RESULT_STOP_SAVE
 class MultilineInputDialog(QDialog):
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
-    def __init__(self, text="", parent=None, context_text="", default_value=None, operation_type="edit"):
+    def __init__(self, text="", parent=None, context_text="", default_value=None, operation_type="edit",
+                 block_label=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Text")
         self.default_value = default_value
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Add operation indicator
         operation_label = QLabel()
         if operation_type == "add":
@@ -26,10 +27,21 @@ class MultilineInputDialog(QDialog):
         else:
             operation_label.setText("✏️ EDITING EXISTING FIELD")
             operation_label.setStyleSheet("font-weight: bold; color: #1565C0; padding: 5px;")
-        
+
         operation_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(operation_label)
-        
+
+        # Prominent banner naming the data block(s) this prompt applies to
+        # (multi-block files only)
+        if block_label:
+            block_banner = QLabel(f"📦 {block_label}")
+            block_banner.setStyleSheet(
+                "font-weight: bold; font-size: 13px; color: #4A148C; "
+                "background-color: rgba(156, 39, 176, 0.12); "
+                "border: 1px solid #9C27B0; border-radius: 3px; padding: 5px;")
+            block_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(block_banner)
+
         # Add context label if provided
         if context_text:
             context_label = QLabel(context_text)
