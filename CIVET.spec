@@ -62,6 +62,7 @@ a = Analysis(
         # Application modules - Main application structure
         'gui',
         'gui.collapsible_box',
+        'gui.check_progress',
         'gui.data_name_integrity',
         'gui.field_checking',
         'gui.format_handlers',
@@ -87,6 +88,7 @@ a = Analysis(
         'gui.dialogs.multiline_dialog',
         'gui.dialogs.multi_block_value_dialog',
         'gui.dialogs.non_ascii_conversion_dialog',
+        'gui.dialogs.progress_banner',
         'gui.dialogs.recognised_prefixes_dialog',
         'version',
         
