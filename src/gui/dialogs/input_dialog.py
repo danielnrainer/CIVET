@@ -4,13 +4,14 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPalette
 from . import RESULT_ABORT, RESULT_STOP_SAVE
+from .progress_banner import build_check_progress_banner
 
 
 class CIFInputDialog(QDialog):
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
     def __init__(self, title, text, value="", default_value=None, parent=None, operation_type="edit", suggestions=None,
-                 block_label=None):
+                 block_label=None, progress=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.default_value = default_value
@@ -20,6 +21,12 @@ class CIFInputDialog(QDialog):
         self.set_dialog_color(operation_type)
 
         layout = QVBoxLayout(self)
+
+        # "Check N/Total" progress banner for the overall run (whole
+        # pipeline, not just this dialog); omitted outside a check run
+        progress_banner = build_check_progress_banner(progress)
+        if progress_banner:
+            layout.addWidget(progress_banner)
 
         # Add operation indicator
         operation_label = QLabel()
@@ -197,7 +204,7 @@ class CIFInputDialog(QDialog):
 
     @staticmethod
     def getText(parent, title, text, value="", default_value=None, operation_type="edit",
-                suggestions=None, show_dialog_fn=None, block_label=None):
+                suggestions=None, show_dialog_fn=None, block_label=None, progress=None):
         """
         Args:
             show_dialog_fn: Optional callable(QDialog) -> int, used to display the
@@ -207,6 +214,9 @@ class CIFInputDialog(QDialog):
                 a plain modal ``dialog.exec()``.
             block_label: Optional text naming the data block(s) the prompt applies
                 to; shown as a prominent banner (multi-block files only).
+            progress: Optional (current, total) tuple for the "Check N/Total"
+                banner; see CheckProgressTracker.snapshot(). Omitted (no banner)
+                when None or total <= 0.
         """
         if show_dialog_fn is None:
             show_dialog_fn = lambda d: d.exec()
@@ -225,7 +235,7 @@ class CIFInputDialog(QDialog):
                 title = f"✏️ {title}"
 
             dialog = MultilineInputDialog(str(value), parent, text, default_value, operation_type,
-                                          block_label=block_label)
+                                          block_label=block_label, progress=progress)
             dialog.setWindowTitle(title)
             
             # Set background color based on operation type
@@ -281,7 +291,7 @@ class CIFInputDialog(QDialog):
         else:
             # Use single-line dialog for single-line values
             dialog = CIFInputDialog(title, text, value, default_value, parent, operation_type, suggestions,
-                                    block_label=block_label)
+                                    block_label=block_label, progress=progress)
             result = show_dialog_fn(dialog)
 
             if result == QDialog.DialogCode.Accepted:

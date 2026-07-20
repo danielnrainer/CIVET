@@ -22,6 +22,10 @@ theme rather than strict chronological commit order.
   - The **File Status** panel's first row reports the data-block count, with a new scope selector
     to show syntax/notation/data-name/data-value status for the whole file or a single block; a
     tooltip explains the combined "all blocks" issue count against the per-block breakdown.
+- **Check Progress Indicator**: **Start Checks** now shows a "Check N/Total" counter and progress
+  bar in the status bar for the duration of a run, echoed in a banner inside each field-check
+  dialog. The total is an estimate derived from the loaded `.cif_rules` set and the number of
+  selected data blocks, and grows on the fly if a run needs more steps than predicted.
 
 ## [1.3] - 2026-07-06
 

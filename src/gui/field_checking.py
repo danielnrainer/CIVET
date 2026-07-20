@@ -25,6 +25,7 @@ from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
                               TextBlockTracker)
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
+from .check_progress import CheckProgressTracker, count_rule_steps
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog,
                       MultiBlockValueDialog, RESULT_ABORT, RESULT_STOP_SAVE)
 from .dialogs.data_name_validation_dialog import DataNameValidationDialog
@@ -158,6 +159,20 @@ class FieldCheckingMixin:
         """Banner text naming the scoped block for input dialogs (None when unscoped)."""
         scope = self._check_block_scope
         return f"Data block: data_{scope}" if scope else None
+
+    def _get_check_progress(self) -> CheckProgressTracker:
+        """Return the tracker for the currently running check pass.
+
+        Lazily creates an inert zero-total tracker (advance()s are cheap
+        no-ops that never produce a visible indicator) when called outside
+        a run started via start_checks - e.g. from tests that call the
+        rule-execution methods directly.
+        """
+        tracker = getattr(self, '_check_progress', None)
+        if tracker is None:
+            tracker = CheckProgressTracker()
+            self._check_progress = tracker
+        return tracker
 
     def _get_active_field_rules_path(self) -> str:
         """Return the currently selected .cif_rules source path, if any."""
@@ -438,7 +453,7 @@ class FieldCheckingMixin:
             f"Recorded {len(changes)} conversion note(s)."
         )
 
-    def check_line(self, prefix, default_value=None, multiline=False, description="", suggestions=None):
+    def check_line(self, prefix, default_value=None, multiline=False, description="", suggestions=None, progress=None):
         """Check and potentially update a CIF field value."""
         removable_chars = "'"
         lines, line_offset = self._get_check_lines()
@@ -464,7 +479,7 @@ class FieldCheckingMixin:
                     show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                         d, "dialogs.field_check_edit_mode"
                     ),
-                    block_label=self._check_block_label())
+                    block_label=self._check_block_label(), progress=progress)
 
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
@@ -476,9 +491,9 @@ class FieldCheckingMixin:
 
         QMessageBox.warning(self, "Line Not Found",
                           f"The line starting with '{prefix}' was not found.")
-        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
+        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions, progress=progress)
 
-    def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description="", suggestions=None):
+    def add_missing_line(self, prefix, lines, default_value=None, multiline=False, description="", suggestions=None, progress=None):
         """Add a missing CIF field with value."""
         value, result = CIFInputDialog.getText(
             self, "Add Missing Line",
@@ -487,7 +502,7 @@ class FieldCheckingMixin:
             show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                 d, "dialogs.field_check_edit_mode"
             ),
-            block_label=self._check_block_label())
+            block_label=self._check_block_label(), progress=progress)
 
         if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
             return result
@@ -518,7 +533,7 @@ class FieldCheckingMixin:
         self._set_check_lines(lines)
         return result
     
-    def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None, suggestions=None):
+    def check_line_with_config(self, prefix, default_value=None, multiline=False, description="", config=None, suggestions=None, progress=None):
         """Check and potentially update a CIF field value with configuration options."""
         if config is None:
             config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
@@ -583,7 +598,7 @@ class FieldCheckingMixin:
                     show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                         d, "dialogs.field_check_edit_mode"
                     ),
-                    block_label=self._check_block_label())
+                    block_label=self._check_block_label(), progress=progress)
 
                 if result in [RESULT_ABORT, RESULT_STOP_SAVE]:
                     return result
@@ -595,11 +610,11 @@ class FieldCheckingMixin:
 
         # Field not found - handle missing field
         if not field_found:
-            return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config, suggestions)
-        
+            return self.add_missing_line_with_config(prefix, lines, default_value, multiline, description, config, suggestions, progress=progress)
+
         return QDialog.DialogCode.Accepted
-    
-    def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None, suggestions=None):
+
+    def add_missing_line_with_config(self, prefix, lines, default_value=None, multiline=False, description="", config=None, suggestions=None, progress=None):
         """Add a missing CIF field with value, respecting configuration options."""
         if config is None:
             config = {'auto_fill_missing': False, 'skip_matching_defaults': False}
@@ -628,7 +643,7 @@ class FieldCheckingMixin:
             return QDialog.DialogCode.Accepted
 
         # Otherwise, use the normal missing line dialog
-        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions)
+        return self.add_missing_line(prefix, lines, default_value, multiline, description, suggestions, progress=progress)
     
     def _add_modern_equivalent_field(self, deprecated_field: str, modern_field: str):
         """
@@ -867,6 +882,29 @@ class FieldCheckingMixin:
         # Store the initial state for potential restore
         initial_state = self.text_editor.toPlainText()
 
+        # Set up the whole-run progress tracker (status bar + per-dialog
+        # "Check N/Total" banners). `total` is an upper-bound estimate - see
+        # check_progress.py - covering the field-rule pass plus one coarse
+        # step per data block for each of the other pipeline phases below;
+        # it grows on the fly if a run needs more steps than predicted.
+        scopes = self._check_scopes(config)
+        shared_mode = len(scopes) > 1 and (config.get('block_mode') or 'independent') == 'shared'
+        fields_for_count = self.field_checker.get_field_set(self.current_field_set) or []
+        rule_steps = count_rule_steps(fields_for_count)
+        field_pass_steps = rule_steps if shared_mode else rule_steps * max(len(scopes), 1)
+
+        estimated_total = field_pass_steps + len(scopes)  # + absolute-structure checks
+        if config.get('validate_data_names', True):
+            estimated_total += 1
+        if config.get('check_duplicates_aliases', True):
+            estimated_total += len(scopes)
+        estimated_total += len(scopes)  # audit-creation-method update
+
+        self._check_progress = CheckProgressTracker()
+        if hasattr(self, 'update_check_progress'):
+            self._check_progress.on_change(self.update_check_progress)
+        self._check_progress.reset(estimated_total)
+
         # Suspend debounced/background compliance refreshes for the duration of
         # the check run. The loop rewrites the editor after every field, and each
         # rewrite would otherwise re-validate the whole file on a background
@@ -879,6 +917,7 @@ class FieldCheckingMixin:
                 validation_success = self._validate_data_names_before_checks()
                 if not validation_success:
                     return  # User cancelled or aborted
+                self._check_progress.advance(1)
 
             # Single field set processing
             success = self._process_single_field_set(config, initial_state)
@@ -896,6 +935,7 @@ class FieldCheckingMixin:
                         self._active_check_block = None
                     if not duplicate_check_success:
                         return  # User aborted or there was an error
+                    self._check_progress.advance(1)
 
             # Update _audit_creation_method to include CIVET info after
             # successful checks, in every block that was checked
@@ -910,12 +950,14 @@ class FieldCheckingMixin:
                         self.modified = True
                 finally:
                     self._active_check_block = None
+                self._check_progress.advance(1)
 
             # If we get here, checks completed successfully
             if config.get('reformat_after_checks', False):
                 self.reformat_file()
         finally:
             self._end_compliance_batch()
+            self._check_progress.reset(0)  # clear the indicator
 
         self.update_window_title()
         QMessageBox.information(self, "Checks Complete", "Field checking completed successfully!")
@@ -1180,6 +1222,7 @@ class FieldCheckingMixin:
         # Action rules apply to every block, silently (same result as
         # running them independently per block)
         if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
+            self._get_check_progress().advance(1)
             if not is_custom_or_user:
                 return 'continue'
             modified = False
@@ -1244,6 +1287,7 @@ class FieldCheckingMixin:
                 field_def, blocks, config, initial_state,
                 ensure_parser_current, operations_applied, is_custom_or_user)
 
+        self._get_check_progress().advance(1)
         distinct_values = set(values.values())
         if len(distinct_values) == 1:
             common_value = next(iter(distinct_values))
@@ -1276,7 +1320,7 @@ class FieldCheckingMixin:
             show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                 d, "dialogs.field_check_edit_mode"
             ),
-            block_label=self._blocks_banner(blocks))
+            block_label=self._blocks_banner(blocks), progress=self._get_check_progress().snapshot())
 
         if result == RESULT_ABORT:
             return self._abort_run(initial_state)
@@ -1306,7 +1350,7 @@ class FieldCheckingMixin:
             show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                 d, "dialogs.field_check_edit_mode"
             ),
-            block_label=self._blocks_banner(blocks))
+            block_label=self._blocks_banner(blocks), progress=self._get_check_progress().snapshot())
 
         if result == RESULT_ABORT:
             return self._abort_run(initial_state)
@@ -1323,7 +1367,7 @@ class FieldCheckingMixin:
             self, field_def.name, values, field_def.default_value, field_def.description,
             show_dialog_fn=lambda d: self._show_dialog_with_configured_interaction(
                 d, "dialogs.field_check_edit_mode"
-            ))
+            ), progress=self._get_check_progress().snapshot())
 
         if result == RESULT_ABORT:
             return self._abort_run(initial_state)
@@ -1353,6 +1397,12 @@ class FieldCheckingMixin:
             'abort' if the run was aborted (editor already restored to initial_state).
         """
         action = getattr(field_def, 'action', 'CHECK')
+
+        # A rule is one pipeline step whether or not it ends up producing a
+        # visible dialog (see check_progress.py); IF itself isn't a step -
+        # its nested rules are, and each will advance when reached below.
+        if action != 'IF':
+            self._get_check_progress().advance(1)
 
         # --- Action rules (custom/user sets only) ---
         if action in ('DELETE', 'EDIT', 'APPEND', 'RENAME'):
@@ -1448,7 +1498,8 @@ class FieldCheckingMixin:
             False,
             description,
             config,
-            suggestions
+            suggestions,
+            progress=self._get_check_progress().snapshot()
         )
 
         if result == RESULT_ABORT:
@@ -1539,6 +1590,7 @@ class FieldCheckingMixin:
                             self._active_check_block = scope
                             if not self._apply_absolute_structure_checks(config, initial_state):
                                 return False
+                            self._get_check_progress().advance(1)
                 else:
                     for scope_index, scope in enumerate(scopes):
                         self._active_check_block = scope
@@ -1560,6 +1612,7 @@ class FieldCheckingMixin:
 
                         if not self._apply_absolute_structure_checks(config, initial_state):
                             return False
+                        self._get_check_progress().advance(1)
 
                         if stopped:
                             break  # Stop-and-save ends the whole run, later blocks included

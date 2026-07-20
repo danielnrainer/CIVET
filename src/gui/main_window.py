@@ -1,8 +1,8 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit, 
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
-                           QFileDialog, QMessageBox, QLineEdit, QCheckBox, 
+                           QFileDialog, QMessageBox, QLineEdit, QCheckBox,
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
-                           QButtonGroup, QComboBox, QFormLayout)
+                           QButtonGroup, QComboBox, QFormLayout, QProgressBar)
 from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop, QObject, QRunnable, QThreadPool, pyqtSignal
 from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
@@ -335,6 +335,21 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         self.modified_label = QLabel()
         self.dictionary_label = QLabel("Dictionary: Default")
         self._compliance_label = QLabel()
+
+        # Whole-run "Check N/Total" indicator, hidden except while a check
+        # run is active. Driven by CheckProgressTracker (see check_progress.py)
+        # so it stays in sync with the per-dialog progress banners.
+        self.check_progress_label = QLabel()
+        self.check_progress_label.setStyleSheet("font-weight: bold; padding-right: 4px;")
+        self.check_progress_bar = QProgressBar()
+        self.check_progress_bar.setFixedWidth(120)
+        self.check_progress_bar.setFixedHeight(14)
+        self.check_progress_bar.setTextVisible(False)
+        self.check_progress_label.setVisible(False)
+        self.check_progress_bar.setVisible(False)
+
+        self.status_bar.addPermanentWidget(self.check_progress_label)
+        self.status_bar.addPermanentWidget(self.check_progress_bar)
         self.status_bar.addPermanentWidget(self.path_label)
         self.status_bar.addPermanentWidget(self._compliance_label)
         self.status_bar.addPermanentWidget(self.modified_label)
@@ -1645,6 +1660,25 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             self.modified_label.setStyleSheet("color: green;")
         else:
             self.modified_label.setText("")
+
+    def update_check_progress(self, current: int, total: int) -> None:
+        """Update (or hide) the status bar's "Check N/Total" indicator.
+
+        Registered as the CheckProgressTracker's on_change callback for the
+        duration of a check run (see field_checking.start_checks); total <= 0
+        means no run is active, so the indicator is hidden.
+        """
+        if total <= 0:
+            self.check_progress_label.setVisible(False)
+            self.check_progress_bar.setVisible(False)
+            return
+
+        display_current = min(current, total)
+        self.check_progress_label.setText(f"Check {display_current}/{total}")
+        self.check_progress_label.setVisible(True)
+        self.check_progress_bar.setMaximum(total)
+        self.check_progress_bar.setValue(display_current)
+        self.check_progress_bar.setVisible(True)
 
     def update_dictionary_status(self):
         """Update the dictionary status label in the status bar"""

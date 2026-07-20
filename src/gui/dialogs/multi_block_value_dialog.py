@@ -11,13 +11,14 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLabel, QLineEdit, QPushButton)
 from PyQt6.QtCore import Qt
 from . import RESULT_ABORT, RESULT_STOP_SAVE
+from .progress_banner import build_check_progress_banner
 
 
 class MultiBlockValueDialog(QDialog):
     """One editable value row per data block for a diverging field."""
 
     def __init__(self, field_name, block_values, default_value=None,
-                 description="", parent=None):
+                 description="", parent=None, progress=None):
         """
         Args:
             field_name: the CIF data name being resolved
@@ -25,6 +26,8 @@ class MultiBlockValueDialog(QDialog):
                 field is missing in that block}, in file order
             default_value: the rule's suggested value, if any
             description: rule description shown to the user
+            progress: Optional (current, total) tuple for the "Check
+                N/Total" banner; see CheckProgressTracker.snapshot().
         """
         super().__init__(parent)
         self.setWindowTitle("Resolve Per-Block Values")
@@ -49,6 +52,10 @@ class MultiBlockValueDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        progress_banner = build_check_progress_banner(progress)
+        if progress_banner:
+            layout.addWidget(progress_banner)
+
         header = QLabel("⚠️ VALUE DIFFERS BETWEEN DATA BLOCKS")
         header.setStyleSheet("font-weight: bold; color: #F57C00; padding: 5px;")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -56,8 +63,7 @@ class MultiBlockValueDialog(QDialog):
 
         intro = QLabel(
             f"'{field_name}' has different values in the selected data blocks.\n"
-            "Review each block's value below (this is expected for e.g. a "
-            "variable-temperature study).\n\n"
+            "Review each block's value below .\n\n"
             + (f"Description: {description}\n" if description else "")
             + (f"Suggested value: {default_value}" if default_value else "")
         )
@@ -123,7 +129,7 @@ class MultiBlockValueDialog(QDialog):
 
     @staticmethod
     def getValues(parent, field_name, block_values, default_value=None,
-                  description="", show_dialog_fn=None):
+                  description="", show_dialog_fn=None, progress=None):
         """Show the dialog; returns (values_dict_or_None, result).
 
         Result codes follow CIFInputDialog.getText: Accepted (apply values),
@@ -134,7 +140,7 @@ class MultiBlockValueDialog(QDialog):
             show_dialog_fn = lambda d: d.exec()
 
         dialog = MultiBlockValueDialog(field_name, block_values, default_value,
-                                       description, parent)
+                                       description, parent, progress=progress)
         result = show_dialog_fn(dialog)
 
         if result == QDialog.DialogCode.Accepted:

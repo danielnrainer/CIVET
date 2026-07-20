@@ -3,18 +3,25 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
 from PyQt6.QtCore import Qt
 from . import RESULT_ABORT, RESULT_STOP_SAVE
+from .progress_banner import build_check_progress_banner
 
 
 class MultilineInputDialog(QDialog):
     RESULT_USE_DEFAULT = 4  # User wants to use default value
 
     def __init__(self, text="", parent=None, context_text="", default_value=None, operation_type="edit",
-                 block_label=None):
+                 block_label=None, progress=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Text")
         self.default_value = default_value
 
         layout = QVBoxLayout(self)
+
+        # "Check N/Total" progress banner for the overall run; omitted
+        # outside a check run
+        progress_banner = build_check_progress_banner(progress)
+        if progress_banner:
+            layout.addWidget(progress_banner)
 
         # Add operation indicator
         operation_label = QLabel()

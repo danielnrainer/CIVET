@@ -208,8 +208,8 @@ def _patch_get_text(monkeypatch, reply, calls=None):
     """Replace CIFInputDialog.getText with a canned (value, result) reply."""
     def fake_get_text(parent, title, text, value="", default_value=None,
                       operation_type="edit", suggestions=None, show_dialog_fn=None,
-                      block_label=None):
-        _ = (parent, title, value, default_value, operation_type, suggestions, show_dialog_fn)
+                      block_label=None, progress=None):
+        _ = (parent, title, value, default_value, operation_type, suggestions, show_dialog_fn, progress)
         if calls is not None:
             calls.append({'text': text, 'block_label': block_label})
         return reply
@@ -237,8 +237,8 @@ def test_shared_check_divergent_uses_per_block_dialog(monkeypatch):
     seen = {}
 
     def fake_get_values(parent, field_name, block_values, default_value=None,
-                        description="", show_dialog_fn=None):
-        _ = (parent, default_value, description, show_dialog_fn)
+                        description="", show_dialog_fn=None, progress=None):
+        _ = (parent, default_value, description, show_dialog_fn, progress)
         seen['field'] = field_name
         seen['values'] = dict(block_values)
         return {"xtal_100K": "110", "xtal_200K": "210"}, QDialog.DialogCode.Accepted

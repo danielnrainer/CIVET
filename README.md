@@ -32,6 +32,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows. On multi-block files this runs per block, so the same data name legitimately repeated across blocks is never flagged as a duplicate.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
 - **Multi-Data-Block Support**: Files with several `data_` blocks are checked block-by-block instead of silently mixing them up (see below for details).
+- **Check Progress Indicator**: A live "Check N/Total" counter and progress bar in the status bar, echoed in each field-check dialog, shows how far a **Start Checks** run has gotten.
 - **Live File Status Panel**: Side-by-side with field-rule selection, a compact status panel tracks the data-block count, syntax compliance (CIF 2.0 / CIF 1.1 / not compliant), notation state (modern/legacy/mixed), and latest data-name/data-value validation outcomes — for the whole file or a single selected data block.
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
@@ -273,6 +274,17 @@ series) are checked block-by-block rather than treating the file as one document
   view syntax/notation/data-name/data-value status for the whole file or a single block; when
   viewing the whole file, a tooltip on the issue counts explains any gap between the combined total
   and the per-block figures (shared issues are counted once combined).
+
+### Check Progress Indicator
+
+**Start Checks** shows a "Check N/Total" counter and progress bar in the status bar for the
+duration of the run, and repeats the same counter in a banner inside each field-check dialog.
+`Total` is an estimate computed at the start of the run from the loaded `.cif_rules` set (and the
+number of selected data blocks); it grows on the fly if a run turns out to need more steps than
+predicted (e.g. an `IF` block whose condition is met, or a per-block fallback in Shared mode), so
+the counter never shows something like "61/60" - it just adjusts upward. The counter still
+advances through checks that resolve silently (auto-fill or skip-matching-defaults), so it never
+stalls, and the indicator disappears once the run finishes, is stopped, or is aborted.
 
 ### Editing Convenience
 
