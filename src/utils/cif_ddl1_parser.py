@@ -191,9 +191,12 @@ class DDL1DictionaryParser:
         # Extract list_reference
         block.list_reference = self._extract_single_value(content, '_list_reference')
         
-        # Extract list_link_parent and list_link_child
-        block.list_link_parent = self._extract_single_value(content, '_list_link_parent')
-        block.list_link_child = self._extract_single_value(content, '_list_link_child')
+        # Extract list_link_parent and list_link_child (values are themselves
+        # data names, e.g. '_pd_phase_id' — use _extract_linked_field_name,
+        # not _extract_single_value, since the latter rejects any captured
+        # value starting with '_' as a heuristic against tags with no value).
+        block.list_link_parent = self._extract_linked_field_name(content, '_list_link_parent')
+        block.list_link_child = self._extract_linked_field_name(content, '_list_link_child')
         
         # Extract enumeration values
         block.enumeration_values = self._extract_enumerations(content)
@@ -278,6 +281,23 @@ class DDL1DictionaryParser:
             return value if value and value != '?' else None
         return None
     
+    def _extract_linked_field_name(self, content: str, tag: str) -> Optional[str]:
+        """
+        Extract a single-line value that is itself a data name, e.g. the
+        '_pd_phase_id' in '_list_link_parent  _pd_phase_id'.
+
+        Unlike _extract_single_value(), a leading underscore in the captured
+        value is expected here (it's a field name), not a sign that the
+        regex ran past a missing value into the next tag.
+        """
+        escaped_tag = re.escape(tag)
+        pattern = rf"(?:^|\n)\s*{escaped_tag}\s+['\"]?(_[^'\"\s;]+)['\"]?"
+        match = re.search(pattern, content)
+        if match:
+            value = match.group(1).strip()
+            return value if value else None
+        return None
+
     def _extract_semicolon_text(self, content: str, tag: str) -> Optional[str]:
         """Extract semicolon-delimited text block following a tag in DDL1 format."""
         escaped_tag = re.escape(tag)
@@ -498,7 +518,9 @@ class DDL1DictionaryParser:
             examples=block.examples if block.examples else None,
             units=block.units,
             ddl_format='DDL1',
-            source_dictionary=self._dictionary_name
+            source_dictionary=self._dictionary_name,
+            list_link_parent=block.list_link_parent,
+            list_link_child=block.list_link_child
         )
         
         # Store metadata

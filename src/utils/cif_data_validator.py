@@ -12,14 +12,19 @@ Classes:
                         and a CIFDictionaryManager
 
 Severity levels:
-    'error'   -- definite violation (loop count mismatch, enum value not allowed)
+    'error'   -- definite violation (loop count mismatch, enum value not allowed,
+                 parent/child key value with no matching parent)
     'warning' -- likely problem (type mismatch against dictionary type)
     'info'    -- advisory (field not in any loaded dictionary)
+
+Note: check_parent_child_links() is a separate, opt-in entry point (not part
+of validate()) for DDL1 _list_link_parent/_list_link_child relational checks
+-- see its docstring for why this isn't run automatically.
 """
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, TYPE_CHECKING, Set
+from typing import Dict, List, Optional, Any, TYPE_CHECKING, Set, Tuple
 
 if TYPE_CHECKING:
     from .CIF_parser import CIFParser, CIFLoop
@@ -46,7 +51,7 @@ _INTEGER_RE = re.compile(r'^[+-]?\d+(?:\(\d+\))?$')
 @dataclass
 class ValidationIssue:
     """One validation finding from CIFDataValidator."""
-    issue_type: str        # 'loop_incomplete', 'type_mismatch', 'enum_violation'
+    issue_type: str        # 'loop_incomplete', 'type_mismatch', 'enum_violation', 'parent_child_violation'
     severity: str          # 'error', 'warning', 'info'
     field_name: str
     message: str
@@ -117,6 +122,96 @@ class CIFDataValidator:
         # Sort by line number (issues without a line number go last)
         issues.sort(key=lambda x: (x.line_number is None, x.line_number or 0))
         return issues
+
+    def check_parent_child_links(
+        self,
+        cif_parser: 'CIFParser',
+        dict_manager: 'CIFDictionaryManager',
+    ) -> List[ValidationIssue]:
+        """Check DDL1 parent/child key referential integrity (opt-in).
+
+        Some DDL1 dictionaries (e.g. cif_pd.dic-style powder dictionaries)
+        declare that one field's values are keys into another field, via
+        ``_list_link_parent`` / ``_list_link_child`` (see
+        CIFDictionaryManager.get_relational_links()). This mirrors gemmi's
+        ``-p`` parent/child validation: every non-special value under a
+        child field must also appear somewhere under its declared parent
+        field.
+
+        This is deliberately **not** part of validate()'s default checks.
+        gemmi's own docs note this kind of check accumulates "a long list
+        of arbitrary exceptions" in practice (e.g. legitimate values that
+        exist in a different data block, or link declarations that are
+        looser than the actual data). Callers that want it should invoke
+        this explicitly and treat results as advisory alongside the rest
+        of validate().
+
+        Returns an empty list whenever no loaded dictionary declares any
+        parent/child links, so calling this unconditionally is cheap.
+        """
+        issues: List[ValidationIssue] = []
+        links = dict_manager.get_relational_links()
+        if not links:
+            return issues
+
+        values_by_field = self._collect_all_values(cif_parser)
+
+        for child_field, parent_field in links:
+            child_values = values_by_field.get(child_field)
+            if not child_values:
+                continue
+            parent_values = values_by_field.get(parent_field)
+            parent_value_set = {v.lower() for v, _ln in parent_values} if parent_values else set()
+
+            for value, line_number in child_values:
+                if value in _SPECIAL_VALUES:
+                    continue
+                if value.lower() not in parent_value_set:
+                    issues.append(ValidationIssue(
+                        issue_type='parent_child_violation',
+                        severity='error',
+                        field_name=child_field,
+                        message=(
+                            f"Value '{value}' for {child_field} has no matching value in "
+                            f"its parent item {parent_field} (linked via DDL1 "
+                            f"_list_link_parent/_list_link_child)."
+                        ),
+                        line_number=line_number,
+                        value=value,
+                        expected=f"a value present in {parent_field}",
+                    ))
+
+        issues.sort(key=lambda x: (x.line_number is None, x.line_number or 0))
+        return issues
+
+    def _collect_all_values(
+        self,
+        cif_parser: 'CIFParser',
+    ) -> Dict[str, List[Tuple[str, Optional[int]]]]:
+        """Map lowercased field name -> [(value, line_number), ...] across
+        both individual fields and loop columns."""
+        values: Dict[str, List[Tuple[str, Optional[int]]]] = {}
+
+        for field_obj in cif_parser.fields.values():
+            if field_obj.value == "(in loop)":
+                continue
+            str_value = str(field_obj.value).strip()
+            if not str_value:
+                continue
+            values.setdefault(field_obj.name.lower(), []).append((str_value, field_obj.line_number))
+
+        for loop in cif_parser.loops:
+            for row_idx, row in enumerate(loop.data_rows):
+                approx_line = (loop.line_number or 0) + len(loop.field_names) + row_idx + 1
+                for col_idx, field_name in enumerate(loop.field_names):
+                    if col_idx >= len(row):
+                        continue
+                    value = row[col_idx]
+                    if not value:
+                        continue
+                    values.setdefault(field_name.lower(), []).append((str(value).strip(), approx_line))
+
+        return values
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -26,6 +26,15 @@ theme rather than strict chronological commit order.
   bar in the status bar for the duration of a run, echoed in a banner inside each field-check
   dialog. The total is an estimate derived from the loaded `.cif_rules` set and the number of
   selected data blocks, and grows on the fly if a run needs more steps than predicted.
+- **DDL1 parent/child key checking**: `CIFDataValidator.check_parent_child_links()` verifies that
+  values in a field declared as a DDL1 child key (`_list_link_parent`) or referenced as a parent key
+  (`_list_link_child`) actually match a value in the linked field.
+
+### Fixed
+- **DDL1 dictionary parsing**: `_list_link_parent`/`_list_link_child` values are themselves data names
+  (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with
+  no value, so they never reached field metadata despite being parsed. Both tags are now correctly
+  extracted and exposed on `FieldMetadata` and via `CIFDictionaryManager.get_relational_links()`.
 
 ## [1.3] - 2026-07-06
 

@@ -1096,6 +1096,37 @@ class CIFDictionaryManager:
         self._cache_put(self._metadata_lookup_cache, key, _MISSING_METADATA, _MAX_LOOKUP_CACHE_ENTRIES)
         return None
 
+    def get_relational_links(self) -> List[Tuple[str, str]]:
+        """Return (child_field, parent_field) pairs declared by loaded DDL1 dictionaries.
+
+        DDL1 dictionaries may declare parent/child key relationships between
+        two data items via ``_list_link_parent`` (on the child's definition,
+        naming its parent) and/or ``_list_link_child`` (on the parent's
+        definition, naming its child). Both directions are merged here into
+        a single (child, parent) edge list, lowercased. Fields with no such
+        declaration contribute nothing, so this is empty unless a loaded
+        dictionary actually defines relational links.
+        """
+        self._ensure_loaded()
+        links: Set[Tuple[str, str]] = set()
+
+        def _collect(metadata_map: Dict[str, Any]) -> None:
+            for definition_id, meta in metadata_map.items():
+                parent = getattr(meta, 'list_link_parent', None)
+                if parent:
+                    links.add((definition_id.lower(), parent.lower()))
+                child = getattr(meta, 'list_link_child', None)
+                if child:
+                    links.add((child.lower(), definition_id.lower()))
+
+        if hasattr(self.parser, '_field_metadata'):
+            _collect(self.parser._field_metadata)
+        for parser in self._additional_parsers:
+            if hasattr(parser, '_field_metadata'):
+                _collect(parser._field_metadata)
+
+        return sorted(links)
+
     def _search_field_in_dictionary_file(self, field_name: str) -> bool:
         """
         Search for a field name directly in the CIF core dictionary file.

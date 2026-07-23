@@ -43,6 +43,8 @@ class FieldMetadata:
     units: Optional[str] = None  # Units code (DDLm: _units.code, DDL1: _units)
     ddl_format: Optional[str] = None  # Source DDL format ('DDLm', 'DDL1', 'DDL2')
     source_dictionary: Optional[str] = None  # Name of the source dictionary
+    list_link_parent: Optional[str] = None  # DDL1 _list_link_parent: this field is a child key referencing the named parent field
+    list_link_child: Optional[str] = None  # DDL1 _list_link_child: the named field is a child key referencing this field
     
     def get_all_aliases_names(self) -> List[str]:
         """Get list of all alias names (including deprecated)"""
