@@ -94,8 +94,6 @@ class CIFDictionaryParser:
         """
         if self._parsed:
             return self._legacy_to_modern, self._modern_to_legacy
-            
-        print("Parsing CIF core dictionary...")
         
         if not self.cif_core_path.exists():
             raise FileNotFoundError(f"CIF core dictionary not found at: {self.cif_core_path}")
@@ -117,9 +115,6 @@ class CIFDictionaryParser:
         self._parse_save_blocks(content)
         
         self._parsed = True
-        print(f"Parsed {len(self._legacy_to_modern)} field mappings from CIF core dictionary")
-        print(f"Found {len(self._deprecated_fields)} deprecated fields")
-        print(f"Found {len(self._replaced_fields)} replaced/obsolete fields")
         
         return self._legacy_to_modern, self._modern_to_legacy
         

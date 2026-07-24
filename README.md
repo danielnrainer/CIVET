@@ -37,6 +37,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **Persistent User Configuration**: Cross-platform storage for settings, user rules, recognised prefixes, and downloaded dictionaries.
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
 - **Performance**: Debounced/background compliance checks, content-hash-based reparse avoidance, and caching across dictionary lookups and validation keep the editor responsive on larger files.
+- **Headless CLI**: `src/cli.py` exposes syntax/data-name/data-value validation, CIF1↔CIF2 and legacy↔modern conversion, and `.cif_rules` linting for CI/batch use without launching the GUI (see below).
 
 ## Quick Start
 
@@ -85,6 +86,41 @@ pyinstaller CIVET.spec
 ```
 
 Compiled releases bundle only the runtime application and required runtime dependencies; development and test tools are not included.
+
+## Command-Line Interface (headless)
+
+`src/cli.py` wraps the same validation/conversion modules the GUI uses, so CIF files can be
+screened or converted in CI/batch pipelines without a display. No packaging/entry-point changes
+required - just run it with the same Python environment as `src/main.py`.
+
+**Validate one or more files** (exit code `0` = no errors, `1` = errors found, `2` = a file
+couldn't be read):
+```bash
+python src/cli.py check *.cif
+python src/cli.py check *.cif --format json          # machine-readable
+python src/cli.py check *.cif --check-links          # also run the opt-in DDL1 parent/child check
+python src/cli.py check *.cif -d my_dictionary.dic    # load an additional dictionary
+python src/cli.py check *.cif --syntax-version cif2   # enforce CIF 2.0 compliance regardless of the current header
+```
+A CIF 1.1 file is never CIF 2.0 compliant (and vice versa) since each requires the other's
+version header to be absent, so `check` validates against whichever version the file declares
+(or CIF 1.1 if that's ambiguous) unless `--syntax-version` overrides it.
+
+**Convert notation and/or syntax version:**
+```bash
+python src/cli.py convert file.cif --to-notation modern --to-syntax cif2 -o file_modern.cif
+python src/cli.py convert file.cif --to-notation legacy --in-place
+```
+
+**Lint a `.cif_rules` file's own structure** (mixed formats, duplicate aliases, unknown/deprecated
+fields, malformed `IF`/`RENAME`/`CALCULATE` lines):
+```bash
+python src/cli.py lint-rules field_rules/3ded.cif_rules
+```
+
+Run `python src/cli.py <command> --help` for the full flag list. The underlying functions
+(`check_content`, `convert_content`, `build_dictionary_manager` in `src/cli.py`) are also a
+plain Python API if you want CIVET's checks from your own scripts rather than through the CLI.
 
 ## Custom Field Rules
 Create validation rules using `.cif_rules` files:

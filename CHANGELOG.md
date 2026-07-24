@@ -6,6 +6,11 @@ theme rather than strict chronological commit order.
 ## since 1.3
 
 ### Added
+- **Headless CLI** (`src/cli.py`): `check` (syntax/data-name/data-value validation, text or JSON
+  output), `convert` (CIF1↔CIF2 syntax and legacy↔modern notation conversion), and `lint-rules`
+  (structural validation of a `.cif_rules` file) subcommands, wrapping the same validation/
+  conversion modules the GUI uses so CIF files can be screened or converted in CI/batch pipelines
+  without launching the editor.
 - **IF / IF NOT checks**: keywords for .cif_rules files extended to include if / if not logic
 - **Multi-Data-Block Support**: CIF files containing several `data_` blocks (e.g. multiple crystals
   or a variable-temperature series) are now checked block-by-block.
