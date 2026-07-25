@@ -43,7 +43,7 @@ a = Analysis(
         # The application will automatically load all dictionaries at startup
         # Dictionary filenames include version numbers (e.g., cif_core_3.3.0.dic)
         ('dictionaries/*.dic', 'dictionaries'),               # All CIF dictionaries
-        ('dictionaries/registered_prefixes.json', 'dictionaries'),  # Registered CIF prefixes
+        ('dictionaries/reserved_prefixes.cif', 'dictionaries'),  # Offline fallback snapshot of the IUCr reserved-prefixes registry
         
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file

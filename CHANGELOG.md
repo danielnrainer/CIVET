@@ -35,6 +35,17 @@ theme rather than strict chronological commit order.
   values in a field declared as a DDL1 child key (`_list_link_parent`) or referenced as a parent key
   (`_list_link_child`) actually match a value in the linked field.
 
+### Changed
+- **Registered CIF prefixes now come from the live IUCr registry** instead of a bundled static list:
+  CIVET fetches and caches the official
+  [reserved-prefixes registry](https://cif-dictionaries.iucr.org/cifdic/dic/reserved_prefixes.cif),
+  refreshing it automatically in the background when the cache is missing or stale (30+ days), or
+  on demand via a new **Update from IUCr Registry** button in **Settings → View Recognised
+  Prefixes...**. Falls back to a bundled offline snapshot when there is no cache yet and no network.
+- User-allowed (unofficial) prefixes and fields - added via **Add User Prefix...** for local prefixes
+  not yet registered with IUCr, now stored in a `user_allowed_prefixes.cif` file in the CIVET config
+  directory making them visible, editable, and portable alongside the rest of CIVET's configuration.
+
 ### Fixed
 - **DDL1 dictionary parsing**: `_list_link_parent`/`_list_link_child` values are themselves data names
   (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with

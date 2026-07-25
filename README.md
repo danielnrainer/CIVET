@@ -200,13 +200,20 @@ CIVET stores all user configuration and customizations in a platform-specific ap
 **Contents:**
 ```
 CIVET/
-├── settings.json           # Editor preferences (font, ruler, etc.)
-├── registered_prefixes.json  # Custom CIF prefix registry
-├── dictionaries/           # User-downloaded CIF dictionaries
-└── field_rules/            # Custom validation rules
+├── settings.json                    # Editor preferences (font, ruler, etc.)
+├── registered_prefixes_cache.cif    # Cached official IUCr prefix registry (auto-updated)
+├── user_allowed_prefixes.cif        # Your own unofficial/local prefixes and fields
+├── dictionaries/                    # User-downloaded CIF dictionaries
+└── field_rules/                     # Custom validation rules
 ```
 
 This allows settings and customizations to persist across sessions and software updates, even when using the standalone executable.
+
+Registered CIF prefixes are fetched from the official
+[IUCr reserved-prefixes registry](https://cif-dictionaries.iucr.org/cifdic/dic/reserved_prefixes.cif)
+and cached locally; CIVET refreshes this automatically in the background, or you can
+trigger a refresh via **Settings → View Recognised Prefixes... → Update from IUCr Registry**.
+
 
 ### Editor Settings
 

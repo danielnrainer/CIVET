@@ -14,14 +14,28 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QPushButton, QGroupBox,
     QWidget, QHeaderView, QMessageBox, QInputDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 from utils.registered_prefixes import (
     get_registered_prefixes, get_prefix_info, get_prefix_data_source,
-    get_all_prefix_info
+    get_all_prefix_info, fetch_and_cache_official_prefixes,
+    IUCR_RESERVED_PREFIXES_URL
 )
 from utils.data_name_validator import DataNameValidator
+
+
+class PrefixUpdateWorker(QThread):
+    """Worker thread for fetching the official IUCr reserved-prefixes registry."""
+
+    finished = pyqtSignal(bool, str)  # success, message
+
+    def run(self):
+        try:
+            source = fetch_and_cache_official_prefixes()
+            self.finished.emit(True, source)
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 class RecognisedPrefixesDialog(QDialog):
@@ -29,7 +43,7 @@ class RecognisedPrefixesDialog(QDialog):
     Dialog for viewing and managing recognised CIF data name prefixes.
     
     Shows all prefixes that CIVET will accept without flagging as unknown:
-    - IUCr registered prefixes (from registered_prefixes.json)
+    - IUCr registered prefixes (fetched from the official registry and cached)
     - User-allowed prefixes (stored in user preferences)
     """
     
@@ -90,22 +104,28 @@ class RecognisedPrefixesDialog(QDialog):
         # Source info
         source_group = QGroupBox("Prefix Data Source")
         source_layout = QVBoxLayout(source_group)
-        source_path = get_prefix_data_source()
-        source_label = QLabel(f"<code>{source_path}</code>")
-        source_label.setWordWrap(True)
-        source_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        source_layout.addWidget(source_label)
+        self.source_label = QLabel()
+        self.source_label.setWordWrap(True)
+        self.source_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._refresh_source_label()
+        source_layout.addWidget(self.source_label)
         layout.addWidget(source_group)
         
         # Button row
         button_layout = QHBoxLayout()
-        
+
         # Add user prefix button
         add_prefix_btn = QPushButton("Add User Prefix...")
         add_prefix_btn.setToolTip("Add a custom prefix to your allowed list")
         add_prefix_btn.clicked.connect(self._on_add_prefix)
         button_layout.addWidget(add_prefix_btn)
-        
+
+        # Update registered prefixes from the official IUCr registry
+        self.update_btn = QPushButton("Update from IUCr Registry")
+        self.update_btn.setToolTip(f"Fetch the latest reserved-prefix list from {IUCR_RESERVED_PREFIXES_URL}")
+        self.update_btn.clicked.connect(self._on_update_from_iucr)
+        button_layout.addWidget(self.update_btn)
+
         button_layout.addStretch()
         
         # Close button
@@ -115,6 +135,39 @@ class RecognisedPrefixesDialog(QDialog):
         
         layout.addLayout(button_layout)
     
+    def _refresh_source_label(self) -> None:
+        """Update the source-info label with the current prefix data source."""
+        self.source_label.setText(f"<code>{get_prefix_data_source()}</code>")
+
+    def _on_update_from_iucr(self) -> None:
+        """Fetch the latest reserved-prefix registry from IUCr in a background thread."""
+        self.update_btn.setEnabled(False)
+        self.update_btn.setText("Updating...")
+
+        self._update_worker = PrefixUpdateWorker()
+        self._update_worker.finished.connect(self._on_update_finished)
+        self._update_worker.start()
+
+    def _on_update_finished(self, success: bool, message: str) -> None:
+        """Handle completion of the IUCr registry update."""
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Update from IUCr Registry")
+
+        if success:
+            self.validator.clear_cache()
+            self._refresh_source_label()
+            self._populate_tree()
+            QMessageBox.information(
+                self, "Prefixes Updated",
+                f"Successfully updated registered prefixes from IUCr.\n\nSource: {message}"
+            )
+        else:
+            QMessageBox.warning(
+                self, "Update Failed",
+                f"Could not fetch the official prefix registry:\n\n{message}\n\n"
+                "The previously loaded prefixes are unchanged."
+            )
+
     def _populate_tree(self) -> None:
         """Populate the tree with prefix data."""
         self.tree.clear()
@@ -136,13 +189,7 @@ class RecognisedPrefixesDialog(QDialog):
         
         # Add registered prefixes
         for prefix in sorted(registered_prefixes.keys(), key=str.lower):
-            info = registered_prefixes[prefix]
-            description = info.get("description", "")
-            dict_suggestion = info.get("suggested_dictionary", "")
-            
-            if dict_suggestion:
-                description = f"{description} (→ {dict_suggestion})"
-            
+            description = registered_prefixes[prefix]
             child = QTreeWidgetItem([f"_{prefix}_", description, "IUCr Registry"])
             child.setData(0, Qt.ItemDataRole.UserRole, prefix)  # Store original prefix
             child.setData(2, Qt.ItemDataRole.UserRole, "registered")  # Category marker

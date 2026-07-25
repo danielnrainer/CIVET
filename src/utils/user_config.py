@@ -12,10 +12,11 @@ application data directory:
 
 Directory structure:
     CIVET/
-    ├── settings.json           # Editor and application settings
-    ├── registered_prefixes.json  # User-customized CIF prefixes
-    ├── dictionaries/           # User-downloaded CIF dictionaries
-    └── field_rules/            # User-created field rules files
+    ├── settings.json                    # Editor and application settings
+    ├── registered_prefixes_cache.cif    # Cached official IUCr prefix registry
+    ├── user_allowed_prefixes.cif        # User-allowed (unofficial) prefixes/fields
+    ├── dictionaries/                    # User-downloaded CIF dictionaries
+    └── field_rules/                     # User-created field rules files
 """
 
 import json
@@ -131,9 +132,27 @@ def ensure_user_field_rules_directory() -> Path:
     return path
 
 
-def get_user_prefixes_path() -> Path:
-    """Get path to user's custom registered_prefixes.json file."""
-    return get_user_config_directory() / 'registered_prefixes.json'
+def get_user_allowed_prefixes_path() -> Path:
+    """Get path to the user's allowed-prefixes/fields file.
+
+    Holds prefixes and specific field names the user has explicitly allowed
+    (e.g. local/unofficial prefixes not registered with IUCr) - see
+    DataNameValidator.add_allowed_prefix / add_allowed_field. Stored as a
+    small CIF file (rather than QSettings) so it lives alongside the rest of
+    the CIVET config, is easy to inspect/back up/copy between machines, and
+    can be read with CIVET's own CIF parser.
+    """
+    return get_user_config_directory() / 'user_allowed_prefixes.cif'
+
+
+def get_prefix_cache_path() -> Path:
+    """Get path to the cached copy of the official IUCr reserved-prefixes registry.
+
+    This is CIVET-managed (written by registered_prefixes.fetch_and_cache_official_prefixes)
+    and should not be hand-edited. Stored as CIF (not JSON) so it can be read
+    with CIVET's own CIF parser, same as the rest of the prefix-related files.
+    """
+    return get_user_config_directory() / 'registered_prefixes_cache.cif'
 
 
 def get_settings_path() -> Path:

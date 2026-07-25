@@ -1,0 +1,329 @@
+# CIVET offline fallback snapshot of the official IUCr reserved-prefixes
+# registry, mirrored verbatim from:
+#   https://cif-dictionaries.iucr.org/cifdic/dic/reserved_prefixes.cif
+# Captured 2026-07-25. Only used when there is no cached copy of the live
+# registry yet and no network access is available - refresh by re-saving a
+# fresh copy of that URL over this file; do not hand-edit its data rows.
+
+data_reserved_prefixes
+
+loop_
+_publcif_reserved_prefix.prefix
+_publcif_reserved_prefix.description
+_publcif_reserved_prefix.submitter
+_publcif_reserved_prefix.date
+
+'ccdc'
+'Cambridge Crystallographic Data Centre'
+'F.H. Allen (allen@ccdc.cam.ac.uk)'
+'Tue Aug 12 15:10:50 1997'
+
+'cgraph'
+'Oxford Cryosystems Crystallographica package'
+'A. Renshaw (alex@cgraph.demon.co.uk)'
+'Tue Aug 12 15:06:18 1997'
+
+'gsas'
+'GSAS powder refinement system'
+'A. Larson '
+'Tue Aug 12 15:07:43 1997'
+
+'iucr'
+'IUCr journal use'
+'B. McMahon (bm@iucr.org)'
+'Tue Aug 12 15:08:27 1997'
+
+'shelx'
+'SHELXL solution and refinement programs'
+'G.M. Sheldrick (gsheldr@shelx.uni-ac.gwdg.de)'
+'Tue Aug 12 15:10:14 1997'
+
+'xtal'
+'Xtal program system'
+'S.R. Hall (syd@crystal.uwa.edu.au)'
+'Tue Aug 12 15:12:01 1997'
+
+'ndb'
+'Nucleic Acids Database Project, Rutgers University'
+'John Westbrook (jwest@rcsb.rutgers.edu)'
+'Fri Oct 24 13:28:10 1997'
+
+'pdb'
+'Protein Data Bank'
+'John Westbrook (jwest@rcsb.rutgers.edu)'
+'Fri Oct 24 13:34:14 1997'
+
+'rcsb'
+'Research Collaboratory for Structural Bioinformatics'
+'John Westbrook (jwest@rcsb.rutgers.edu)'
+'Thu Nov 25 13:15:00 1999'
+
+'pdb2cif'
+'Dictionary of additions to mmCIF used by the program pdb2cif by P. E. Bourne, F. C. Bernstein and H. J. Bernstein'
+'Herbert J. Bernstein (yaya@bernstein-plus-sons.com)'
+'Wed Oct 29 10:44:22 1997'
+
+'B+S'
+'This prefix is for use in creating various tags used by the author in projects on CIF, mmCIF, imageCIF, etc. to avoid conflict with the standard dictionaries.'
+'Herbert J. Bernstein (yaya@bernstein-plus-sons.com)'
+'Wed Oct 29 10:49:35 1997'
+
+'ebi'
+'macromolecular harvest deposition files'
+'Kim Henrick (henrick@ebi.ac.uk)'
+'Tue Dec  9 16:03:35 1997'
+
+'CCP4'
+'http://www.dl.ac.uk/CCP/CCP4/main.html'
+'Sue Bailey (ccp4@dl.ac.uk)'
+'Wed Apr 22 11:08:15 1998'
+
+'vrf'
+'Validation Reply Form (IUCr/Acta C use)'
+'Michael Hoyland (mh@iucr.org)'
+'Wed Jul 15 16:29:08 1998'
+
+'wdc'
+'Entries in the World Directory of Crystallographers'
+'Brian McMahon (bm@iucr.org)'
+'Wed Sep  2 16:40:00 1998'
+
+'msd'
+'data items for the European Bioinformatics Institute Molecular Structure Database Group'
+'Kim Henrick (henrick@ebi.ac.uk)'
+'Wed Sep 23 11:16:14 1998'
+
+'mdb'
+'Model Database, database of model structures of biological molecules'
+'Alexei A. Adzhubei (aaa75196@ggr.co.uk)'
+'Thu Jan  7 10:29:17 1999'
+
+'asd'
+'Active Site Database'
+'Alexei Adzhubei (aaa75196@ggr.co.uk)'
+'Thu Mar 18 08:50:51 1999'
+
+'pdbx'
+'Protein Data Bank - exchange dictionary prefix'
+'John Westbrook (jwest@rcsb.rutgers.edu)'
+'Thu Jun  8 13:29:17 2000'
+
+'anbf'
+'Australian National Beamline Facility'
+'James R Hester (jrh@anbf2.kek.jp)'
+'Fri Jul 21 03:01:35 2000'
+
+'iims'
+'Integration of Information about Macromolecular Structure. Integration of the results of 3D Electron Microscopy with existing data models from X-ray and NMR methods.'
+'Richard Newman (newman@ebi.ac.uk)'
+'Wed May 23 08:39:45 2001'
+
+'gsk'
+'In house GlaxoSmithKline data entries '
+'R. Curtis Haltiwanger (R_Curtis_Haltiwanger@gsk.com)'
+'Tue Jul  3 02:27:22 2001'
+
+'crystmol'
+'Used by CrystMol software for items not covered in core and mmCif dictionaries'
+'David J. Duchamp (djduchamp@aol.com)'
+'Sun Oct  7 15:18:11 2001'
+
+'edchem'
+'Our locally-invented cif names'
+'Edinburgh University Chemistry (s.parsons@ed.ac.uk)'
+'Sat May  4 20:29:33 2002'
+
+'parvati'
+'validation and statistical summaries from PARVATI validation server http://www.bmsc.washington.edu/parvati '
+'Ethan A Merritt (merritt@u.washington.edu)'
+'Mon Jun  3 22:23:37 2002'
+
+'csd'
+'Cambridge Structural Database'
+'Frank H. Allen (allen@ccdc.cam.ac.uk)'
+'Fri Jun 21 10:24:26 2002'
+
+'oxford'
+'Used in conjunction with the Oxford CRYSTALS program'
+'David Watkin (david.watkin@chem.ox.ac.uk)'
+'Tue Jul  8 10:57:17 2003'
+
+'itqb'
+'Local names of Instituto de Tecnologia Quimica e Biologica da Universidade Nova de Lisboa, Oeiras, Portugal, especially for molecular modelling extensions '
+'Carlos A. Cunha (ccunha@itqb.unl.pt)'
+'Wed Sep 17 16:35:43 2003'
+
+'NIEHS'
+'general-use local prefix for NIEHS (National Institute of Environmental Health Sciences)'
+'Joseph M Krahn (krahn@niehs.nih.gov)'
+'Wed Mar  7 19:44:10 2007'
+
+'bruker'
+'Used by Bruker AXS software for items not covered in core and mmCif dictionaries'
+'Joerg Kaercher (Joerg.Kaercher@bruker-axs.com)'
+'Thu Aug  2 20:36:13 2007'
+
+'rayonix'
+'Information specific to Rayonix (Mar USA) instruments'
+'Michael Blum  (blum@rayonix.com)'
+'Tue Sep 25 18:49:37 2007'
+
+'acihd'
+'local names used by ACI Heidelberg'
+'H. Wadepohl (wadepohl@uni-heidelberg.de)'
+'Tue Aug  5 07:58:11 2008'
+
+'cod'
+'Prefix used for data items added by COD maintainers and depositors.'
+'Saulius Grazulis, Crystallography Open Database (COD) (grazulis@ibt.lt)'
+'Wed Jan 21 08:10:08 2009'
+
+'amcsd'
+'Identifier for file created as an entry in the American MIneralogist Crystal Structure Database (http://rruff.geo.arizona.edu/AMS/amcsd.php)'
+'Robert T Downs (rdowns@u.arizona.edu)'
+'Tue May  4 23:46:52 2010'
+
+'nottingham'
+'Prefix for University of Nottingham internal CIF items'
+'Alexander J. Blake (a.j.blake@nottingham.ac.uk)'
+'Mon Jun 14 15:18:33 2010'
+
+'prop'
+'prefix for properties as used in the MPOD database: www.materialproperties.org'
+'Daniel Chateigner (daniel.chateigner@ensicaen.fr)'
+'Mon Dec  6 15:02:59 2010'
+
+'mpod'
+'prefix used in the MPOD database: www.materialproperties.org'
+'Daniel Chateigner (daniel.chateigner@ensicaen.fr)'
+'Mon Dec  6 15:06:19 2010'
+
+'BplusS'
+'Alternative to B+S for use with DDLm'
+'Herbert J. Bernstein (yaya@bernstein-plus-sons.com)'
+'Fri Jan 21 11:39:34 2011'
+
+'SSAD'
+'Prefix for Sulfur SAD Database CIFS'
+'Herbert J. Bernstein (yaya@bernstein-plus-sons.com)'
+'Sun Jun  5 13:38:40 2011'
+
+'publcif'
+'Local items used by the publCIF editor'
+'Simon P. Westrip (sw@publcif.co.uk)'
+'Mon Jun 13 13:48:10 2011'
+
+'montpellier'
+'Prefix for University of Montpellier internal CIF items'
+'Arie van der Lee (avderlee@univ-montp2.fr)'
+'Tue Jul 19 10:19:31 2011'
+
+'phenix'
+'PHENIX is a software suite for the automated determination of macromolecular structures using X-ray crystallography and other methods.'
+'Richard Gildea (rjgildea@lbl.gov)'
+'Wed Oct 10 22:37:11 2012'
+
+'H5'
+'HDF5 related tags for CIF support of HDF5 and NeXus'
+'Herbert J. Bernstein (yayahjb@gmail.com)'
+'Sat Dec 29 16:26:51 2012'
+
+'NX'
+'Nexus-related tags for CIF HDF5/NeXus integration'
+'Herbert J. Bernstein (yaya@bernstein-plus-sons.com)'
+'Sat Dec 29 16:28:25 2012'
+
+'dft'
+'A prefix for data pertaining to density functional theory calculations, such as convergence criteria, precise method used etc.'
+'Torbjörn Björkman (torbjorn.bjorkman@aalto.fi)'
+'Thu Apr 25 13:16:56 2013'
+
+'tcod'
+'Data names specific to the Theoretical Crystallography Open Database, http://www.crystallography.net/tcod'
+'Saulius Grazulis (grazulis@ibt.lt)'
+'Fri May 17 14:58:47 2013'
+
+'solsa'
+'SOLSA H2020 project Sonic Drilling coupled with Automated Mineralogy and chemistry On-Line-On-Mine-Real-Time)'
+'Saulius Grazulis, Crystallography Open Database (COD) (grazulis@ibt.lt)'
+'Mon Feb  8 10:43:36 2016'
+
+'nomad'
+'Data names defined by the NOMAD Center of Excellence for theoretical material science calculations and structures.'
+'NOMAD laboratory (fawzi.mohamed@fhi-berlin.mpg.de)'
+'Fri Oct 28 12:39:43 2016'
+
+'raman'
+'Data items for recording spectra obtained by Raman spectroscopy technique.'
+'Saulius Grazulis (grazulis@ibt.lt)'
+'Wed Feb 22 07:36:20 2017'
+
+'aflow'
+'Tags for AFLOW high-throughput Density Functional Calculations'
+'Michael Mehl (mmehl@usna.edu)'
+'Fri May 19 17:05:58 2017'
+
+'manchester'
+'For internal use of the XRD service at The University of Manchester'
+'Fabrizio Ortu (fabrizio.ortu@manchester.ac.uk)'
+'Tue Sep  5 08:16:47 2017'
+
+'TOPOS'
+'Prefix names for the data items generated by the ToposPro software'
+'Vladislav A. Blatov (blatov@topospro.com)'
+'Tue May  8 18:27:35 2018'
+
+'ISO'
+'Tags used by the ISOTROPY Software Suite'
+'Branton J. Campbell (branton_campbell@byu.edu)'
+'Fri May 11 21:47:33 2018'
+
+'LANL'
+'For internal use of the XRD service at Los Alamos National Lab'
+'Conrad Goodwin (cgoodwin@lanl.gov)'
+'Tue May 15 17:40:37 2018'
+
+'chimerax'
+'Prefix for UCSF ChimeraX'
+'Greg Couch (gregc@cgl.ucsf.edu)'
+'Thu Aug  2 22:03:42 2018'
+
+'sydney'
+'Prefix for University of Sydney internal CIF items'
+'William Lewis (w.lewis@sydney.edu.au)'
+'Mon Aug  6 06:38:39 2018'
+
+'mp'
+'Information specific to the Materials Project (MP) database and its related software tools. See materialsproject.org and github.com/materialsproject for more information.'
+'Matthew Horton (mkhorton@lbl.gov)'
+'Mon Aug  6 21:22:19 2018'
+
+'rotag'
+'Prefix used for the data items generated by rotag software.'
+'Algirdas Grybauskas (algirdas.grybauskas@gmc.vu.lt)'
+'Mon Jul 15 11:30:13 2019'
+
+'naned'
+'Prefix for CIF entries created within the project NanED for 3DED data. Proposals for expanding CIF dictionary to fully accomodate 3DED data.'
+'Lukas Palatinus (palat@fzu.cz)'
+'Tue Sep 20 09:44:23 2022'
+
+'cambridge'
+'Prefix for University of Cambridge internal CIF items'
+'Andrew Bond (adb29@cam.ac.uk)'
+'Sat Jun  1 09:57:09 2024'
+
+'mifads'
+'General-use local prefix for the Materials Innovation Factory Advanced Diffraction Suite.'
+'Alexandra Longcake (Alexandra.Longcake@liverpool.ac.uk)'
+'Thu Mar  5 17:01:26 2026'
+
+'enact'
+'Information and data describing crystallisations performed using the ENaCt technique.'
+'Thomas David Smith (t.smith7@newcastle.ac.uk)'
+'Thu Mar  5 19:20:41 2026'
+
+'fsg'
+'This output is produced by FINDSPINGROUP and is used for downstream functionality.'
+'Yutong Yu (karl.yt.yu@gmail.com)'
+'Sun Mar 15 06:42:18 2026'

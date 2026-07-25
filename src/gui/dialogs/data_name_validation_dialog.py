@@ -618,9 +618,7 @@ class DataNameValidationDialog(QDialog):
             details += f" → {field_result.successor_name}"
         elif field_result.modern_equivalent:
             details += f" → {field_result.modern_equivalent}"
-        if field_result.suggested_dictionary:
-            details += f" (try loading: {field_result.suggested_dictionary})"
-        
+
         field_item = QTreeWidgetItem([field_result.field_name, details, ""])
         field_item.setToolTip(1, details)
         if field_result.line_number > 0:

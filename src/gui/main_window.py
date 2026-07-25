@@ -20,8 +20,10 @@ from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, Field
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
 from utils.data_name_validator import DataNameValidator, FieldCategory
-from utils.registered_prefixes import get_prefix_data_source
-from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_user_prefixes_path, get_setting
+from utils.registered_prefixes import (
+    get_prefix_data_source, is_prefix_cache_stale, fetch_and_cache_official_prefixes
+)
+from utils.user_config import get_user_config_directory, ensure_user_config_directory, get_setting
 from utils.cif2_value_formatting import (
     format_cif2_value, is_multiline, needs_quoting,
     validate_cif2_content, fix_cif2_compliance_issues
@@ -144,6 +146,12 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         
         self.update_dictionary_status()
         self.select_initial_file()
+
+        # Best-effort, silent background refresh of the IUCr reserved-prefix
+        # registry if the local cache is missing or stale. Never blocks
+        # startup and fails silently (e.g. offline) - the cached/bundled
+        # snapshot already loaded is used until this succeeds.
+        QTimer.singleShot(2000, self._maybe_auto_refresh_prefixes)
 
     def load_settings(self):
         """Load editor settings - delegated to text editor component"""
@@ -2794,28 +2802,28 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             
             # Show info about the config directory
             prefix_source = get_prefix_data_source()
-            user_prefixes_file = get_user_prefixes_path()
-            
+
             info_text = (
                 f"<b>Configuration Directory:</b><br>"
                 f"<code>{config_dir}</code><br><br>"
                 f"<b>Contents:</b><br>"
                 f"• <b>settings.json</b> - Editor preferences<br>"
-                f"• <b>registered_prefixes.json</b> - Custom CIF prefixes<br>"
+                f"• <b>registered_prefixes_cache.cif</b> - Cached copy of the official "
+                f"IUCr reserved-prefix registry (CIVET-managed, refreshed automatically)<br>"
+                f"• <b>user_allowed_prefixes.cif</b> - Prefixes/fields you've allowed that "
+                f"aren't (yet) officially registered - managed via View Recognised "
+                f"Prefixes > Add User Prefix...<br>"
                 f"• <b>dictionaries/</b> - User-downloaded dictionaries<br>"
                 f"• <b>field_rules/</b> - Custom validation rules<br><br>"
                 f"<b>Current Prefix Source:</b><br>"
-                f"<code>{prefix_source}</code>"
+                f"<code>{prefix_source}</code><br><br>"
+                f"<b>Tip:</b> Officially registered prefixes are fetched automatically from "
+                f"the IUCr registry (Settings > View Recognised Prefixes > Update from IUCr "
+                f"Registry to refresh now). For local prefixes not yet registered with IUCr, "
+                f"use the Add User Prefix... button in that same dialog rather than editing "
+                f"files here by hand."
             )
-            
-            if not user_prefixes_file.exists():
-                info_text += (
-                    "<br><br><b>Tip:</b> To customize registered prefixes, copy "
-                    "<code>registered_prefixes.json</code> from the GitHub repository "
-                    "to this config folder and edit as needed. "
-                    "Go to Settings > Reload Prefix Configuration to apply changes."
-                )
-            
+
             QMessageBox.information(self, "CIVET Config Directory", info_text)
             
         except Exception as e:
@@ -2869,11 +2877,37 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 f"Could not open user field rules directory:\n{str(e)}"
             )
     
+    def _maybe_auto_refresh_prefixes(self):
+        """
+        Silently refresh the cached IUCr reserved-prefix registry if stale.
+
+        Runs on a worker thread so a slow/absent network connection can never
+        block the UI; failures (e.g. offline) are ignored since the
+        already-loaded cached/bundled snapshot remains in use.
+        """
+        if not is_prefix_cache_stale():
+            return
+
+        worker = _BackgroundTask(fetch_and_cache_official_prefixes)
+
+        def _on_success(_source):
+            if hasattr(self, 'data_name_validator'):
+                self.data_name_validator.clear_cache()
+
+        def _on_failure(_message):
+            pass  # Offline or unreachable - keep using the existing snapshot
+
+        worker.signals.finished.connect(_on_success)
+        worker.signals.failed.connect(_on_failure)
+        self._worker_pool.start(worker)
+
     def reload_prefix_configuration(self):
         """
-        Reload the registered prefixes configuration from JSON files.
-        
-        Useful after editing the registered_prefixes.json file in the config directory.
+        Reload the registered prefixes configuration from local cache/files.
+
+        Useful to pick up a cache written by a prior "Update from IUCr
+        Registry" fetch. Does not touch the network - see the "Update from
+        IUCr Registry" button in View Recognised Prefixes for that.
         """
         from utils.registered_prefixes import reload_prefix_data, get_prefix_data_source, get_registered_prefixes
         

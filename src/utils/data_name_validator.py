@@ -10,8 +10,9 @@ and registered IUCr prefixes. It categorizes fields into:
 - Unknown: Not recognized in any dictionary
 - Deprecated: Field is deprecated with modern replacement
 
-The validator maintains user preferences in QSettings for persistence and
-provides caching for performance optimization.
+The validator maintains user preferences (allowed prefixes/fields) in a
+small CIF file in the CIVET config directory, and provides caching for
+performance optimization.
 """
 
 from enum import Enum
@@ -20,16 +21,14 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
-from PyQt6.QtCore import QSettings
-
-from utils.CIF_parser import TextBlockTracker
+from utils.CIF_parser import TextBlockTracker, CIFParser
 from utils.registered_prefixes import (
     is_registered_prefix,
     get_prefix_from_field,
-    suggest_dictionary_for_prefix,
     get_prefix_info,
     get_registered_prefixes_lower
 )
+from utils.user_config import get_user_allowed_prefixes_path
 
 if TYPE_CHECKING:
     from utils.cif_dictionary_manager import CIFDictionaryManager
@@ -65,7 +64,6 @@ class FieldValidationResult:
     category: FieldCategory
     line_number: int
     description: str = ""              # Why this category
-    suggested_dictionary: str = ""     # If unknown, suggest a dict
     modern_equivalent: str = ""        # If deprecated, the modern (dot-notation) replacement
     successor_name: str = ""           # Format-aware successor (legacy or modern, depending on file)
     successor_already_exists: bool = False  # True when successor (or alias-equivalent) is already present
@@ -108,9 +106,6 @@ class DataNameValidator:
         _validation_cache: Cache of validation results for performance
     """
     
-    # QSettings keys for persistence
-    SETTINGS_KEY_PREFIXES = "CIVET/allowed_prefixes"
-    SETTINGS_KEY_FIELDS = "CIVET/allowed_fields"
     MAX_FIELD_CACHE_ENTRIES = 4096
     MAX_REPORT_CACHE_ENTRIES = 16
     MAX_EQUIVALENT_CACHE_ENTRIES = 1024
@@ -158,7 +153,6 @@ class DataNameValidator:
                 category=cached.category,
                 line_number=line_number,
                 description=cached.description,
-                suggested_dictionary=cached.suggested_dictionary,
                 modern_equivalent=cached.modern_equivalent,
                 successor_name=cached.successor_name,
                 successor_already_exists=cached.successor_already_exists,
@@ -262,13 +256,11 @@ class DataNameValidator:
         # Check if field uses a registered IUCr prefix
         if is_registered_prefix(field_name):
             prefix_info = get_prefix_info(prefix) or ""
-            suggested_dict = suggest_dictionary_for_prefix(prefix) or ""
             result = FieldValidationResult(
                 field_name=field_name,
                 category=FieldCategory.REGISTERED_LOCAL,
                 line_number=line_number,
                 description=f"Uses registered prefix '{prefix}'" + (f": {prefix_info}" if prefix_info else ""),
-                suggested_dictionary=suggested_dict,
                 prefix=prefix
             )
             self._validation_cache[cache_key] = result
@@ -297,13 +289,11 @@ class DataNameValidator:
         if embedded_prefix and embedded_prefix.lower() in get_registered_prefixes_lower():
             from utils.registered_prefixes import get_prefix_info as get_info
             prefix_info = get_info(embedded_prefix) or ""
-            suggested_dict = suggest_dictionary_for_prefix(embedded_prefix) or ""
             result = FieldValidationResult(
                 field_name=field_name,
                 category=FieldCategory.REGISTERED_LOCAL,
                 line_number=line_number,
                 description=f"Uses registered embedded prefix '{embedded_prefix}'" + (f": {prefix_info}" if prefix_info else ""),
-                suggested_dictionary=suggested_dict,
                 prefix=prefix,
                 embedded_prefix=embedded_prefix,
                 suggested_format=suggested_format or ""
@@ -311,8 +301,6 @@ class DataNameValidator:
             self._validation_cache[cache_key] = result
             self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
             return result
-        
-        suggested_dict = suggest_dictionary_for_prefix(prefix) if prefix else ""
         
         if embedded_prefix:
             # This appears to be a category extension with embedded local prefix
@@ -322,13 +310,12 @@ class DataNameValidator:
             )
         else:
             description = "Not found in loaded dictionaries"
-        
+
         result = FieldValidationResult(
             field_name=field_name,
             category=FieldCategory.UNKNOWN,
             line_number=line_number,
             description=description,
-            suggested_dictionary=suggested_dict or "",
             prefix=prefix,
             suggested_format=suggested_format or "",
             embedded_prefix=embedded_prefix or ""
@@ -742,38 +729,63 @@ class DataNameValidator:
             FieldCategory.USER_ALLOWED
         }
     
+    # Loop tags used in the user_allowed_prefixes.cif file. One single-column
+    # loop per list - see _load_user_preferences/_save_user_preferences.
+    _ALLOWED_PREFIX_TAG = '_civet_allowed_prefix.name'
+    _ALLOWED_FIELD_TAG = '_civet_allowed_field.name'
+
     def _load_user_preferences(self) -> None:
-        """Load user preferences from QSettings."""
-        settings = QSettings()
-        
-        # Load allowed prefixes
-        prefixes_str = settings.value(self.SETTINGS_KEY_PREFIXES, "")
-        if prefixes_str:
-            self._user_allowed_prefixes = {
-                p.strip().lower() for p in prefixes_str.split(',') if p.strip()
-            }
-        else:
-            self._user_allowed_prefixes = set()
-        
-        # Load allowed fields
-        fields_str = settings.value(self.SETTINGS_KEY_FIELDS, "")
-        if fields_str:
-            self._user_allowed_fields = {
-                f.strip().lower() for f in fields_str.split(',') if f.strip()
-            }
-        else:
-            self._user_allowed_fields = set()
-    
+        """Load user-allowed prefixes/fields from the config directory's CIF file."""
+        prefs_path = get_user_allowed_prefixes_path()
+        self._user_allowed_prefixes = set()
+        self._user_allowed_fields = set()
+
+        if not prefs_path.exists():
+            return
+
+        try:
+            with open(prefs_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except IOError as e:
+            print(f"Warning: Could not read allowed prefixes/fields {prefs_path}: {e}")
+            return
+
+        parser = CIFParser()
+        parser.parse_file(content)
+        for loop in parser.loops:
+            if len(loop.field_names) != 1:
+                continue
+            tag_lower = loop.field_names[0].lower()
+            values = {row[0].strip().lower() for row in loop.data_rows if row and row[0].strip()}
+            if tag_lower == self._ALLOWED_PREFIX_TAG.lower():
+                self._user_allowed_prefixes = values
+            elif tag_lower == self._ALLOWED_FIELD_TAG.lower():
+                self._user_allowed_fields = values
+
     def _save_user_preferences(self) -> None:
-        """Save user preferences to QSettings."""
-        settings = QSettings()
-        
-        # Save allowed prefixes
-        prefixes_str = ','.join(sorted(self._user_allowed_prefixes))
-        settings.setValue(self.SETTINGS_KEY_PREFIXES, prefixes_str)
-        
-        # Save allowed fields
-        fields_str = ','.join(sorted(self._user_allowed_fields))
-        settings.setValue(self.SETTINGS_KEY_FIELDS, fields_str)
-        
-        settings.sync()
+        """Save user-allowed prefixes/fields to a small CIF file in the config directory."""
+        prefs_path = get_user_allowed_prefixes_path()
+
+        lines = [
+            "# CIVET user-allowed CIF prefixes/fields - not officially IUCr-registered.",
+            "# Managed via View Recognised Prefixes... > Add User Prefix (safe to hand-edit).",
+            "data_civet_user_allowed",
+        ]
+        if self._user_allowed_prefixes:
+            lines.append("")
+            lines.append("loop_")
+            lines.append(self._ALLOWED_PREFIX_TAG)
+            lines.extend(f"'{p}'" for p in sorted(self._user_allowed_prefixes))
+        if self._user_allowed_fields:
+            lines.append("")
+            lines.append("loop_")
+            lines.append(self._ALLOWED_FIELD_TAG)
+            lines.extend(f"'{f}'" for f in sorted(self._user_allowed_fields))
+        content = "\n".join(lines) + "\n"
+
+        try:
+            prefs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(prefs_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except IOError as e:
+            print(f"Warning: Could not save allowed prefixes/fields {prefs_path}: {e}")
