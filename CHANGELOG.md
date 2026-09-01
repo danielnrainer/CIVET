@@ -47,6 +47,11 @@ theme rather than strict chronological commit order.
   directory making them visible, editable, and portable alongside the rest of CIVET's configuration.
 
 ### Fixed
+- **Data Name Validation delete action left orphan values**: deleting a field from the Data Name
+  Validation dialog sometimes only removed the data-name but not the data value leaving a valueless 
+  data value behind and the CIF invalid. The whole data item (name *and* value) is now correctly removed.
+  Loop columns, which cannot be dropped without also rewriting every data row, are left untouched with 
+  a warning instead of being half-deleted.
 - **DDL1 dictionary parsing**: `_list_link_parent`/`_list_link_child` values are themselves data names
   (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with
   no value, so they never reached field metadata despite being parsed. Both tags are now correctly

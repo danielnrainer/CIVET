@@ -2454,14 +2454,27 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             _block_fields(block_code).add(successor.lower())
 
         counts = {'deleted': 0, 'replaced': 0, 'removed_existing': 0,
-                  'added': 0, 'corrected': 0, 'malformed_fixed': 0}
+                  'added': 0, 'corrected': 0, 'malformed_fixed': 0,
+                  'skipped_loop': 0}
         
         if fields_to_delete or deprecated_updates or deprecated_replacements or format_corrections:
             lines = content.split('\n')
             new_lines = []
             in_multiline = False
             skip_until_semicolon = False
-            awaiting_semicolon_block = False  # True after skipping a field name with no inline value
+            # True after deleting a bare field name whose value sits on the
+            # following line(s); the value must be removed with it so the file
+            # is not left with an orphan data value.
+            awaiting_deleted_value = False
+            # True while consuming the remaining lines of a deleted multi-line
+            # bracket value ([ ... ] / { ... }); brackets are balanced by depth.
+            skip_bracket_value = False
+            bracket_depth = 0
+            # True while walking the column-name header of a loop_. Deleting a
+            # loop column with this line-based pass would leave the data rows
+            # with the wrong number of values, so those deletions are skipped
+            # and reported instead.
+            in_loop_header = False
             current_block = None  # data_ block the walk is currently inside
 
             def _in_scope(name):
@@ -2469,18 +2482,34 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 scope = action_scopes.get(name)
                 return scope is None or scope == current_block
 
+            def _bracket_delta(text):
+                """Net bracket nesting change contributed by ``text``."""
+                return (
+                    text.count('[') + text.count('{')
+                    - text.count(']') - text.count('}')
+                )
+
             for line in lines:
-                # Handle semicolon-delimited multiline values
                 stripped = line.strip()
+
+                # Consume the trailing lines of a deleted multi-line bracket value.
+                if skip_bracket_value:
+                    bracket_depth += _bracket_delta(line)
+                    if bracket_depth <= 0:
+                        skip_bracket_value = False
+                        bracket_depth = 0
+                    continue
+
+                # Handle semicolon-delimited multiline values
                 if stripped.startswith(';'):
                     if skip_until_semicolon:
                         # This is the closing semicolon of a deleted field's multiline value
                         skip_until_semicolon = False
                         continue
-                    if awaiting_semicolon_block:
+                    if awaiting_deleted_value:
                         # This is the opening semicolon of the deleted field's multiline value;
                         # skip it and then skip everything until the closing semicolon
-                        awaiting_semicolon_block = False
+                        awaiting_deleted_value = False
                         skip_until_semicolon = True
                         continue
                     in_multiline = not in_multiline
@@ -2491,11 +2520,33 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     # Skip lines that are part of a deleted multiline field
                     continue
 
-                if awaiting_semicolon_block:
-                    # We skipped a field name expecting a semicolon block, but this line
-                    # isn't a semicolon — unexpected in valid CIF; stop waiting and
-                    # process this line normally
-                    awaiting_semicolon_block = False
+                if awaiting_deleted_value:
+                    # The deleted field name stood alone on its line; the value
+                    # that belongs to it is on a following line and must go too.
+                    if not stripped or stripped.startswith('#'):
+                        # Blank line or comment between name and value — drop it
+                        # along with the field.
+                        continue
+                    lowered = stripped.lower()
+                    if (stripped.startswith('_') or lowered.startswith('loop_')
+                            or lowered.startswith('data_')):
+                        # No value actually followed the name (malformed CIF).
+                        # Stop waiting and process this line normally.
+                        awaiting_deleted_value = False
+                    elif stripped[0] in '[{':
+                        # Bracket value, possibly spanning several lines.
+                        awaiting_deleted_value = False
+                        bracket_depth = _bracket_delta(line)
+                        if bracket_depth > 0:
+                            skip_bracket_value = True
+                        else:
+                            bracket_depth = 0
+                        continue
+                    else:
+                        # Ordinary single-line value (bare, quoted, or a
+                        # self-contained bracket expression).
+                        awaiting_deleted_value = False
+                        continue
 
                 if in_multiline:
                     new_lines.append(line)
@@ -2504,13 +2555,43 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 # Track which data block we're in for block-scoped actions
                 if stripped.lower().startswith('data_'):
                     current_block = stripped[5:]
+                    in_loop_header = False
                     new_lines.append(line)
                     continue
+
+                # Enter a loop_ column-name header
+                if stripped.lower() == 'loop_':
+                    in_loop_header = True
+                    new_lines.append(line)
+                    continue
+
+                # A non-blank, non-comment line that is not a data name ends the
+                # loop header (the loop's data rows have started).
+                if in_loop_header and stripped and not stripped.startswith('_') \
+                        and not stripped.startswith('#'):
+                    in_loop_header = False
 
                 # Check if this line contains a field
                 if stripped.startswith('_'):
                     parts = stripped.split(None, 1)
                     field_name = parts[0].lower() if parts else ''
+
+                    if in_loop_header:
+                        # Only pure renames are safe on a loop column with this
+                        # line-based pass; deletion / successor-insertion are not.
+                        if field_name in fields_to_delete and _in_scope(field_name):
+                            counts['skipped_loop'] += 1
+                            new_lines.append(line)
+                            continue
+                        if (field_name in deprecated_updates
+                                and _in_scope(field_name)
+                                and not _successor_present(
+                                    current_block,
+                                    deprecated_updates[field_name],
+                                    field_name)):
+                            counts['skipped_loop'] += 1
+                            new_lines.append(line)
+                            continue
 
                     # Decide what happens to this occurrence (block-scoped)
                     delete_this = False
@@ -2546,15 +2627,28 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
 
                     if delete_this:
                         modified = True
-                        # Check if this is a multiline value
+                        # Remove the whole data item: the name AND its value,
+                        # wherever the value lives.
                         if len(parts) == 1:
-                            # Field name only — the semicolon block is on the next line(s);
-                            # set awaiting_semicolon_block so the opening ';' is also skipped
-                            awaiting_semicolon_block = True
+                            # Field name only — the value is on the following
+                            # line(s). Defer to awaiting_deleted_value so the
+                            # value (semicolon block, bracket value, or a plain
+                            # value on its own line) is removed too.
+                            awaiting_deleted_value = True
                             continue
-                        elif parts[1].strip().startswith(';'):
+                        value_part = parts[1].strip()
+                        if value_part.startswith(';'):
                             # Inline semicolon after field name (e.g. _field ;\nvalue\n;)
                             skip_until_semicolon = True
+                            continue
+                        elif value_part[:1] in '[{':
+                            # Bracket value on the same line, possibly continuing
+                            # onto following lines.
+                            bracket_depth = _bracket_delta(value_part)
+                            if bracket_depth > 0:
+                                skip_bracket_value = True
+                            else:
+                                bracket_depth = 0
                             continue
                         else:
                             # Single line value, skip this line
@@ -2611,6 +2705,18 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     self,
                     "Changes Applied",
                     "The following changes were applied:\n• " + "\n• ".join(changes_summary)
+                )
+
+            if counts['skipped_loop']:
+                # A loop column cannot be removed safely by this line-based pass
+                # without also rewriting every data row, so it was left in place.
+                QMessageBox.warning(
+                    self,
+                    "Loop Column Not Removed",
+                    f"{counts['skipped_loop']} field(s) are columns of a loop_ and "
+                    "were left unchanged. Removing a loop column also requires "
+                    "deleting its value from every row of the loop; please edit "
+                    "the loop by hand."
                 )
     
     def show_editor_settings(self):

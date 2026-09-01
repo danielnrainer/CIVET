@@ -132,6 +132,85 @@ def test_apply_validation_actions_delete_in_all_blocks_by_default(editor):
     assert "_unknown_field" not in editor.text_editor.toPlainText()
 
 
+def test_apply_validation_actions_delete_removes_value_on_following_line(editor):
+    """A bare data name with its value on the next line is one CIF item.
+
+    Deleting it must remove both lines, never leave the value orphaned.
+    """
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_unknown_field\n    the_value\n_cell_length_a 5.0\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "_unknown_field" not in content
+    assert "the_value" not in content
+    assert "_cell_length_a 5.0" in content
+
+
+def test_apply_validation_actions_delete_removes_semicolon_value_on_next_line(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_unknown_field\n;\nmultiline value\nsecond line\n;\n"
+        "_cell_length_a 5.0\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "_unknown_field" not in content
+    assert "multiline value" not in content
+    assert "second line" not in content
+    assert content.count(";") == 0
+    assert "_cell_length_a 5.0" in content
+
+
+def test_apply_validation_actions_delete_removes_multiline_bracket_value(editor):
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\n_unknown_field [1 2 3\n4 5 6]\n_cell_length_a 5.0\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "_unknown_field" not in content
+    assert "4 5 6]" not in content
+    assert "_cell_length_a 5.0" in content
+
+
+def test_apply_validation_actions_delete_skips_loop_column(editor, monkeypatch):
+    """A loop column can't be dropped line-by-line without orphaning row data."""
+    _stub_window_updates(editor)
+    warnings = []
+    monkeypatch.setattr(
+        main_window.QMessageBox, "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+    editor.text_editor.setText(
+        "data_a\nloop_\n_known_a\n_unknown_field\n_known_b\n"
+        "1 2 3\n4 5 6\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_field"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    # Loop left intact rather than made invalid
+    assert "_unknown_field" in content
+    assert "1 2 3" in content
+    assert warnings
+
+
 def test_apply_validation_actions_successor_presence_checked_per_block(editor):
     _stub_window_updates(editor)
     editor.text_editor.setText(
