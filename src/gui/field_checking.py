@@ -1993,6 +1993,8 @@ class FieldCheckingMixin:
                                 'value': value,
                                 'is_deprecated': self.dict_manager.is_field_deprecated(alias)
                             })
+                detailed_conflicts[canonical]=sorted(detailed_conflicts[canonical],key=lambda k : k['line_num'])
+
             
             # Show dialog with scrollable content, honoring configured editor
             # interaction behavior (browse/edit the main editor while open).
