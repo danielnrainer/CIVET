@@ -2870,20 +2870,34 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             return True
     
     def validate_field_rules(self):
-        """Manual field definition validation (Settings menu)."""
-        # If we have a custom field rules file loaded (from Custom or User selection), validate it
+        """Manual field definition validation (Settings menu).
+
+        Validates whichever field-rules file is currently selected in the
+        "CIF Field Definition Selection" panel by default (built-in, user or
+        custom). Any other .cif_rules file can be loaded from within the
+        validation dialog itself via its "Open Another File" button.
+        """
+        # If we have a field rules file loaded (from Built-in, User or Custom
+        # selection), validate it. custom_field_rules_file tracks the active
+        # selection for all three cases.
         if self.custom_field_rules_file:
-            # Validate the current custom field definition file
             self._validate_field_rules_file(self.custom_field_rules_file)
-        else:
-            # Ask user to select a file to validate
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Select Field Definition File to Validate", "",
-                "Field Rules Files (*.cif_rules);;All Files (*)"
-            )
-            
-            if file_path:
-                self._validate_field_rules_file(file_path)
+            return
+
+        # Nothing selected yet - let the user pick a starting file. Default to
+        # CIVET's user field-rules directory.
+        try:
+            start_dir = get_user_field_rules_directory()
+        except Exception:
+            start_dir = ""
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Field Definition File to Validate", start_dir,
+            "Field Rules Files (*.cif_rules);;All Files (*)"
+        )
+
+        if file_path:
+            self._validate_field_rules_file(file_path)
     
     def open_config_directory(self):
         """
