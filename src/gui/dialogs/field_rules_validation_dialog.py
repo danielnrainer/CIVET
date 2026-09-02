@@ -11,17 +11,19 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton,
     QGroupBox, QScrollArea, QWidget, QTreeWidget, QTreeWidgetItem,
-    QMessageBox, QFileDialog, QCheckBox, QSplitter, QFrame, QTreeWidgetItemIterator,
+    QMessageBox, QFileDialog, QCheckBox, QSplitter, QTreeWidgetItemIterator,
     QTabWidget, QPlainTextEdit, QComboBox, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
 
-# Add parent directories to path to import from utils
+# Add parent directories to path to import from utils / gui
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.field_rules_validator import ValidationResult, ValidationIssue, IssueCategory, AutoFixType, CIFFormatAnalyzer
+from utils.user_field_rules import get_user_field_rules_directory
+from gui.collapsible_widgets import CollapsibleSection
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
 from utils.format_compatibility_warning import show_modern_format_warning
 
@@ -196,7 +198,7 @@ class FieldRulesValidationDialog(QDialog):
         self.changes_made = []
         
         self.setWindowTitle("Field Rules Validation")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(760, 480)
         self.resize(1000, 700)
         
         self.setup_ui()
@@ -232,24 +234,34 @@ class FieldRulesValidationDialog(QDialog):
     def setup_ui(self):
         """Set up the user interface"""
         layout = QVBoxLayout()
-        
-        # Header with summary and instructions
-        header_group = QGroupBox("Validation Summary")
-        header_layout = QVBoxLayout()
-        
-        self.summary_label = QLabel()
-        self.summary_label.setWordWrap(True)
-        header_layout.addWidget(self.summary_label)
-        
-        # Add instructions
-        instructions_frame = QFrame()
-        instructions_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        instructions_frame.setStyleSheet("QFrame { background-color: #f0f8ff; border: 1px solid #d0d0d0; border-radius: 4px; padding: 8px; }")
-        instructions_layout = QVBoxLayout(instructions_frame)
-        
-        instructions_title = QLabel("<b>How to use this validation dialog:</b>")
-        instructions_layout.addWidget(instructions_title)
-        
+        layout.setSpacing(6)
+
+        # File bar - shows the file currently being validated and lets the
+        # user swap in any other .cif_rules file without leaving the dialog.
+        file_bar_layout = QHBoxLayout()
+        file_bar_layout.addWidget(QLabel("<b>Validating file:</b>"))
+        self.file_bar_label = QLabel()
+        self.file_bar_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        file_bar_layout.addWidget(self.file_bar_label, 1)
+        self.load_file_btn = QPushButton("📂 Open Another File…")
+        self.load_file_btn.setToolTip(
+            "Load any .cif_rules file to validate.\n"
+            "Opens in CIVET's field-rules directory by default."
+        )
+        self.load_file_btn.clicked.connect(self.load_another_file)
+        self.load_file_btn.setEnabled(self.validator is not None)
+        file_bar_layout.addWidget(self.load_file_btn)
+        layout.addLayout(file_bar_layout)
+
+        # --- Collapsible header sections -------------------------------------
+        # These carry useful but bulky context. Making them collapsible lets
+        # the user reclaim the vertical space for the Validation Issues list.
+
+        # "How to use" - helpful the first time, noise afterwards: collapsed
+        # by default.
+        self.instructions_section = CollapsibleSection(
+            "How to use this dialog", expanded=False
+        )
         instructions_text = QLabel(
             "1. Review the validation issues below, organized by category<br>"
             "2. Check the boxes next to the issues you want to fix automatically<br>"
@@ -258,38 +270,36 @@ class FieldRulesValidationDialog(QDialog):
             "5. Save or replace your field definition file with the fixes"
         )
         instructions_text.setWordWrap(True)
-        instructions_text.setStyleSheet("margin-left: 10px;")
-        instructions_layout.addWidget(instructions_text)
-        
-        header_layout.addWidget(instructions_frame)
-        
-        # Format selection for automatic fixes
-        format_selection_frame = QFrame()
-        format_selection_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        format_selection_frame.setStyleSheet("QFrame { background-color: #f8f8f8; border: 1px solid #d0d0d0; border-radius: 4px; padding: 8px; }")
-        format_layout = QHBoxLayout(format_selection_frame)
-        
-        format_label = QLabel("<b>Automatic fix format:</b>")
-        format_layout.addWidget(format_label)
-        
+        self.instructions_section.addWidget(instructions_text)
+        layout.addWidget(self.instructions_section)
+
+        # Validation summary stats - expanded by default, collapsible when the
+        # issues list needs the room.
+        self.summary_section = CollapsibleSection("Validation Summary", expanded=True)
+        self.summary_label = QLabel()
+        self.summary_label.setWordWrap(True)
+        self.summary_section.addWidget(self.summary_label)
+        layout.addWidget(self.summary_section)
+
+        # Automatic-fix format - a single row, always visible (key control).
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("<b>Automatic fix format:</b>"))
+
         self.format_button_group = QButtonGroup()
-        
-        self.legacy_radio = QRadioButton("Legacy format (e.g., _cell_length_a)")
+
+        self.legacy_radio = QRadioButton("Legacy (e.g. _cell_length_a)")
         self.legacy_radio.setToolTip("Convert mixed formats to legacy style with underscores")
         self.format_button_group.addButton(self.legacy_radio, 1)
         format_layout.addWidget(self.legacy_radio)
-        
-        self.modern_radio = QRadioButton("Modern format (e.g., _cell.length_a)")
+
+        self.modern_radio = QRadioButton("Modern (e.g. _cell.length_a)")
         self.modern_radio.setToolTip("Convert mixed formats to modern style with dots")
         self.format_button_group.addButton(self.modern_radio, 2)
         format_layout.addWidget(self.modern_radio)
-        
+
         format_layout.addStretch()
-        header_layout.addWidget(format_selection_frame)
-        
-        header_group.setLayout(header_layout)
-        layout.addWidget(header_group)
-        
+        layout.addLayout(format_layout)
+
         # Main content with tabs
         self.tab_widget = QTabWidget()
         
@@ -303,15 +313,13 @@ class FieldRulesValidationDialog(QDialog):
         self.setup_editor_tab(editor_tab)
         self.tab_widget.addTab(editor_tab, "✏️ Manual Editor")
         
-        layout.addWidget(self.tab_widget)
-        
-        # Action buttons
-        buttons_group = QGroupBox("Actions")
-        buttons_layout = QVBoxLayout()
-        
-        # Main fix button - more prominent
-        fix_layout = QHBoxLayout()
-        
+        # The tabs take all remaining vertical space; collapsing the header
+        # sections above flows straight into the Validation Issues list.
+        layout.addWidget(self.tab_widget, 1)
+
+        # Action buttons - compact, no group box, to preserve vertical space.
+        actions_row = QHBoxLayout()
+
         self.apply_fixes_btn = QPushButton("🔧 Apply Selected Fixes")
         self.apply_fixes_btn.setToolTip("Apply automatic fixes for all checked issues")
         self.apply_fixes_btn.clicked.connect(self.apply_selected_fixes)
@@ -320,7 +328,7 @@ class FieldRulesValidationDialog(QDialog):
                 background-color: #4CAF50;
                 color: white;
                 font-weight: bold;
-                padding: 8px 16px;
+                padding: 6px 14px;
                 border: none;
                 border-radius: 4px;
             }
@@ -332,78 +340,166 @@ class FieldRulesValidationDialog(QDialog):
                 color: #666666;
             }
         """)
-        fix_layout.addWidget(self.apply_fixes_btn)
-        
-        fix_layout.addStretch()
-        buttons_layout.addLayout(fix_layout)
-        
-        # File handling
-        file_layout = QHBoxLayout()
-        
+        actions_row.addWidget(self.apply_fixes_btn)
+
         self.preview_changes_btn = QPushButton("👁 Preview Changes")
         self.preview_changes_btn.setToolTip("Show what changes will be made to the file")
         self.preview_changes_btn.clicked.connect(self.preview_changes)
-        file_layout.addWidget(self.preview_changes_btn)
-        
-        file_layout.addStretch()
-        
+        actions_row.addWidget(self.preview_changes_btn)
+
+        actions_row.addStretch()
+
         self.save_as_btn = QPushButton("💾 Save As New File...")
         self.save_as_btn.setToolTip("Save the fixed field definitions to a new file")
         self.save_as_btn.clicked.connect(self.save_as_new_file)
         self.save_as_btn.setEnabled(False)
-        file_layout.addWidget(self.save_as_btn)
-        
+        actions_row.addWidget(self.save_as_btn)
+
         self.replace_file_btn = QPushButton("🔄 Replace Original File")
         self.replace_file_btn.setToolTip("Replace the original file with the fixed version (backup will be created)")
         self.replace_file_btn.clicked.connect(self.replace_original_file)
         self.replace_file_btn.setEnabled(False)
-        file_layout.addWidget(self.replace_file_btn)
-        
-        buttons_layout.addLayout(file_layout)
-        
-        # Close buttons
+        actions_row.addWidget(self.replace_file_btn)
+
+        layout.addLayout(actions_row)
+
+        # Close / skip row
         close_layout = QHBoxLayout()
         close_layout.addStretch()
-        
+
         self.skip_btn = QPushButton("Skip Validation")
         self.skip_btn.clicked.connect(self.reject)
         close_layout.addWidget(self.skip_btn)
-        
+
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.accept)
         close_layout.addWidget(self.close_btn)
-        
-        buttons_layout.addLayout(close_layout)
-        
-        buttons_group.setLayout(buttons_layout)
-        layout.addWidget(buttons_group)
-        
+
+        layout.addLayout(close_layout)
+
         # Connect radio button signals after UI is fully set up
         self.legacy_radio.toggled.connect(self.on_format_changed)
         self.modern_radio.toggled.connect(self.on_format_changed)
         
         # Set default format based on validation result or analyze rules content
-        if hasattr(self.validation_result, 'target_format_used'):
-            if self.validation_result.target_format_used == "legacy":
-                self.legacy_radio.setChecked(True)
-            else:
-                self.modern_radio.setChecked(True)
-        else:
-            # Analyze the provided rules content to choose a sensible default
-            try:
-                rules_format = CIFFormatAnalyzer.analyze_cif_format(self.field_rules_content)
-                if rules_format == "legacy":
+        self._apply_default_format_selection()
+
+        self._update_file_bar_label()
+
+        self.setLayout(layout)
+
+        # Set the "Close" button as the default button instead of "Apply Selected Fixes"
+        self.close_btn.setDefault(True)
+
+    def _apply_default_format_selection(self):
+        """Pick a sensible default for the automatic-fix format radios.
+
+        Signals are blocked so this does not trigger a redundant
+        re-validation; callers refresh the display themselves.
+        """
+        self.legacy_radio.blockSignals(True)
+        self.modern_radio.blockSignals(True)
+        try:
+            if hasattr(self.validation_result, 'target_format_used'):
+                if self.validation_result.target_format_used == "legacy":
                     self.legacy_radio.setChecked(True)
                 else:
                     self.modern_radio.setChecked(True)
+            else:
+                # Analyze the provided rules content to choose a sensible default
+                try:
+                    rules_format = CIFFormatAnalyzer.analyze_cif_format(self.field_rules_content)
+                    if rules_format == "legacy":
+                        self.legacy_radio.setChecked(True)
+                    else:
+                        self.modern_radio.setChecked(True)
+                except Exception:
+                    # Fallback if analysis fails
+                    self.modern_radio.setChecked(True)
+        finally:
+            self.legacy_radio.blockSignals(False)
+            self.modern_radio.blockSignals(False)
+
+    def _update_file_bar_label(self):
+        """Refresh the file-bar label to match the file under validation."""
+        if not hasattr(self, 'file_bar_label'):
+            return
+        if self.field_rules_path:
+            self.file_bar_label.setText(self.field_rules_path)
+            self.file_bar_label.setToolTip(self.field_rules_path)
+        else:
+            self.file_bar_label.setText("(unsaved field definition content)")
+            self.file_bar_label.setToolTip("")
+
+    def load_another_file(self):
+        """Let the user pick any .cif_rules file and validate it in place."""
+        if not self.validator:
+            QMessageBox.warning(
+                self, "Cannot Load File",
+                "No validator is available, so another file cannot be validated here."
+            )
+            return
+
+        # Start in the directory of the current file when we have one,
+        # otherwise fall back to CIVET's default user field-rules directory.
+        start_dir = ""
+        if self.field_rules_path and os.path.isfile(self.field_rules_path):
+            start_dir = os.path.dirname(self.field_rules_path)
+        if not start_dir:
+            try:
+                start_dir = get_user_field_rules_directory()
             except Exception:
-                # Fallback if analysis fails
-                self.modern_radio.setChecked(True)
-        
-        self.setLayout(layout)
-        
-        # Set the "Close" button as the default button instead of "Apply Selected Fixes"
-        self.close_btn.setDefault(True)
+                start_dir = ""
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Field Rules File to Validate", start_dir,
+            "Field Rules Files (*.cif_rules);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                new_content = f.read()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error Loading File",
+                f"Failed to read field rules file:\n{str(e)}"
+            )
+            return
+
+        try:
+            new_result = self.validator.validate_field_rules(new_content, cif_content=None)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Validation Error",
+                f"Failed to validate the selected file:\n{str(e)}"
+            )
+            return
+
+        # Swap in the newly loaded file and reset any pending fixes
+        self.field_rules_content = new_content
+        self.field_rules_path = file_path
+        self.validation_result = new_result
+        self.fixed_content = None
+        self.changes_made = []
+
+        # Reset the manual editor to the freshly loaded content
+        if hasattr(self, 'manual_editor'):
+            self.manual_editor.blockSignals(True)
+            self.manual_editor.setPlainText(new_content)
+            self.manual_editor.blockSignals(False)
+            self.editor_status_label.setText("Ready for manual editing")
+            self.editor_status_label.setStyleSheet("color: #666; font-style: italic;")
+
+        # Nothing has been fixed for this file yet
+        self.save_as_btn.setEnabled(False)
+        self.replace_file_btn.setEnabled(False)
+
+        self._apply_default_format_selection()
+        self._update_file_bar_label()
+        self.populate_data()
+        self.tab_widget.setCurrentIndex(0)
     
     def setup_issues_tab(self, tab_widget):
         """Setup the validation issues tab"""
@@ -467,12 +563,15 @@ class FieldRulesValidationDialog(QDialog):
         self.details_text.setReadOnly(True)
         self.details_text.setMaximumHeight(150)
         details_layout.addWidget(self.details_text)
-        
+
         details_group.setLayout(details_layout)
         splitter.addWidget(details_group)
-        
-        # Set splitter sizes
-        splitter.setSizes([400, 150])
+
+        # Favour the issues tree; the details pane can be dragged away entirely.
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setCollapsible(1, True)
+        splitter.setSizes([520, 120])
         layout.addWidget(splitter)
     
     def setup_editor_tab(self, tab_widget):

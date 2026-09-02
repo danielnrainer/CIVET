@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from utils.user_config import (
     load_settings, set_setting, DEFAULT_SETTINGS, get_settings_path
 )
-from gui.collapsible_box import CollapsibleBox
+from gui.collapsible_widgets import CollapsibleBox
 
 
 class EditorSettingsDialog(QDialog):

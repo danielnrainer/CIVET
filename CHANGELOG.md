@@ -45,8 +45,22 @@ theme rather than strict chronological commit order.
 - User-allowed (unofficial) prefixes and fields - added via **Add User Prefix...** for local prefixes
   not yet registered with IUCr, now stored in a `user_allowed_prefixes.cif` file in the CIVET config
   directory making them visible, editable, and portable alongside the rest of CIVET's configuration.
+- **Validate Field Rules dialog works on any `.cif_rules` file**: **Settings → Validate Field
+  Rules...** still defaults to the file currently selected in **CIF Field Definition Selection**
+  (built-in, user, or custom), but the dialog now has an **Open Another File...** button to load and
+  validate any other `.cif_rules` file without closing it. Its file picker opens in CIVET's user
+  field-rules directory by default, and a file bar at the top shows which file is under validation.
+  The dialog's header sections ("How to use this dialog", "Validation Summary") are now collapsible -
+  "How to use" starts collapsed - and the decorative group boxes were trimmed, so the Validation
+  Issues list gets the bulk of the vertical space; the issue-details pane can also be dragged away
+  entirely.
 
 ### Fixed
+- **Data Name Validation delete action left orphan values**: deleting a field from the Data Name
+  Validation dialog sometimes only removed the data-name but not the data value leaving a valueless 
+  data value behind and the CIF invalid. The whole data item (name *and* value) is now correctly removed.
+  Loop columns, which cannot be dropped without also rewriting every data row, are left untouched with 
+  a warning instead of being half-deleted.
 - **DDL1 dictionary parsing**: `_list_link_parent`/`_list_link_child` values are themselves data names
   (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with
   no value, so they never reached field metadata despite being parsed. Both tags are now correctly
