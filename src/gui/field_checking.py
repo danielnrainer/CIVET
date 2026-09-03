@@ -1993,6 +1993,7 @@ class FieldCheckingMixin:
                                 'value': value,
                                 'is_deprecated': self.dict_manager.is_field_deprecated(alias)
                             })
+                # Sort found duplicate entries by line number
                 detailed_conflicts[canonical]=sorted(detailed_conflicts[canonical],key=lambda k : k['line_num'])
 
             
