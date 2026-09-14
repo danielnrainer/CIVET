@@ -87,6 +87,49 @@ def test_guess_modern_equivalent_detects_misplaced_dot_name():
     assert suggested == "_audit_contact_author.address"
 
 
+def test_is_known_field_rejects_truncated_name_that_is_a_prefix_of_a_real_one():
+    """Regression: the dictionary-file fallback search used an unanchored
+    regex, so '_chemical_formula.moiet' (missing the trailing 'y') matched
+    as a substring of the real '_definition.id  '_chemical_formula.moiety''
+    line and was wrongly accepted as known."""
+    manager = _manager()
+
+    assert manager.is_known_field("_chemical_formula.moiety") is True
+    assert manager.is_known_field("_chemical_formula.moiet") is False
+
+
+def test_guess_modern_equivalent_catches_a_missing_letter_typo():
+    """_chemical_formula_moiet (missing the trailing 'y') is close enough to
+    the real _chemical_formula.moiety to flag as a typo, not just declared
+    unknown - the earlier fix only stopped it being "corrected" to the
+    equally-nonexistent _chemical_formula.moiet."""
+    manager = _manager()
+
+    assert manager.guess_modern_equivalent("_chemical_formula_moiet") == "_chemical_formula.moiety"
+
+
+def test_guess_modern_equivalent_catches_typos_in_attribute_or_category():
+    """The same typo tolerance should catch a wrong/missing/extra letter in
+    either the attribute (moety) or the category (chmical, formulas),
+    regardless of which notation (dot or underscore) the field otherwise
+    uses."""
+    manager = _manager()
+
+    assert manager.guess_modern_equivalent("_chemical_formula.moety") == "_chemical_formula.moiety"
+    assert manager.guess_modern_equivalent("_chmical_formula.moiety") == "_chemical_formula.moiety"
+    assert manager.guess_modern_equivalent("_chemical_formulas.moiety") == "_chemical_formula.moiety"
+
+
+def test_guess_modern_equivalent_does_not_guess_for_short_or_unrelated_names():
+    """Typo tolerance is deliberately not attempted on short names (too easy
+    to coincidentally collide with an unrelated real field), and genuinely
+    unrelated/custom field names must not get a fabricated suggestion."""
+    manager = _manager()
+
+    assert manager.guess_modern_equivalent("_my_custom_field") is None
+    assert manager.guess_modern_equivalent("_refln_frame_id") is None
+
+
 def test_find_malformed_fields_detects_misplaced_dot_name():
     manager = _manager()
     content = "data_t\n_audit_contact.author_address ;Street\n;\n"

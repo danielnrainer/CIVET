@@ -42,6 +42,7 @@ class FieldCategory(Enum):
     UNKNOWN = "unknown"                # Not recognized
     DEPRECATED = "deprecated"          # Deprecated field
     MALFORMED = "malformed"            # Malformed name matchable to a known field
+    MALFORMED_USER_ALLOWED = "malformed_user_allowed"  # Embedded prefix is user-allowed, but the name is still not valid in any notation
 
 
 class FieldAction(Enum):
@@ -87,6 +88,7 @@ class ValidationReport:
     unknown_fields: List[FieldValidationResult] = field(default_factory=list)
     deprecated_fields: List[FieldValidationResult] = field(default_factory=list)
     malformed_fields: List[FieldValidationResult] = field(default_factory=list)
+    malformed_user_allowed_fields: List[FieldValidationResult] = field(default_factory=list)
     total_fields: int = 0
 
 
@@ -127,39 +129,49 @@ class DataNameValidator:
         
         # Load persisted user preferences
         self._load_user_preferences()
-    
+
+    def _cache_and_return(self, cache_key: str, result: FieldValidationResult) -> FieldValidationResult:
+        """Cache *result* and return an independent copy of it.
+
+        Must be a copy, not the same object stored in the cache -
+        validate_cif_content mutates results in place for format-aware
+        (legacy/modern) suggestions, and doing that to the cached object
+        itself would corrupt every later lookup of this field name.
+        """
+        self._validation_cache[cache_key] = result
+        self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
+        return copy.copy(result)
+
     def validate_field(self, field_name: str, line_number: int = 0) -> FieldValidationResult:
         """
         Validate a single CIF field name.
-        
+
         Args:
             field_name: The CIF field name to validate (with leading underscore)
             line_number: Line number in CIF file (for reporting)
-            
+
         Returns:
             FieldValidationResult with category and details
         """
         # Normalize field name
         field_name_lower = field_name.lower().strip()
-        
+
         # Check cache first (use normalized name + line number as key since
         # line number may differ for same field name in different contexts)
         cache_key = field_name_lower
         if cache_key in self._validation_cache:
-            # Return cached result but update line number
-            cached = self._validation_cache[cache_key]
-            return FieldValidationResult(
-                field_name=field_name,
-                category=cached.category,
-                line_number=line_number,
-                description=cached.description,
-                modern_equivalent=cached.modern_equivalent,
-                successor_name=cached.successor_name,
-                successor_already_exists=cached.successor_already_exists,
-                checkcif_retain_required=cached.checkcif_retain_required,
-                prefix=cached.prefix
-            )
-        
+            # Return an independent copy with the field name/line number
+            # updated for this call. Must be a copy, not the cached object
+            # itself - validate_cif_content mutates results in place for
+            # format-aware (legacy/modern) suggestions, and doing that to
+            # the shared cached object would corrupt every later lookup
+            # (e.g. a legacy-format file's suggestion leaking into a later,
+            # unrelated modern-format file's validation of the same field).
+            result = copy.copy(self._validation_cache[cache_key])
+            result.field_name = field_name
+            result.line_number = line_number
+            return result
+
         # Extract prefix for later use
         prefix = get_prefix_from_field(field_name) or ""
         
@@ -172,9 +184,7 @@ class DataNameValidator:
                 description="Ignored for this session",
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Check if specific field is user allowed
         if field_name_lower in self._user_allowed_fields:
@@ -185,12 +195,16 @@ class DataNameValidator:
                 description="Field allowed by user",
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
-        # Check if prefix is user allowed
-        if prefix and prefix.lower() in {p.lower() for p in self._user_allowed_prefixes}:
+        # Check if prefix is user allowed. A genuine dictionary category
+        # (e.g. 'refln') must never be honoured here even if it's still
+        # sitting in a user's allowed-prefixes list from before this check
+        # existed - that would silently wave through any unrecognized field
+        # under that category (e.g. _refln_frame_id) as if it were a known
+        # local extension.
+        if (prefix and prefix.lower() in {p.lower() for p in self._user_allowed_prefixes}
+                and not self.dict_manager.is_known_category(prefix)):
             result = FieldValidationResult(
                 field_name=field_name,
                 category=FieldCategory.USER_ALLOWED,
@@ -198,9 +212,7 @@ class DataNameValidator:
                 description=f"Prefix '{prefix}' allowed by user",
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Check if field is deprecated (before checking if known, as deprecated fields are "known")
         if self.dict_manager.is_field_deprecated(field_name):
@@ -218,9 +230,7 @@ class DataNameValidator:
                 checkcif_retain_required=checkcif_retain_required,
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Check if field is known in dictionary
         if self.dict_manager.is_known_field(field_name):
@@ -231,9 +241,7 @@ class DataNameValidator:
                 description="Known in dictionary",
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Check if field is a malformed version of a known field.
         # Examples:
@@ -249,9 +257,7 @@ class DataNameValidator:
                 suggested_format=modern_equiv,
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Check if field uses a registered IUCr prefix
         if is_registered_prefix(field_name):
@@ -263,50 +269,65 @@ class DataNameValidator:
                 description=f"Uses registered prefix '{prefix}'" + (f": {prefix_info}" if prefix_info else ""),
                 prefix=prefix
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         # Field is unknown - check for embedded local prefix in category extension
         embedded_prefix, suggested_format = self._detect_embedded_local_prefix(field_name)
         
+        # A local prefix embedded mid-name (category_prefix_attribute) is
+        # never valid as written, in any notation - legacy requires the
+        # prefix first, and there's no dot to mark the category boundary
+        # for modern notation either. So even once the prefix itself is
+        # recognized (user-allowed or registered), the field still needs a
+        # mandatory rename rather than being filed away as already fine -
+        # otherwise it would keep silently passing forever.
+
         # Check if embedded local prefix is user allowed
         if embedded_prefix and embedded_prefix.lower() in {p.lower() for p in self._user_allowed_prefixes}:
             result = FieldValidationResult(
                 field_name=field_name,
-                category=FieldCategory.USER_ALLOWED,
+                category=FieldCategory.MALFORMED_USER_ALLOWED,
                 line_number=line_number,
-                description=f"Embedded prefix '{embedded_prefix}' allowed by user",
+                description=(
+                    f"Local prefix '{embedded_prefix}' is allowed, but as written this name isn't "
+                    f"valid in any notation - should be renamed to '{suggested_format}'"
+                ),
                 prefix=prefix,
                 embedded_prefix=embedded_prefix,
                 suggested_format=suggested_format or ""
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
-        
+            return self._cache_and_return(cache_key, result)
+
         # Check if embedded local prefix is a registered IUCr prefix
         if embedded_prefix and embedded_prefix.lower() in get_registered_prefixes_lower():
-            from utils.registered_prefixes import get_prefix_info as get_info
-            prefix_info = get_info(embedded_prefix) or ""
             result = FieldValidationResult(
                 field_name=field_name,
-                category=FieldCategory.REGISTERED_LOCAL,
+                category=FieldCategory.MALFORMED,
                 line_number=line_number,
-                description=f"Uses registered embedded prefix '{embedded_prefix}'" + (f": {prefix_info}" if prefix_info else ""),
+                description=(
+                    f"Uses registered prefix '{embedded_prefix}', but as written this name isn't "
+                    f"valid in any notation - should be renamed to '{suggested_format}'"
+                ),
                 prefix=prefix,
                 embedded_prefix=embedded_prefix,
                 suggested_format=suggested_format or ""
             )
-            self._validation_cache[cache_key] = result
-            self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-            return result
+            return self._cache_and_return(cache_key, result)
         
         if embedded_prefix:
             # This appears to be a category extension with embedded local prefix
             description = (
                 f"Unknown field with embedded local prefix '{embedded_prefix}'. "
                 # f"Consider using proper format: {suggested_format}"
+            )
+        elif prefix and self.dict_manager.is_known_category(prefix):
+            # e.g. _refln_frame_id: 'refln' is a real category, but
+            # 'frame_id' isn't one of its recognized attributes - this is
+            # not a local-prefix situation, just an attribute name the
+            # loaded dictionaries don't define.
+            description = (
+                f"'{prefix}' is a known category, but the rest of this name "
+                f"isn't a recognized attribute of it - not found in loaded dictionaries"
             )
         else:
             description = "Not found in loaded dictionaries"
@@ -320,9 +341,7 @@ class DataNameValidator:
             suggested_format=suggested_format or "",
             embedded_prefix=embedded_prefix or ""
         )
-        self._validation_cache[cache_key] = result
-        self._trim_cache(self._validation_cache, self.MAX_FIELD_CACHE_ENTRIES)
-        return result
+        return self._cache_and_return(cache_key, result)
     
     def validate_cif_content(self, content: str) -> ValidationReport:
         """
@@ -438,12 +457,36 @@ class DataNameValidator:
 
                 report.deprecated_fields.append(result)
             elif result.category == FieldCategory.MALFORMED:
-                if result.suggested_format and prefer_legacy:
+                if result.embedded_prefix:
+                    # A confirmed-but-mid-name local prefix (see
+                    # validate_field) - the "correct" form depends on
+                    # notation the same way an embedded-prefix suggestion
+                    # always has, not on a dictionary-defined legacy alias.
+                    self._apply_legacy_preference_to_embedded_prefix(result, prefer_legacy)
+                    result.description = (
+                        f"Uses registered prefix '{result.embedded_prefix}', but as written "
+                        f"this name isn't valid in any notation - should be renamed to "
+                        f"'{result.suggested_format}'"
+                    )
+                elif result.suggested_format and prefer_legacy:
                     legacy_suggestion = self.dict_manager.map_to_legacy(result.suggested_format)
                     if legacy_suggestion:
                         result.suggested_format = legacy_suggestion
                         result.description = f"Should be {legacy_suggestion}"
                 report.malformed_fields.append(result)
+            elif result.category == FieldCategory.MALFORMED_USER_ALLOWED:
+                # Same reasoning as the MALFORMED/embedded_prefix case above,
+                # but for a prefix the user allowed rather than one that's
+                # IUCr-registered - kept in its own category (see
+                # CATEGORY_CONFIG in the dialog) since it's a personal,
+                # self-declared exception rather than a globally vetted one.
+                self._apply_legacy_preference_to_embedded_prefix(result, prefer_legacy)
+                result.description = (
+                    f"Local prefix '{result.embedded_prefix}' is allowed, but as written this "
+                    f"name isn't valid in any notation - should be renamed to "
+                    f"'{result.suggested_format}'"
+                )
+                report.malformed_user_allowed_fields.append(result)
         
         self._report_cache[report_cache_key] = copy.deepcopy(report)
         self._trim_cache(self._report_cache, self.MAX_REPORT_CACHE_ENTRIES)
@@ -513,123 +556,166 @@ class DataNameValidator:
     
     def _detect_embedded_local_prefix(self, field_name: str) -> tuple:
         """
-        Detect if an unknown field has an embedded local prefix in a category extension.
-        
-        Per IUCr Volume G Ch3.1, when adding to a pre-existing category with a local prefix,
-        the prefix should come after the dot (e.g., _chemical_oxdiff.formula).
-        
-        This method detects patterns like _chemical_oxdiff_formula where:
-        - _chemical_ is a known dictionary category
-        - oxdiff is an embedded local prefix
+        Detect if an unknown field has a genuine embedded local prefix in a
+        category extension.
+
+        Per IUCr Volume G Ch3.1, when adding to a pre-existing category with a
+        local prefix, the prefix should come after the dot
+        (e.g., _chemical_oxdiff_formula should be written _chemical.oxdiff_formula).
+
+        This detects patterns like _chemical_oxdiff_formula where:
+        - _chemical_ is a genuine category in the loaded dictionaries
+          (checked dynamically, not against a hardcoded list)
+        - oxdiff is an embedded local prefix - confirmed against the
+          registered-prefix registry or the user's own allowed-prefix list,
+          so an ordinary (if unrecognized) multi-word attribute name like
+          "frame_id" in "_refln_frame_id" isn't mistaken for one
         - formula is the attribute name
-        
+
         Args:
             field_name: The CIF field name to analyze
-            
+
         Returns:
             Tuple of (embedded_prefix, suggested_format) or (None, None) if not detected
         """
-        from utils.registered_prefixes import REGISTERED_CIF_PREFIXES_LOWER
-        
         # Only check underscore-only format (no dot already present)
         if '.' in field_name:
             return (None, None)
-        
+
         # Remove leading underscore and split by underscore
         name_without_underscore = field_name[1:] if field_name.startswith('_') else field_name
         parts = name_without_underscore.split('_')
-        
+
         if len(parts) < 3:
             return (None, None)
-        
-        # Try to find a known category at the start, followed by an embedded prefix
-        # We check progressively: _cell_, _chemical_, _diffrn_, _exptl_, etc.
-        for i in range(1, len(parts) - 1):
-            # Build potential category (first i parts)
-            potential_category = '_' + '_'.join(parts[:i]) + '_'
-            
-            # Check if this looks like a known dictionary category
-            # We use is_known_field to check if any field with this category exists
-            test_field = '_' + '_'.join(parts[:i]) + '_length_a'  # Common test pattern
-            category_known = self._is_category_known(potential_category)
-            
-            if category_known:
-                # The next part could be an embedded local prefix
-                potential_embedded = parts[i].lower()
-                
-                # Check if it looks like a registered prefix or could be a local prefix
-                # (anything that's not a known attribute of this category)
-                remaining_parts = parts[i:]  # e.g., ['oxdiff', 'formula']
-                
-                if len(remaining_parts) >= 2:
-                    embedded_prefix = remaining_parts[0]
-                    attribute_parts = remaining_parts[1:]
-                    
-                    # Verify this isn't actually a valid field (the embedded part + rest)
-                    full_check = '_' + '_'.join(parts[:i]) + '_' + '_'.join(remaining_parts)
-                    if not self.dict_manager.is_known_field(full_check):
-                        # Check if removing the embedded prefix would yield a known field
-                        without_embedded = '_' + '_'.join(parts[:i]) + '_' + '_'.join(attribute_parts)
-                        
-                        # Build the suggested corrected format
-                        # Per IUCr Volume G Ch3.1: local prefix goes after the dot
-                        # _chemical_oxdiff_formula -> _chemical.oxdiff_formula
-                        category = '_'.join(parts[:i])
-                        local_attribute = '_'.join(remaining_parts)  # oxdiff_formula
-                        suggested = f"_{category}.{local_attribute}"
-                        
-                        return (embedded_prefix, suggested)
-        
-        return (None, None)
-    
-    def _is_category_known(self, category_prefix: str) -> bool:
-        """
-        Check if a category prefix corresponds to known dictionary fields.
-        
-        Args:
-            category_prefix: Category prefix like '_chemical_' or '_diffrn_'
-            
-        Returns:
-            True if fields with this category exist in loaded dictionaries
-        """
-        # Common known categories in CIF dictionaries
-        known_categories = {
-            '_atom_', '_atom_site_', '_atom_sites_', '_atom_type_',
-            '_audit_', '_cell_', '_chemical_', '_chemical_formula_',
-            '_citation_', '_computing_', '_database_', '_diffrn_',
-            '_diffrn_attenuator_', '_diffrn_detector_', '_diffrn_measurement_',
-            '_diffrn_orient_', '_diffrn_radiation_', '_diffrn_refln_',
-            '_diffrn_reflns_', '_diffrn_source_', '_diffrn_standards_',
-            '_exptl_', '_exptl_absorpt_', '_exptl_crystal_',
-            '_geom_', '_geom_angle_', '_geom_bond_', '_geom_contact_',
-            '_geom_hbond_', '_geom_torsion_',
-            '_journal_', '_publ_', '_publ_author_',
-            '_refine_', '_refine_diff_', '_refine_ls_',
-            '_refln_', '_reflns_', '_reflns_shell_',
-            '_space_group_', '_space_group_symop_',
-            '_struct_', '_symmetry_', '_twin_',
-        }
-        
-        category_lower = category_prefix.lower()
-        if category_lower in known_categories:
-            return True
-        
-        # Also try to check against actual dictionary if available
-        # This is a simplified check - a full implementation would
-        # iterate through all known fields
-        return False
 
-    def add_allowed_prefix(self, prefix: str) -> None:
+        registered_prefixes_lower = get_registered_prefixes_lower()
+        user_allowed_lower = {p.lower() for p in self._user_allowed_prefixes}
+
+        # Prefer the longest genuine category match, so a deeper real
+        # category (e.g. "diffrn_radiation") isn't mistaken for a shorter
+        # one ("diffrn") plus an embedded local prefix ("radiation").
+        for i in range(len(parts) - 1, 0, -1):
+            potential_category = '_'.join(parts[:i])
+
+            if not self.dict_manager.is_known_category(potential_category):
+                continue
+
+            remaining_parts = parts[i:]  # e.g., ['oxdiff', 'formula']
+            if len(remaining_parts) < 2:
+                continue
+
+            embedded_prefix = remaining_parts[0]
+
+            # Only treat the next segment as an embedded local prefix when
+            # there's positive evidence it actually is one - i.e. it's a
+            # registered IUCr prefix or one the user has already allowed.
+            # Without that, it's most likely just part of an unrecognized
+            # multi-word attribute name, not a prefix.
+            if (embedded_prefix.lower() not in registered_prefixes_lower and
+                    embedded_prefix.lower() not in user_allowed_lower):
+                continue
+
+            # Build the suggested corrected format
+            # Per IUCr Volume G Ch3.1: local prefix goes after the dot
+            # _chemical_oxdiff_formula -> _chemical.oxdiff_formula
+            local_attribute = '_'.join(remaining_parts)  # oxdiff_formula
+            suggested = f"_{potential_category}.{local_attribute}"
+
+            return (embedded_prefix, suggested)
+
+        return (None, None)
+
+    @staticmethod
+    def _legacy_format_for_embedded_prefix(embedded_prefix: str, modern_suggested_format: str) -> str:
+        """
+        Build the legacy-valid reordering of an embedded-local-prefix suggestion.
+
+        A local prefix can only legitimately appear as the very first segment
+        in underscore-only (legacy) CIF notation - _civet_exptl_term is a
+        valid legacy tag, _exptl_civet_term is not. The modern dot-notation
+        form (_exptl.civet_term) has no such restriction, since the dot marks
+        the category boundary explicitly rather than relying on position.
+
+        Args:
+            embedded_prefix: The detected local prefix (e.g. 'civet')
+            modern_suggested_format: The dotted suggestion from
+                _detect_embedded_local_prefix (e.g. '_exptl.civet_term')
+
+        Returns:
+            The legacy-valid reordering (e.g. '_civet_exptl_term'), or "" if
+            it can't be derived from the given inputs.
+        """
+        if not modern_suggested_format or '.' not in modern_suggested_format:
+            return ""
+
+        category, attribute = modern_suggested_format.lstrip('_').split('.', 1)
+        prefix_marker = f"{embedded_prefix}_"
+        if attribute.lower().startswith(prefix_marker.lower()):
+            remaining_attribute = attribute[len(prefix_marker):]
+        elif attribute.lower() == embedded_prefix.lower():
+            remaining_attribute = ""
+        else:
+            return ""
+
+        segments = [embedded_prefix, category]
+        if remaining_attribute:
+            segments.append(remaining_attribute)
+        return "_" + "_".join(segments)
+
+    def _apply_legacy_preference_to_embedded_prefix(
+        self, result: FieldValidationResult, prefer_legacy: bool
+    ) -> None:
+        """
+        Swap an embedded-local-prefix result's suggested_format to the
+        legacy-valid reordering when the file being validated is itself in
+        legacy format, since the modern dotted form isn't a legacy tag at all.
+        """
+        if not (result.embedded_prefix and prefer_legacy):
+            return
+        legacy_format = self._legacy_format_for_embedded_prefix(
+            result.embedded_prefix, result.suggested_format
+        )
+        if legacy_format:
+            result.suggested_format = legacy_format
+
+    def is_known_category(self, category: str) -> bool:
+        """
+        Check if `category` is a genuine CIF category in the loaded
+        dictionaries (e.g. 'refln', 'cell') rather than a local prefix.
+
+        Args:
+            category: Candidate category/prefix name, with or without
+                leading/trailing underscores.
+
+        Returns:
+            True if this is a real dictionary category.
+        """
+        return self.dict_manager.is_known_category(category)
+
+    def add_allowed_prefix(self, prefix: str) -> bool:
         """
         Add a prefix to the user-allowed list.
-        
+
+        Refuses to add a prefix that's actually a genuine dictionary
+        category (e.g. 'refln') - allowing one would silently accept any
+        unrecognized field under that category as a known local extension.
+
         Args:
             prefix: The prefix to allow (without underscore)
+
+        Returns:
+            True if the prefix was added, False if it was refused because
+            it's a real dictionary category.
         """
-        if prefix:
-            self._user_allowed_prefixes.add(prefix.lower())
-            self._save_user_preferences()
-            self.clear_cache()
+        if not prefix:
+            return False
+        if self.is_known_category(prefix):
+            return False
+        self._user_allowed_prefixes.add(prefix.lower())
+        self._save_user_preferences()
+        self.clear_cache()
+        return True
     
     def remove_allowed_prefix(self, prefix: str) -> None:
         """

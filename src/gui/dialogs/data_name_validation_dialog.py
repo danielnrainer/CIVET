@@ -255,8 +255,14 @@ class DataNameValidationDialog(QDialog):
     CATEGORY_CONFIG = {
         FieldCategory.MALFORMED: {
             'icon': '🔧',
-            'color': '#e74c3c',  # Red
+            'color': '#c0392b',  # Darker red
             'label': 'Malformed Fields',
+            'expanded': True,
+        },
+        FieldCategory.MALFORMED_USER_ALLOWED: {
+            'icon': '🔧',
+            'color': '#e74c3c',  # Red - still a mandatory rename, distinct from MALFORMED
+            'label': 'Malformed User Allowed Fields',
             'expanded': True,
         },
         FieldCategory.UNKNOWN: {
@@ -279,7 +285,7 @@ class DataNameValidationDialog(QDialog):
         },
         FieldCategory.USER_ALLOWED: {
             'icon': '👤',
-            'color': '#27ae60',  # Green
+            'color': '#f39c12',  # Amber - a personal exception, not a verified-valid field
             'label': 'User Allowed Fields',
             'expanded': False,
         },
@@ -385,6 +391,7 @@ class DataNameValidationDialog(QDialog):
             (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
             (FieldCategory.USER_ALLOWED, len(self.validation_report.user_allowed_fields)),
             (FieldCategory.MALFORMED, len(self.validation_report.malformed_fields)),
+            (FieldCategory.MALFORMED_USER_ALLOWED, len(self.validation_report.malformed_user_allowed_fields)),
             (FieldCategory.UNKNOWN, len(self.validation_report.unknown_fields)),
             (FieldCategory.DEPRECATED, len(self.validation_report.deprecated_fields)),
         ]
@@ -435,6 +442,11 @@ class DataNameValidationDialog(QDialog):
                 f"🔧 Malformed ({len(self.validation_report.malformed_fields)})",
                 FieldCategory.MALFORMED
             )
+        if self.validation_report.malformed_user_allowed_fields:
+            self.filter_combo.addItem(
+                f"🔧 Malformed User Allowed ({len(self.validation_report.malformed_user_allowed_fields)})",
+                FieldCategory.MALFORMED_USER_ALLOWED
+            )
         if self.validation_report.unknown_fields:
             self.filter_combo.addItem(
                 f"⚠ Unknown ({len(self.validation_report.unknown_fields)})",
@@ -445,15 +457,15 @@ class DataNameValidationDialog(QDialog):
                 f"⚡ Deprecated ({len(self.validation_report.deprecated_fields)})",
                 FieldCategory.DEPRECATED
             )
-        if self.validation_report.registered_local_fields:
-            self.filter_combo.addItem(
-                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
-                FieldCategory.REGISTERED_LOCAL
-            )
         if self.validation_report.user_allowed_fields:
             self.filter_combo.addItem(
                 f"👤 User Allowed ({len(self.validation_report.user_allowed_fields)})",
                 FieldCategory.USER_ALLOWED
+            )
+        if self.validation_report.registered_local_fields:
+            self.filter_combo.addItem(
+                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
+                FieldCategory.REGISTERED_LOCAL
             )
         if self.validation_report.valid_fields:
             self.filter_combo.addItem(
@@ -547,13 +559,17 @@ class DataNameValidationDialog(QDialog):
         self._field_items.clear()
         self._category_items.clear()
         
-        # Order categories: malformed, unknown and deprecated first (expanded), then others
+        # Order categories: malformed, unknown and deprecated first (expanded,
+        # most severe), then user-allowed (a personal exception - still
+        # worth a second look, so ranked above the fully-vetted categories),
+        # then registered-local and valid.
         category_order = [
             (FieldCategory.MALFORMED, self.validation_report.malformed_fields),
             (FieldCategory.UNKNOWN, self.validation_report.unknown_fields),
             (FieldCategory.DEPRECATED, self.validation_report.deprecated_fields),
-            (FieldCategory.REGISTERED_LOCAL, self.validation_report.registered_local_fields),
+            (FieldCategory.MALFORMED_USER_ALLOWED, self.validation_report.malformed_user_allowed_fields),
             (FieldCategory.USER_ALLOWED, self.validation_report.user_allowed_fields),
+            (FieldCategory.REGISTERED_LOCAL, self.validation_report.registered_local_fields),
             (FieldCategory.VALID, self.validation_report.valid_fields),
         ]
         
@@ -663,46 +679,46 @@ class DataNameValidationDialog(QDialog):
         prefix = field_result.prefix
         # Use embedded_prefix if available (for category extensions like _chemical_oxdiff_formula)
         effective_prefix = field_result.embedded_prefix if field_result.embedded_prefix else prefix
-        
+        # 'prefix' colliding with a genuine dictionary category (e.g.
+        # 'refln' in _refln_frame_id) means this isn't a local-prefix
+        # situation at all - the field is just an unrecognized attribute.
+        prefix_is_real_category = bool(effective_prefix) and self.validator.is_known_category(effective_prefix)
+
         if category == FieldCategory.UNKNOWN:
             # Correct format button (if format suggestion is available for embedded prefixes)
             if field_result.suggested_format:
                 correct_btn = QPushButton("✓ Fix")
                 correct_btn.setMaximumWidth(BUTTON_WIDTH)
-                correct_btn.setToolTip(
-                    f"Correct field name from '{field_name}'\n"
-                    f"to '{field_result.suggested_format}'\n"
-                    f"(proper dot notation)"
-                )
+                correct_btn.setToolTip(self._correct_format_tooltip(field_name, field_result.suggested_format))
                 correct_btn.setStyleSheet("color: #27ae60;")  # Green
                 correct_btn.clicked.connect(
-                    lambda checked, fn=field_name, sf=field_result.suggested_format: 
+                    lambda checked, fn=field_name, sf=field_result.suggested_format:
                         self._on_correct_format(fn, sf)
                 )
                 layout.addWidget(correct_btn)
-            
-            # Allow prefix button (if prefix exists - use embedded_prefix if available)
-            if effective_prefix:
-                allow_prefix_btn = QPushButton("+ Prefix")
-                allow_prefix_btn.setMaximumWidth(BUTTON_WIDTH)
-                allow_prefix_btn.setToolTip(
-                    f"Add prefix '_{effective_prefix}_' to\n"
-                    f"your allowed prefixes list"
-                )
-                allow_prefix_btn.clicked.connect(
-                    lambda checked, fn=field_name, p=effective_prefix: self._on_allow_prefix(fn, p)
-                )
-                layout.addWidget(allow_prefix_btn)
-            
-            # Allow field button
+
+            self._add_allow_prefix_button(layout, field_name, effective_prefix, prefix_is_real_category, BUTTON_WIDTH)
+
+            # Allow field button - warn first if this field name sits under a
+            # known category but isn't one of its recognized attributes
+            # (likely a typo, or at least a non-standard extension),
+            # since exempting it is easy to click without noticing that.
             allow_field_btn = QPushButton("+ Field")
             allow_field_btn.setMaximumWidth(BUTTON_WIDTH)
-            allow_field_btn.setToolTip(
-                f"Add '{field_name}' to your\n"
-                f"allowed fields list"
-            )
+            if prefix_is_real_category:
+                allow_field_btn.setToolTip(
+                    f"'{field_name}' is not a recognized attribute of the\n"
+                    f"'{effective_prefix}' category - add it to your allowed\n"
+                    f"fields list anyway? (you'll be asked to confirm)"
+                )
+            else:
+                allow_field_btn.setToolTip(
+                    f"Add '{field_name}' to your\n"
+                    f"allowed fields list"
+                )
             allow_field_btn.clicked.connect(
-                lambda checked, fn=field_name: self._on_allow_field(fn)
+                lambda checked, fn=field_name, warn=prefix_is_real_category, p=effective_prefix:
+                    self._on_allow_field(fn, warn, p)
             )
             layout.addWidget(allow_field_btn)
             
@@ -739,16 +755,19 @@ class DataNameValidationDialog(QDialog):
                 fix_btn = QPushButton("✓ Fix")
                 fix_btn.setMaximumWidth(BUTTON_WIDTH)
                 fix_btn.setStyleSheet("color: #27ae60;")  # Green
-                fix_btn.setToolTip(
-                    f"Rename '{field_name}'\n"
-                    f"to '{suggested}'"
-                )
+                if field_result.embedded_prefix:
+                    fix_btn.setToolTip(self._correct_format_tooltip(field_name, suggested))
+                else:
+                    fix_btn.setToolTip(
+                        f"Rename '{field_name}'\n"
+                        f"to '{suggested}'"
+                    )
                 fix_btn.clicked.connect(
                     lambda checked, fn=field_name, sf=suggested:
                         self._on_fix_malformed(fn, sf)
                 )
                 layout.addWidget(fix_btn)
-            
+
             # Skip button
             skip_btn = QPushButton("⊘ Skip")
             skip_btn.setMaximumWidth(BUTTON_WIDTH)
@@ -854,19 +873,42 @@ class DataNameValidationDialog(QDialog):
             layout.addWidget(skip_btn)
         
         elif category == FieldCategory.REGISTERED_LOCAL:
-            # Info only - no actions needed but could allow adding to user allowed
-            if prefix:
-                allow_prefix_btn = QPushButton("+ Prefix")
-                allow_prefix_btn.setMaximumWidth(BUTTON_WIDTH)
-                allow_prefix_btn.setToolTip(
-                    f"Add prefix '_{prefix}_' to your\n"
-                    f"personal allowed prefixes list"
+            # Info only - the field already uses a registered prefix in
+            # valid notation (a prefix embedded mid-name is never valid, so
+            # that case is routed to MALFORMED instead - see validate_field).
+            self._add_allow_prefix_button(layout, field_name, effective_prefix, prefix_is_real_category, BUTTON_WIDTH)
+
+        # USER_ALLOWED: info only, no actions needed - same reasoning as
+        # REGISTERED_LOCAL above.
+
+        elif category == FieldCategory.MALFORMED_USER_ALLOWED:
+            # A local prefix the user already allowed, but embedded
+            # mid-name - never valid notation, so (unlike plain USER_ALLOWED)
+            # this needs a mandatory rename. The prefix itself is already
+            # recognized, so there's nothing to "+ Prefix" here.
+            suggested = field_result.suggested_format
+            if suggested:
+                fix_btn = QPushButton("✓ Fix")
+                fix_btn.setMaximumWidth(BUTTON_WIDTH)
+                fix_btn.setStyleSheet("color: #27ae60;")  # Green
+                fix_btn.setToolTip(self._correct_format_tooltip(field_name, suggested))
+                fix_btn.clicked.connect(
+                    lambda checked, fn=field_name, sf=suggested:
+                        self._on_fix_malformed(fn, sf)
                 )
-                allow_prefix_btn.clicked.connect(
-                    lambda checked, fn=field_name, p=prefix: self._on_allow_prefix(fn, p)
-                )
-                layout.addWidget(allow_prefix_btn)
-        
+                layout.addWidget(fix_btn)
+
+            skip_btn = QPushButton("⊘ Skip")
+            skip_btn.setMaximumWidth(BUTTON_WIDTH)
+            skip_btn.setToolTip(
+                f"Ignore '{field_name}' for\n"
+                f"this session only"
+            )
+            skip_btn.clicked.connect(
+                lambda checked, fn=field_name: self._on_ignore_field(fn)
+            )
+            layout.addWidget(skip_btn)
+
         return container
     
     def _on_allow_prefix(self, field_name: str, prefix: str) -> None:
@@ -885,16 +927,42 @@ class DataNameValidationDialog(QDialog):
         self._update_apply_button()
         self._update_prefixes_label()
     
-    def _on_allow_field(self, field_name: str) -> None:
+    def _on_allow_field(
+        self, field_name: str, warn_unrecognized_attribute: bool = False, category_prefix: str = ""
+    ) -> None:
         """
         Handle allow field button click.
-        
+
         Args:
             field_name: The field to allow
+            warn_unrecognized_attribute: True when field_name's leading
+                segment is a genuine dictionary category it isn't a
+                recognized attribute of (e.g. _refln_frame_id under
+                'refln') - prompts for confirmation first, since this data
+                name doesn't correspond to anything in the CIF standard
+                (though allowing it won't make the file invalid).
+            category_prefix: The colliding category, for the confirmation text.
         """
+        if warn_unrecognized_attribute:
+            reply = QMessageBox.question(
+                self,
+                "Not a Recognized CIF Data Name",
+                f"'{field_name}' is not a defined CIF data name - "
+                f"'{category_prefix}' is a real dictionary category, but the "
+                f"rest of the name isn't one of its recognized attributes.\n\n"
+                f"This won't make the file invalid, but it usually means "
+                f"either a typo or a non-standard field with no home in the "
+                f"CIF standard.\n\n"
+                f"Add it to your personal allowed-fields list anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         self._fields_to_allow.add(field_name.lower())
         self._pending_actions[field_name.lower()] = FieldAction.ALLOW_FIELD
-        
+
         # Update UI to show pending action
         self._mark_field_as_handled(field_name, "Will allow this field")
         self._update_apply_button()
@@ -975,6 +1043,66 @@ class DataNameValidationDialog(QDialog):
         self._mark_field_as_handled(field_name, "Will ignore for this session")
         self._update_apply_button()
     
+    @staticmethod
+    def _correct_format_tooltip(field_name: str, suggested_format: str) -> str:
+        """
+        Build the tooltip for a "Fix" button offered on an embedded-local-
+        prefix field. The suggestion is either the modern dotted form
+        (_category.prefix_attribute) or, for a legacy-format file, the
+        legacy-valid reordering (_prefix_category_attribute) - a local
+        prefix can only legitimately be the first segment in underscore-only
+        notation, so the two forms need different explanations.
+        """
+        note = "proper dot notation" if '.' in suggested_format else "prefix moved to the start, per legacy notation rules"
+        return (
+            f"Correct field name from '{field_name}'\n"
+            f"to '{suggested_format}'\n"
+            f"({note})"
+        )
+
+    def _add_allow_prefix_button(
+        self,
+        layout: QHBoxLayout,
+        field_name: str,
+        effective_prefix: str,
+        prefix_is_real_category: bool,
+        button_width: int
+    ) -> None:
+        """
+        Add a "+ Prefix" button for a field with a candidate local prefix.
+
+        Kept visible but disabled (with an explanatory tooltip) rather than
+        hidden outright when the candidate is actually a genuine dictionary
+        category (e.g. 'refln') - mirrors how a deprecated field checkCIF
+        still requires (e.g. _cell_measurement_temperature) shows a disabled
+        "Replace" button rather than none at all, so it's clear an action
+        was considered and specifically why it isn't available.
+        """
+        if not effective_prefix:
+            return
+
+        allow_prefix_btn = QPushButton("+ Prefix")
+        allow_prefix_btn.setMaximumWidth(button_width)
+
+        if prefix_is_real_category:
+            allow_prefix_btn.setEnabled(False)
+            allow_prefix_btn.setStyleSheet("color: #7f8c8d;")  # Grey
+            allow_prefix_btn.setToolTip(
+                f"'{effective_prefix}' is already a category defined in the\n"
+                f"loaded CIF dictionaries, not a local prefix - it can't be\n"
+                f"added to your allowed-prefixes list."
+            )
+        else:
+            allow_prefix_btn.setToolTip(
+                f"Add prefix '_{effective_prefix}_' to\n"
+                f"your allowed prefixes list"
+            )
+            allow_prefix_btn.clicked.connect(
+                lambda checked, fn=field_name, p=effective_prefix: self._on_allow_prefix(fn, p)
+            )
+
+        layout.addWidget(allow_prefix_btn)
+
     def _on_correct_format(self, field_name: str, suggested_format: str) -> None:
         """
         Mark field for format correction (fix embedded local prefix notation).
@@ -1187,6 +1315,7 @@ class DataNameValidationDialog(QDialog):
         
         all_fields = (
             self.validation_report.malformed_fields +
+            self.validation_report.malformed_user_allowed_fields +
             self.validation_report.unknown_fields +
             self.validation_report.deprecated_fields +
             self.validation_report.registered_local_fields +
@@ -1376,6 +1505,7 @@ class DataNameValidationDialog(QDialog):
             (FieldCategory.REGISTERED_LOCAL, len(self.validation_report.registered_local_fields)),
             (FieldCategory.USER_ALLOWED, len(self.validation_report.user_allowed_fields)),
             (FieldCategory.MALFORMED, len(self.validation_report.malformed_fields)),
+            (FieldCategory.MALFORMED_USER_ALLOWED, len(self.validation_report.malformed_user_allowed_fields)),
             (FieldCategory.UNKNOWN, len(self.validation_report.unknown_fields)),
             (FieldCategory.DEPRECATED, len(self.validation_report.deprecated_fields)),
         ]
@@ -1410,6 +1540,11 @@ class DataNameValidationDialog(QDialog):
                 f"🔧 Malformed ({len(self.validation_report.malformed_fields)})",
                 FieldCategory.MALFORMED
             )
+        if self.validation_report.malformed_user_allowed_fields:
+            self.filter_combo.addItem(
+                f"🔧 Malformed User Allowed ({len(self.validation_report.malformed_user_allowed_fields)})",
+                FieldCategory.MALFORMED_USER_ALLOWED
+            )
         if self.validation_report.unknown_fields:
             self.filter_combo.addItem(
                 f"⚠ Unknown ({len(self.validation_report.unknown_fields)})",
@@ -1420,15 +1555,15 @@ class DataNameValidationDialog(QDialog):
                 f"⚡ Deprecated ({len(self.validation_report.deprecated_fields)})",
                 FieldCategory.DEPRECATED
             )
-        if self.validation_report.registered_local_fields:
-            self.filter_combo.addItem(
-                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
-                FieldCategory.REGISTERED_LOCAL
-            )
         if self.validation_report.user_allowed_fields:
             self.filter_combo.addItem(
                 f"👤 User Allowed ({len(self.validation_report.user_allowed_fields)})",
                 FieldCategory.USER_ALLOWED
+            )
+        if self.validation_report.registered_local_fields:
+            self.filter_combo.addItem(
+                f"ℹ️ Registered Local ({len(self.validation_report.registered_local_fields)})",
+                FieldCategory.REGISTERED_LOCAL
             )
         if self.validation_report.valid_fields:
             self.filter_combo.addItem(

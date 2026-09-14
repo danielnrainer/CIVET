@@ -34,6 +34,11 @@ theme rather than strict chronological commit order.
 - **DDL1 parent/child key checking**: `CIFDataValidator.check_parent_child_links()` verifies that
   values in a field declared as a DDL1 child key (`_list_link_parent`) or referenced as a parent key
   (`_list_link_child`) actually match a value in the linked field.
+- **Local-prefix-aware data name suggestions**: Data Name Validation now recognizes a local prefix
+  embedded mid-name after a real dictionary category (e.g. `_chemical_oxdiff_formula`) and offers to
+  correct it to modern dotted notation (`_chemical.oxdiff_formula`) or, for a legacy-format file, the
+  legacy-valid reordering with the prefix moved to the front (`_oxdiff_chemical_formula`) - a local
+  prefix can only be the first segment in legacy notation, never embedded mid-name.
 
 ### Changed
 - **Registered CIF prefixes now come from the live IUCr registry** instead of a bundled static list:
@@ -54,6 +59,15 @@ theme rather than strict chronological commit order.
   "How to use" starts collapsed - and the decorative group boxes were trimmed, so the Validation
   Issues list gets the bulk of the vertical space; the issue-details pane can also be dragged away
   entirely.
+- **Data Name Validation dialog category order and colours**: categories now list as Malformed →
+  Malformed User Allowed → Unknown → Deprecated → User Allowed → Registered Local → Valid, and
+  **User Allowed Fields** no longer shares **Valid Fields**' green - a user-allowed exception isn't
+  necessarily correct, just tolerated. A new **Malformed User Allowed Fields** category separates
+  fields whose embedded local prefix is only user-allowed (not IUCr-registered) from the main
+  Malformed bucket.
+- Offering to add a real dictionary category (e.g. "refln") as a local prefix, or to exempt a field
+  name that isn't a recognized attribute of its own category, now requires explicit confirmation, and
+  is shown disabled with an explanation - rather than silently unavailable - when it would be wrong.
 
 ### Fixed
 - **Data Name Validation delete action left orphan values**: deleting a field from the Data Name
@@ -65,6 +79,23 @@ theme rather than strict chronological commit order.
   (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with
   no value, so they never reached field metadata despite being parsed. Both tags are now correctly
   extracted and exposed on `FieldMetadata` and via `CIFDictionaryManager.get_relational_links()`.
+- **False "Fix" suggestion for unrelated unknown fields**: an unrecognized field under a real
+  dictionary category (e.g. `_refln_frame_id`) no longer gets a fabricated dot-notation "fix" -
+  `_refln.frame_id` isn't a genuine field, and "frame" isn't a local prefix, but this was previously
+  suggested as if it were. The dialog now explains that the category is known but the rest of the
+  name isn't a recognized attribute, instead.
+- **A real dictionary category could be added as a local prefix**: doing so (via the old "+ Prefix"
+  button, or **Add User Prefix...**) would silently accept *any* unrecognized field under that
+  category from then on, masking real typos and errors. Both entry points now refuse and explain why;
+  a category previously added this way is also now disregarded even if it's still sitting in a
+  user's saved allowed-prefixes list.
+- **A recognized local prefix embedded mid-name stopped being flagged entirely**: once a prefix like
+  "oxdiff" in `_chemical_oxdiff_formula` was added to the allowed-prefixes list, the field was filed
+  away as fully valid, even though the name itself (prefix in the middle) isn't valid in any CIF
+  notation. It's now categorized Malformed / Malformed User Allowed and still requires a rename.
+- **Data-name validation cache could leak a suggestion between unrelated files**: a legacy-format
+  file's suggested rename for a field could incorrectly stick around and be reused when a
+  differently-formatted file was validated afterward and happened to reuse the same field name.
 
 ## [1.3] - 2026-07-06
 

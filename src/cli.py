@@ -36,6 +36,7 @@ MINIMUM_PYTHON = (3, 11)
 _NAME_ISSUE_SEVERITY = {
     FieldCategory.UNKNOWN: "warning",
     FieldCategory.MALFORMED: "warning",
+    FieldCategory.MALFORMED_USER_ALLOWED: "warning",
     FieldCategory.DEPRECATED: "info",
 }
 
@@ -120,6 +121,7 @@ def check_content(
         for category, results in (
             (FieldCategory.UNKNOWN, name_report.unknown_fields),
             (FieldCategory.MALFORMED, name_report.malformed_fields),
+            (FieldCategory.MALFORMED_USER_ALLOWED, name_report.malformed_user_allowed_fields),
             (FieldCategory.DEPRECATED, name_report.deprecated_fields),
         ):
             for result in results:

@@ -330,9 +330,28 @@ class RecognisedPrefixesDialog(QDialog):
                     f"The prefix '{prefix}' is already in your allowed list."
                 )
                 return
-            
+
+            # Check it isn't actually a real dictionary category (e.g.
+            # 'refln') - allowing that would silently accept any
+            # unrecognized field under that category as a known extension.
+            if self.validator.is_known_category(prefix):
+                QMessageBox.warning(
+                    self,
+                    "Not a Local Prefix",
+                    f"'{prefix}' is already a category defined in the loaded "
+                    "CIF dictionaries, not a local prefix, so it can't be "
+                    "added to your allowed-prefixes list."
+                )
+                return
+
             # Add to allowed list
-            self.validator.add_allowed_prefix(prefix)
+            if not self.validator.add_allowed_prefix(prefix):
+                QMessageBox.warning(
+                    self,
+                    "Prefix Not Added",
+                    f"'{prefix}' could not be added to your allowed list."
+                )
+                return
             self._populate_tree()  # Refresh
             
             QMessageBox.information(

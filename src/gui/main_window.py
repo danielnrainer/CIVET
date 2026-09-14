@@ -1547,7 +1547,10 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         if scope_block is None and len(block_names) > 1:
             def _count(text):
                 r = validate_fn(text)
-                return len(r.unknown_fields) + len(r.deprecated_fields) + len(r.malformed_fields)
+                return (
+                    len(r.unknown_fields) + len(r.deprecated_fields)
+                    + len(r.malformed_fields) + len(r.malformed_user_allowed_fields)
+                )
             breakdown = self._compute_block_issue_breakdown(content, block_names, _count)
         return report, breakdown
 
@@ -1967,7 +1970,8 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             return
         n_issues = (len(report.unknown_fields)
                     + len(report.deprecated_fields)
-                    + len(report.malformed_fields))
+                    + len(report.malformed_fields)
+                    + len(report.malformed_user_allowed_fields))
         if n_issues == 0:
             w.setText(f"\u2714 Validated ({report.total_fields} field(s))")
             w.setStyleSheet("color: green; font-weight: bold;")

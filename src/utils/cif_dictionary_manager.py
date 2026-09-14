@@ -495,6 +495,7 @@ class CIFDictionaryManager:
         self._malformed_guess_cache: Dict[str, Optional[str]] = {}
         self._metadata_lookup_cache: Dict[str, Any] = {}
         self._modern_from_compact_name: Dict[str, str] = {}
+        self._known_categories: Set[str] = set()
         self._checkcif_compatibility_fields: Optional[Dict[str, str]] = None
 
 
@@ -571,6 +572,7 @@ class CIFDictionaryManager:
         self._malformed_guess_cache.clear()
         self._metadata_lookup_cache.clear()
         self._modern_from_compact_name.clear()
+        self._known_categories.clear()
 
     def _ensure_default_dictionaries_loaded(self) -> None:
         if self._default_dictionaries_loaded:
@@ -765,15 +767,23 @@ class CIFDictionaryManager:
             # Manual fixes for missing mappings
             self._add_missing_field_mappings()
 
-            # Build compact modern-name index used by malformed-name guessing.
+            # Build compact modern-name index used by malformed-name guessing,
+            # and the set of genuine category names known across all active
+            # dictionaries (used to detect local prefixes embedded in category
+            # extensions, e.g. _chemical_oxdiff_formula, without relying on a
+            # hardcoded guess list).
             self._modern_from_compact_name = {}
+            self._known_categories = set()
             for known_field in self._merged_known_fields_lower:
                 if '.' not in known_field:
                     continue
                 compact = known_field.replace('.', '_')
                 if compact not in self._modern_from_compact_name:
                     self._modern_from_compact_name[compact] = known_field
-            
+                category = known_field.lstrip('_').split('.', 1)[0]
+                if category:
+                    self._known_categories.add(category)
+
             self._loaded = True
         
     def _add_missing_field_mappings(self):
@@ -988,6 +998,30 @@ class CIFDictionaryManager:
         # No true legacy alias exists for this modern field.
         return None
     
+    def is_known_category(self, category: str) -> bool:
+        """
+        Check if `category` is a genuine CIF category defined in the
+        currently loaded/active dictionaries.
+
+        Unlike a hardcoded guess list, this reflects whatever dictionaries
+        are actually loaded (core plus any additional/vendor dictionaries),
+        derived from the category portion of known modern (dot-notation)
+        field names.
+
+        Args:
+            category: Category name, with or without leading/trailing
+                underscores (e.g. 'refln', '_refln_', '_refln').
+
+        Returns:
+            True if at least one known field in the loaded dictionaries
+            belongs to this category.
+        """
+        self._ensure_loaded()
+        normalized = category.strip('_').lower()
+        if not normalized:
+            return False
+        return normalized in self._known_categories
+
     def is_known_field(self, field_name: str) -> bool:
         """
         Check if a field name is known in the CIF dictionary.
@@ -1139,22 +1173,28 @@ class CIFDictionaryManager:
         try:
             with open(cif_core_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             # Search for the field definition pattern
             import re
-            # Look for _definition.id lines containing our field
-            pattern = rf"_definition\.id\s+['\"]?{re.escape(field_name)}['\"]?"
+            escaped_field = re.escape(field_name)
+
+            # Look for _definition.id lines containing our field. The quote
+            # must match (not just optionally appear) and close immediately
+            # after the name - otherwise this matches any name that's a
+            # prefix of a longer one (e.g. '_chemical_formula.moiet' would
+            # wrongly match the real '_chemical_formula.moiety').
+            pattern = rf"_definition\.id\s+(['\"]){escaped_field}\1"
             if re.search(pattern, content, re.IGNORECASE):
                 return True
-                
-            # Also check for save frames with the field name
-            # Build pattern outside f-string to avoid backslash issues
-            escaped_field = re.escape(field_name.replace('.', r'\.'))
-            pattern_str = escaped_field.replace('_', r'[_\.]')
-            pattern = rf"save_{pattern_str}"
+
+            # Also check for save frames with the field name (which flatten
+            # the dot to an underscore, or occasionally keep it). Same
+            # prefix-match risk, so require a boundary right after the name.
+            flexible_field = escaped_field.replace('_', r'[_.]').replace(r'\.', r'[_.]')
+            pattern = rf"save_{flexible_field}(?=[\s\n]|$)"
             if re.search(pattern, content, re.IGNORECASE):
                 return True
-                
+
             return False
             
         except Exception as e:
@@ -1786,10 +1826,99 @@ class CIFDictionaryManager:
             if known_modern and known_modern.lower() != field_name.lower():
                 self._cache_put(self._malformed_guess_cache, cache_key, known_modern, _MAX_LOOKUP_CACHE_ENTRIES)
                 return known_modern
-        
+
+        # Final fallback: a close typo match against a known field (a
+        # missing/extra/wrong letter in the category or attribute, e.g.
+        # '_chemical_formula_moiet' or '_chmical_formula.moiety' for the
+        # real '_chemical_formula.moiety') - the structural (dot-position)
+        # checks above only catch punctuation errors, not spelling ones.
+        compact_candidate = f"_{name_without_prefix}".lower()
+        close_match = self._find_close_known_field(compact_candidate)
+        if close_match and close_match.lower() != field_name.lower():
+            self._cache_put(self._malformed_guess_cache, cache_key, close_match, _MAX_LOOKUP_CACHE_ENTRIES)
+            return close_match
+
         self._cache_put(self._malformed_guess_cache, cache_key, None, _MAX_LOOKUP_CACHE_ENTRIES)
         return None
-    
+
+    # Below this length, typo-tolerant matching is too likely to coincide
+    # with an unrelated short field name - not attempted at all.
+    _FUZZY_MATCH_MIN_LENGTH = 8
+
+    def _find_close_known_field(self, compact_candidate: str) -> Optional[str]:
+        """
+        Find a known field whose compact (dot-removed, lowercase) form is a
+        close typo match for compact_candidate.
+
+        Args:
+            compact_candidate: Lowercase, dot-removed candidate field name
+                (leading underscore included), e.g. '_chemical_formula_moiet'.
+
+        Returns:
+            The modern dotted field name for the single closest match
+            within the distance budget, or None if nothing is close enough,
+            or more than one known field ties for closest (ambiguous -
+            better to leave it unguessed than guess the wrong one).
+        """
+        length = len(compact_candidate)
+        if length < self._FUZZY_MATCH_MIN_LENGTH:
+            return None
+
+        # A short name affords very little room for a coincidental typo
+        # match to also be a real (but unrelated) field, so allow more
+        # edits the longer the candidate is.
+        max_distance = 1 if length < 15 else 2
+
+        best_distance = max_distance + 1
+        best_matches: List[str] = []
+        for compact_key, modern_name in self._modern_from_compact_name.items():
+            if abs(len(compact_key) - length) > max_distance:
+                continue
+            distance = self._levenshtein_distance(compact_candidate, compact_key, max_distance)
+            if distance > max_distance:
+                continue
+            if distance < best_distance:
+                best_distance = distance
+                best_matches = [modern_name]
+            elif distance == best_distance and modern_name not in best_matches:
+                best_matches.append(modern_name)
+
+        if len(best_matches) == 1:
+            return best_matches[0]
+        return None
+
+    @staticmethod
+    def _levenshtein_distance(a: str, b: str, max_distance: int) -> int:
+        """
+        Edit distance between a and b, capped at max_distance + 1: once a
+        row's minimum exceeds max_distance the true distance no longer
+        matters (the caller only checks it against that same budget), so
+        computation stops early rather than finishing an oversized string
+        pair.
+        """
+        if abs(len(a) - len(b)) > max_distance:
+            return max_distance + 1
+        if a == b:
+            return 0
+
+        previous_row = list(range(len(b) + 1))
+        for i, ca in enumerate(a, start=1):
+            current_row = [i]
+            row_min = i
+            for j, cb in enumerate(b, start=1):
+                cost = 0 if ca == cb else 1
+                value = min(
+                    previous_row[j] + 1,        # deletion
+                    current_row[j - 1] + 1,     # insertion
+                    previous_row[j - 1] + cost  # substitution
+                )
+                current_row.append(value)
+                row_min = min(row_min, value)
+            if row_min > max_distance:
+                return max_distance + 1
+            previous_row = current_row
+        return previous_row[-1]
+
     def _guess_modern_equivalent(self, field_name: str) -> Optional[str]:
         """Alias for backwards compatibility with internal callers."""
         return self.guess_modern_equivalent(field_name)

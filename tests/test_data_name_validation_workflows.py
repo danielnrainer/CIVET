@@ -1,7 +1,7 @@
 """Behavior-focused tests for Data Name Validation dialog workflows."""
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from gui.dialogs.data_name_validation_dialog import DataNameValidationDialog
 from utils.data_name_validator import (
@@ -17,6 +17,7 @@ class _FakeValidator:
         self.allowed_prefixes = set()
         self.allowed_fields = set()
         self.session_ignored = set()
+        self.known_categories = set()
 
     def get_allowed_prefixes(self):
         return set(self.allowed_prefixes)
@@ -38,6 +39,9 @@ class _FakeValidator:
 
     def remove_allowed_field(self, field_name):
         self.allowed_fields.discard(field_name.lower())
+
+    def is_known_category(self, category):
+        return category.lower() in self.known_categories
 
 
 @pytest.fixture(scope="module")
@@ -203,4 +207,89 @@ def test_refresh_validation_clears_pending_actions_and_rebuilds_view(app):
     assert dialog.validation_report.total_fields == 1
     assert len(dialog._category_items) == 1
     assert FieldCategory.VALID in dialog._category_items
+    dialog.close()
+
+
+def _unknown_field_result_under_known_category():
+    """e.g. _refln_frame_id: 'refln' is a real dictionary category, but
+    'frame_id' isn't one of its recognized attributes."""
+    return FieldValidationResult(
+        field_name="_refln_frame_id",
+        category=FieldCategory.UNKNOWN,
+        line_number=7,
+        description=(
+            "'refln' is a known category, but the rest of this name isn't "
+            "a recognized attribute of it - not found in loaded dictionaries"
+        ),
+        prefix="refln",
+    )
+
+
+def test_allow_prefix_button_disabled_with_explanation_when_prefix_is_real_category(app):
+    """Regression: offering to "allow" a genuine dictionary category (e.g.
+    'refln') as if it were a local prefix would silently accept any
+    unrecognized field under that category. The button must stay visible
+    (like a deprecated field's disabled 'Replace' button) but disabled,
+    with a tooltip explaining why - not simply vanish."""
+    _ = app
+    validator = _FakeValidator()
+    validator.known_categories = {"refln"}
+    dialog = DataNameValidationDialog(
+        ValidationReport(unknown_fields=[_unknown_field_result_under_known_category()], total_fields=1),
+        validator,
+    )
+
+    buttons_widget = dialog._create_action_buttons(
+        _unknown_field_result_under_known_category(), FieldCategory.UNKNOWN
+    )
+    prefix_btn = next(
+        btn for btn in buttons_widget.findChildren(QPushButton) if btn.text() == "+ Prefix"
+    )
+
+    assert prefix_btn.isEnabled() is False
+    assert "refln" in prefix_btn.toolTip()
+    dialog.close()
+
+
+def test_allow_field_requires_confirmation_when_prefix_is_real_category(app, monkeypatch):
+    """Clicking "+ Field" for a field like _refln_frame_id must prompt for
+    confirmation (declining leaves nothing pending) rather than silently
+    exempting a data name that doesn't correspond to anything in the CIF
+    standard."""
+    _ = app
+    validator = _FakeValidator()
+    validator.known_categories = {"refln"}
+    dialog = DataNameValidationDialog(
+        ValidationReport(unknown_fields=[_unknown_field_result_under_known_category()], total_fields=1),
+        validator,
+    )
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    dialog._on_allow_field("_refln_frame_id", True, "refln")
+    assert "_refln_frame_id" not in dialog._fields_to_allow
+    assert "_refln_frame_id" not in dialog._pending_actions
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    dialog._on_allow_field("_refln_frame_id", True, "refln")
+    assert "_refln_frame_id" in dialog._fields_to_allow
+    assert dialog._pending_actions["_refln_frame_id"] == FieldAction.ALLOW_FIELD
+    dialog.close()
+
+
+def test_allow_field_skips_confirmation_for_an_ordinary_unknown_field(app, monkeypatch):
+    """An unknown field with no known-category collision (the common case -
+    a genuine custom/local field) should be exempted immediately, with no
+    confirmation prompt in the way."""
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_unknown_and_deprecated(), validator)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("QMessageBox.question should not be called here")
+
+    monkeypatch.setattr(QMessageBox, "question", _fail_if_called)
+    dialog._on_allow_field("_unknown_field")
+
+    assert "_unknown_field" in dialog._fields_to_allow
+    dialog.close()
     dialog.close()
