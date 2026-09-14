@@ -60,6 +60,9 @@ class MultilineInputDialog(QDialog):
             layout.addWidget(context_label)
         
         self.textEdit = QTextEdit()
+        # Paste as plain text using this widget's own formatting, rather than
+        # carrying over fonts/styling from whatever the text was copied from.
+        self.textEdit.setAcceptRichText(False)
         # Ensure UTF-8 text handling
         if isinstance(text, bytes):
             self.textEdit.setText(text.decode('utf-8'))

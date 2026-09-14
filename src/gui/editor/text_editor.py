@@ -88,6 +88,10 @@ class CIFTextEditor(QWidget):
         # Main text editor
         self.text_editor = QTextEdit()
         self.text_editor.setUndoRedoEnabled(True)
+        # Pasted/dropped content is always inserted as plain text, picking up
+        # the editor's current font/colors instead of carrying over formatting
+        # from the source application (e.g. a Word document's font).
+        self.text_editor.setAcceptRichText(False)
         
         # Create ruler overlay
         self.ruler = QWidget(self.text_editor)

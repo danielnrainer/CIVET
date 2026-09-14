@@ -4,7 +4,7 @@ import argparse
 from io import TextIOWrapper
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPalette, QColor
 from gui.main_window import CIFEditor
 
 MINIMUM_PYTHON = (3, 11)
@@ -69,7 +69,21 @@ def main():
     
     # Set application-wide encoding attributes
     app.setProperty("encoding", "utf-8")
-    
+
+    # Many dialogs (e.g. Data Name Validation) color list/tree items by
+    # category (red/orange/purple/blue/green...). The default selection
+    # highlight is a saturated blue that clashes with several of those
+    # colors and makes the selected row hard to read. Use a neutral light
+    # grey with black text instead, which stays legible against every
+    # category color and in both the active and inactive (unfocused) state.
+    palette = app.palette()
+    selection_grey = QColor(200, 200, 200)
+    palette.setColor(QPalette.ColorRole.Highlight, selection_grey)
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, selection_grey)
+    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+    app.setPalette(palette)
+
     editor = CIFEditor()
     editor.show()
     sys.exit(app.exec())

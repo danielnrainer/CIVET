@@ -41,6 +41,9 @@ theme rather than strict chronological commit order.
   prefix can only be the first segment in legacy notation, never embedded mid-name.
 
 ### Changed
+- **Selection highlight color**: the default blue selection background clashed with several of the
+  category colors used in dialogs like Data Name Validation, making selected rows hard to read.
+  Selections across the app now use a neutral grey background with black text instead.
 - **Registered CIF prefixes now come from the live IUCr registry** instead of a bundled static list:
   CIVET fetches and caches the official
   [reserved-prefixes registry](https://cif-dictionaries.iucr.org/cifdic/dic/reserved_prefixes.cif),
@@ -60,7 +63,7 @@ theme rather than strict chronological commit order.
   Issues list gets the bulk of the vertical space; the issue-details pane can also be dragged away
   entirely.
 - **Data Name Validation dialog category order and colours**: categories now list as Malformed →
-  Malformed User Allowed → Unknown → Deprecated → User Allowed → Registered Local → Valid, and
+  Unknown → Deprecated → Malformed User Allowed → User Allowed → Registered Local → Valid, and
   **User Allowed Fields** no longer shares **Valid Fields**' green - a user-allowed exception isn't
   necessarily correct, just tolerated. A new **Malformed User Allowed Fields** category separates
   fields whose embedded local prefix is only user-allowed (not IUCr-registered) from the main
@@ -70,6 +73,9 @@ theme rather than strict chronological commit order.
   is shown disabled with an explanation - rather than silently unavailable - when it would be wrong.
 
 ### Fixed
+- **Paste always uses the editor's own formatting**: pasting into the main editor or the multi-line
+  field editor no longer carries over fonts/styling from the source application (e.g. Word) - text is
+  inserted as plain text and picks up whatever font/colors the editor is currently using.
 - **Data Name Validation delete action left orphan values**: deleting a field from the Data Name
   Validation dialog sometimes only removed the data-name but not the data value leaving a valueless 
   data value behind and the CIF invalid. The whole data item (name *and* value) is now correctly removed.
