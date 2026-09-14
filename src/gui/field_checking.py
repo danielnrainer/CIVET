@@ -1978,7 +1978,7 @@ class FieldCheckingMixin:
             detailed_conflicts = {}
             for canonical, alias_list in conflicts.items():
                 detailed_conflicts[canonical] = []
-                for alias in alias_list:
+                for alias in set(alias_list):
                     # Find line number and value for this alias
                     for line_num, line in enumerate(lines, 1):
                         line_stripped = line.strip()
@@ -1993,7 +1993,9 @@ class FieldCheckingMixin:
                                 'value': value,
                                 'is_deprecated': self.dict_manager.is_field_deprecated(alias)
                             })
-                            break
+                # Sort found duplicate entries by line number
+                detailed_conflicts[canonical]=sorted(detailed_conflicts[canonical],key=lambda k : k['line_num'])
+
             
             # Show dialog with scrollable content, honoring configured editor
             # interaction behavior (browse/edit the main editor while open).
