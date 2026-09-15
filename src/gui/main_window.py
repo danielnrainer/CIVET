@@ -1170,6 +1170,28 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
 
+    def closeEvent(self, event):
+        """Prompt for confirmation before closing if there are unsaved changes."""
+        if self.modified:
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "You have unsaved changes. Do you want to save before closing?",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save
+            )
+            if reply == QMessageBox.StandardButton.Save:
+                self.save_file()
+                if self.modified:
+                    # Save was cancelled or failed; keep the window open
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+        event.accept()
+
     def set_field_set(self, field_set_name):
         """Set the current field set selection."""
         self.current_field_set = field_set_name
