@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from PyQt6.QtWidgets import QDialog, QTextEdit
 
-from utils.CIF_parser import CIFParser, CIFLoop
+from utils.CIF_parser import CIFParser, CIFLoop, find_loops
 from .dialogs.loop_editor_dialog import LoopEditorDialog, LoopOption
 
 if TYPE_CHECKING:
@@ -53,30 +53,7 @@ class LoopEditingMixin:
         is exactly the loop's own text (the ``loop_`` line through its last
         data row).
         """
-        helper = CIFParser()
-        loops: List[Tuple[int, int, CIFLoop]] = []
-        idx = 0
-        in_multiline = False
-        while idx < len(lines):
-            stripped = lines[idx].strip()
-
-            if stripped.startswith(';'):
-                in_multiline = not in_multiline
-                idx += 1
-                continue
-            if in_multiline:
-                idx += 1
-                continue
-
-            if stripped.lower() == 'loop_':
-                loop_obj, consumed = helper._parse_loop(lines, idx)
-                if loop_obj is not None:
-                    loops.append((idx, consumed, loop_obj))
-                    idx += consumed
-                    continue
-
-            idx += 1
-        return loops
+        return find_loops(lines)
 
     def _block_name_for_line(self, lines: List[str], line_index: int) -> Optional[str]:
         """Return the data_ block code (e.g. 'crystal1') containing

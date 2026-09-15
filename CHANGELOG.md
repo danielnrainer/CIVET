@@ -53,6 +53,14 @@ theme rather than strict chronological commit order.
   field) now shows a 🔁 indicator and tooltip in the list, and clicking **Delete** on one asks for
   confirmation - explaining that the whole column (its value in every row) will be removed, and
   pointing to the Loop Editor for finer-grained changes.
+- **Rename Data Block**: **Actions → Rename Data Block...** renames a `data_` block and follows the
+  rename to every place the block's code is referenced elsewhere in the file - `_vrf_<ALERT>_<code>`
+  checkCIF/PLATON validation-reply-form field names inside the block, `_audit.block_code` when it
+  matches the block's own code, any `_audit_link.block_code` value elsewhere in the file (including
+  inside a `loop_`) that points at this block, and the echoed `data_` header of a pasted `.fcf`
+  reflection listing inside `_iucr_refine_fcf_details`. Nothing else in the file is touched, and the
+  new name is validated (non-empty, no whitespace/reserved characters, not already used by another
+  block) before anything is changed.
 
 ### Changed
 - **Selection highlight color**: the default blue selection background clashed with several of the

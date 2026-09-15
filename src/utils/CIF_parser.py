@@ -198,6 +198,40 @@ def count_data_blocks(content: str) -> int:
     return len(list_data_block_names(content))
 
 
+def find_loops(lines: List[str]) -> List[Tuple[int, int, 'CIFLoop']]:
+    """Scan raw document lines for every ``loop_`` structure.
+
+    Returns a list of (start_index, lines_consumed, CIFLoop) tuples, in
+    document order. ``lines[start_index:start_index + lines_consumed]`` is
+    exactly the loop's own text (the ``loop_`` line through its last data
+    row).
+    """
+    parser = CIFParser()
+    loops: List[Tuple[int, int, CIFLoop]] = []
+    idx = 0
+    in_multiline = False
+    while idx < len(lines):
+        stripped = lines[idx].strip()
+
+        if stripped.startswith(';'):
+            in_multiline = not in_multiline
+            idx += 1
+            continue
+        if in_multiline:
+            idx += 1
+            continue
+
+        if stripped.lower() == 'loop_':
+            loop_obj, consumed = parser._parse_loop(lines, idx)
+            if loop_obj is not None:
+                loops.append((idx, consumed, loop_obj))
+                idx += consumed
+                continue
+
+        idx += 1
+    return loops
+
+
 class CIFParser:
     """Main parser class for processing CIF file content."""
     

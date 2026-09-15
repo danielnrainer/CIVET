@@ -51,6 +51,7 @@ from .format_handlers import FormatHandlersMixin
 from .field_checking import FieldCheckingMixin
 from .data_name_integrity import DataNameIntegrityMixin
 from .loop_editing import LoopEditingMixin
+from .block_renaming import BlockRenamingMixin
 
 
 class _BackgroundTaskSignals(QObject):
@@ -75,7 +76,7 @@ class _BackgroundTask(QRunnable):
             self.signals.failed.emit(str(exc))
 
 
-class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, LoopEditingMixin, QMainWindow):
+class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, LoopEditingMixin, BlockRenamingMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_file = None
@@ -607,6 +608,14 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             "build a brand-new loop from scratch"
         )
         edit_loop_action.triggered.connect(self.edit_loop_at_cursor)
+
+        rename_block_action = action_menu.addAction("Rename Data Block...")
+        rename_block_action.setToolTip(
+            "Rename a data_ block and update its _vrf_ validation-reply field "
+            "names, _audit.block_code, and any cross-block _audit_link.block_code "
+            "references that point at it"
+        )
+        rename_block_action.triggered.connect(self.rename_data_block_dialog)
 
         format_action = action_menu.addAction("Reformat File")
         format_action.triggered.connect(self.reformat_file)
