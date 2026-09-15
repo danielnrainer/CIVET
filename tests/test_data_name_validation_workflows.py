@@ -293,3 +293,88 @@ def test_allow_field_skips_confirmation_for_an_ordinary_unknown_field(app, monke
     assert "_unknown_field" in dialog._fields_to_allow
     dialog.close()
     dialog.close()
+
+
+def _report_with_loop_column():
+    loop_field = FieldValidationResult(
+        field_name="_atom_site_unknown",
+        category=FieldCategory.UNKNOWN,
+        line_number=10,
+        description="Unknown field",
+        prefix="atom_site",
+        in_loop=True,
+    )
+    standalone_field = FieldValidationResult(
+        field_name="_unknown_field",
+        category=FieldCategory.UNKNOWN,
+        line_number=20,
+        description="Unknown field",
+        prefix="unknown",
+        in_loop=False,
+    )
+    return ValidationReport(
+        unknown_fields=[loop_field, standalone_field],
+        total_fields=2,
+    )
+
+
+def test_loop_column_shown_with_indicator_and_tooltip(app):
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_loop_column(), validator)
+
+    loop_item = dialog._field_items["_atom_site_unknown"]
+    assert "🔁" in loop_item.text(0)
+    assert "loop_" in loop_item.toolTip(0)
+
+    standalone_item = dialog._field_items["_unknown_field"]
+    assert "🔁" not in standalone_item.text(0)
+    assert standalone_item.toolTip(0) == ""
+    dialog.close()
+
+
+def test_deleting_a_loop_column_warns_and_respects_cancel(app, monkeypatch):
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_loop_column(), validator)
+
+    questions = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *a, **k: questions.append(a) or QMessageBox.StandardButton.No,
+    )
+    dialog._on_delete_field("_atom_site_unknown")
+
+    assert questions  # the warning was shown
+    assert "_atom_site_unknown" not in dialog._fields_to_delete
+    assert "_atom_site_unknown" not in dialog._pending_actions
+    dialog.close()
+
+
+def test_deleting_a_loop_column_proceeds_when_confirmed(app, monkeypatch):
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_loop_column(), validator)
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    dialog._on_delete_field("_atom_site_unknown")
+
+    assert "_atom_site_unknown" in dialog._fields_to_delete
+    assert dialog._pending_actions["_atom_site_unknown"] == FieldAction.DELETE
+    dialog.close()
+
+
+def test_deleting_a_standalone_field_skips_the_loop_warning(app, monkeypatch):
+    """A field that isn't a loop column should delete with no extra prompt."""
+    _ = app
+    validator = _FakeValidator()
+    dialog = DataNameValidationDialog(_report_with_loop_column(), validator)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("QMessageBox.question should not be called here")
+
+    monkeypatch.setattr(QMessageBox, "question", _fail_if_called)
+    dialog._on_delete_field("_unknown_field")
+
+    assert "_unknown_field" in dialog._fields_to_delete
+    dialog.close()

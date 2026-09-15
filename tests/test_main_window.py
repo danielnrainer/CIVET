@@ -187,8 +187,13 @@ def test_apply_validation_actions_delete_removes_multiline_bracket_value(editor)
     assert "_cell_length_a 5.0" in content
 
 
-def test_apply_validation_actions_delete_skips_loop_column(editor, monkeypatch):
-    """A loop column can't be dropped line-by-line without orphaning row data."""
+def test_apply_validation_actions_delete_removes_loop_column(editor, monkeypatch):
+    """Deleting a loop column must drop its value from every row too.
+
+    A loop is a table where data names are the column headers: removing a
+    column without removing its values from each row would leave rows with
+    the wrong number of values and corrupt the loop.
+    """
     _stub_window_updates(editor)
     warnings = []
     monkeypatch.setattr(
@@ -205,9 +210,73 @@ def test_apply_validation_actions_delete_skips_loop_column(editor, monkeypatch):
     editor._apply_validation_actions(dialog)
 
     content = editor.text_editor.toPlainText()
-    # Loop left intact rather than made invalid
-    assert "_unknown_field" in content
-    assert "1 2 3" in content
+    assert "_unknown_field" not in content
+    assert "_known_a" in content and "_known_b" in content
+    # Each row now has exactly the two surviving values, in order
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    assert "1 3" in lines
+    assert "4 6" in lines
+    assert not warnings
+
+
+def test_apply_validation_actions_delete_all_loop_columns_removes_loop(editor):
+    """Deleting every column of a loop removes the loop entirely."""
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\nloop_\n_unknown_a\n_unknown_b\n1 2\n3 4\n_cell_length_a 5.0\n")
+
+    dialog = _fake_validation_dialog(
+        get_fields_to_delete=lambda: ["_unknown_a", "_unknown_b"],
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "loop_" not in content
+    assert "_unknown_a" not in content
+    assert "1 2" not in content
+    assert "_cell_length_a 5.0" in content
+
+
+def test_apply_validation_actions_renames_loop_column_in_place(editor):
+    """A format correction on a loop column renames the header, keeping values."""
+    _stub_window_updates(editor)
+    editor.text_editor.setText(
+        "data_a\nloop_\n_old_name\n_known_b\n1 2\n3 4\n")
+
+    dialog = _fake_validation_dialog(
+        get_format_corrections=lambda: {"_old_name": "_new_name"},
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    assert "_old_name" not in content
+    assert "_new_name" in content
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    assert "1 2" in lines
+    assert "3 4" in lines
+
+
+def test_apply_validation_actions_skips_adding_successor_column_to_loop(editor, monkeypatch):
+    """A brand-new loop column can't be added without a value for every row."""
+    _stub_window_updates(editor)
+    warnings = []
+    monkeypatch.setattr(
+        main_window.QMessageBox, "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+    editor.text_editor.setText(
+        "data_a\nloop_\n_old_dep\n_known_b\n1 2\n3 4\n")
+
+    dialog = _fake_validation_dialog(
+        get_deprecated_updates=lambda: {"_old_dep": "_new.succ"},
+    )
+    editor._apply_validation_actions(dialog)
+
+    content = editor.text_editor.toPlainText()
+    # Loop left intact rather than made invalid by an unmatched column
+    assert "_old_dep" in content
+    assert "_new.succ" not in content
+    assert "1 2" in content
     assert warnings
 
 

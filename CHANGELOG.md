@@ -39,6 +39,20 @@ theme rather than strict chronological commit order.
   correct it to modern dotted notation (`_chemical.oxdiff_formula`) or, for a legacy-format file, the
   legacy-valid reordering with the prefix moved to the front (`_oxdiff_chemical_formula`) - a local
   prefix can only be the first segment in legacy notation, never embedded mid-name.
+- **Loop Editor**: any `loop_` can now be opened as a spreadsheet-style table via **Actions → Edit
+  Loop...** or **Edit Loop...** in the editor's right-click menu. Opens pre-loaded with the loop under
+  the cursor, or blank if the cursor isn't inside one; a picker built into the dialog itself lists
+  every loop in the file to switch to, plus a "New Loop" option to build one from scratch. Add,
+  delete, or rename columns (data items); add or delete rows; edit individual cells; or set every
+  row's value for one column in a single action. Only the edited loop's text is rewritten (or a new
+  one inserted at the cursor) - the rest of the file is left untouched. A **Freeze First Column**
+  checkbox (on by default) keeps the first column in view while scrolling through wide loops, and the
+  header row of data names is bold. On multi-block files, a **Filter by Data Block** control narrows
+  the picker to loops from just the selected block(s).
+- **Data Name Validation flags loop columns**: a data name that's a `loop_` column (not a standalone
+  field) now shows a 🔁 indicator and tooltip in the list, and clicking **Delete** on one asks for
+  confirmation - explaining that the whole column (its value in every row) will be removed, and
+  pointing to the Loop Editor for finer-grained changes.
 
 ### Changed
 - **Selection highlight color**: the default blue selection background clashed with several of the
@@ -79,8 +93,13 @@ theme rather than strict chronological commit order.
 - **Data Name Validation delete action left orphan values**: deleting a field from the Data Name
   Validation dialog sometimes only removed the data-name but not the data value leaving a valueless 
   data value behind and the CIF invalid. The whole data item (name *and* value) is now correctly removed.
-  Loop columns, which cannot be dropped without also rewriting every data row, are left untouched with 
-  a warning instead of being half-deleted.
+- **Deleting or renaming a loop column corrupted the loop**: a `loop_` is a table where data names are
+  the column headers, so removing or renaming one without touching every row left rows with the wrong
+  number of values (or a mismatched header/data count). Deleting a loop column - or a deprecated
+  field being replaced/renamed - now rewrites the whole loop, removing or renaming the column and
+  dropping its value from every row (deleting every column removes the loop entirely). Only adding a
+  brand-new successor column is still skipped, with a warning, since there's no sensible value to
+  backfill into existing rows.
 - **DDL1 dictionary parsing**: `_list_link_parent`/`_list_link_child` values are themselves data names
   (e.g. `_pd_phase_id`), but were silently discarded by an extraction heuristic meant to catch tags with
   no value, so they never reached field metadata despite being parsed. Both tags are now correctly

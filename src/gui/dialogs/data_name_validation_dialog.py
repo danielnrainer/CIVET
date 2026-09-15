@@ -635,8 +635,22 @@ class DataNameValidationDialog(QDialog):
         elif field_result.modern_equivalent:
             details += f" → {field_result.modern_equivalent}"
 
-        field_item = QTreeWidgetItem([field_result.field_name, details, ""])
+        display_name = field_result.field_name
+        if field_result.in_loop:
+            display_name = f"🔁 {display_name}"
+
+        field_item = QTreeWidgetItem([display_name, details, ""])
         field_item.setToolTip(1, details)
+        if field_result.in_loop:
+            field_item.setToolTip(
+                0,
+                "This data name is a column in a loop_"
+                "not a standalone field. Deleting it removes the "
+                "column and its value from every row.\n\n"
+                "Use the Loop Editor (Actions → Edit Loop...) for more "
+                "control - e.g. editing values across rows or changing "
+                "several columns at once."
+            )
         if field_result.line_number > 0:
             field_item.setData(0, Qt.ItemDataRole.UserRole, field_result.line_number)
         parent_item.addChild(field_item)
@@ -1017,6 +1031,23 @@ class DataNameValidationDialog(QDialog):
             # Safety net: the corresponding button should already be disabled
             # for checkCIF-required fields, but never delete one regardless.
             return
+
+        if field_result is not None and field_result.in_loop:
+            reply = QMessageBox.question(
+                self,
+                "Data Name Is a Loop Column",
+                f"'{field_name}' is a column in a loop, not a standalone field.\n\n"
+                "Deleting it will remove the column and its values from "
+                "every row of the loop.\n\n"
+                "If you want more control - e.g. editing values across "
+                "rows, or changing more than one column - use the Loop "
+                "Editor instead (Actions → Edit Loop...).\n\n"
+                "Delete this column anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         scope = self._resolve_action_block_scope(field_name)
         if scope is None:

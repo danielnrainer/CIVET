@@ -13,7 +13,7 @@ import re
 import hashlib
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from utils.CIF_field_parsing import CIFFieldChecker, safe_eval_expr
-from utils.CIF_parser import (CIFParser, CIFField, update_audit_creation_method,
+from utils.CIF_parser import (CIFParser, CIFField, CIFLoop, update_audit_creation_method,
                               update_audit_creation_date, count_data_blocks,
                               list_data_block_names)
 from utils.cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
@@ -50,6 +50,7 @@ from .editor import CIFSyntaxHighlighter, CIFTextEditor
 from .format_handlers import FormatHandlersMixin
 from .field_checking import FieldCheckingMixin
 from .data_name_integrity import DataNameIntegrityMixin
+from .loop_editing import LoopEditingMixin
 
 
 class _BackgroundTaskSignals(QObject):
@@ -74,7 +75,7 @@ class _BackgroundTask(QRunnable):
             self.signals.failed.emit(str(exc))
 
 
-class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, QMainWindow):
+class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin, LoopEditingMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_file = None
@@ -598,7 +599,15 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         
         refine_details_action = action_menu.addAction("Edit Refinement Special Details")
         refine_details_action.triggered.connect(self.check_refine_special_details)
-        
+
+        edit_loop_action = action_menu.addAction("Edit Loop...")
+        edit_loop_action.setToolTip(
+            "Edit any loop_ as a table - add/remove/rename columns (data items) "
+            "and rows, or set every row's value for one column at once - or "
+            "build a brand-new loop from scratch"
+        )
+        edit_loop_action.triggered.connect(self.edit_loop_at_cursor)
+
         format_action = action_menu.addAction("Reformat File")
         format_action.triggered.connect(self.reformat_file)
         
@@ -2183,6 +2192,10 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             search_action = menu.addAction("Search in Dictionaries")
             search_action.triggered.connect(lambda: self._open_dictionary_search(selected_text))
 
+        menu.addSeparator()
+        edit_loop_action = menu.addAction("Edit Loop...")
+        edit_loop_action.triggered.connect(self.edit_loop_at_cursor)
+
         menu.exec(self.text_editor.viewport().mapToGlobal(pos))
     
     def show_about_dialog(self):
@@ -2474,12 +2487,10 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
             # bracket value ([ ... ] / { ... }); brackets are balanced by depth.
             skip_bracket_value = False
             bracket_depth = 0
-            # True while walking the column-name header of a loop_. Deleting a
-            # loop column with this line-based pass would leave the data rows
-            # with the wrong number of values, so those deletions are skipped
-            # and reported instead.
-            in_loop_header = False
             current_block = None  # data_ block the walk is currently inside
+            # Scratch parser used only for its loop parsing/formatting helpers
+            # (they don't touch any of its instance state).
+            loop_helper = CIFParser()
 
             def _in_scope(name):
                 """True when the action on this field applies in the current block."""
@@ -2493,7 +2504,79 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     - text.count(']') - text.count('}')
                 )
 
-            for line in lines:
+            def _decide_action(field_name):
+                """Decide what happens to a standalone field occurrence in the
+                current block, applying the counts/tracking side effects.
+
+                Returns (delete_this, rename_to, add_successor).
+                """
+                if field_name in fields_to_delete and _in_scope(field_name):
+                    counts['deleted'] += 1
+                    return True, None, None
+                if field_name in deprecated_replacements and _in_scope(field_name):
+                    successor = deprecated_replacements[field_name]
+                    if _successor_present(current_block, successor, field_name):
+                        # Successor already in this block: removing the
+                        # deprecated field is enough
+                        counts['removed_existing'] += 1
+                        return True, None, None
+                    counts['replaced'] += 1
+                    _mark_successor_present(current_block, successor)
+                    return False, successor, None
+                if field_name in deprecated_updates and _in_scope(field_name):
+                    successor = deprecated_updates[field_name]
+                    if not _successor_present(current_block, successor, field_name):
+                        counts['added'] += 1
+                        _mark_successor_present(current_block, successor)
+                        return False, None, successor
+                    return False, None, None
+                if field_name in format_corrections and _in_scope(field_name):
+                    rename_to = format_corrections[field_name]
+                    if field_name in malformed_fixes:
+                        counts['malformed_fixed'] += 1
+                    else:
+                        counts['corrected'] += 1
+                    return False, rename_to, None
+                return False, None, None
+
+            def _decide_loop_column_action(field_name):
+                """Decide what happens to one loop column, applying the same
+                counts/tracking side effects as _decide_action.
+
+                Returns ('delete' | 'rename' | 'keep', new_name_or_None).
+                Adding a brand-new column (a deprecated field's successor that
+                isn't present yet) can't be done safely here — every existing
+                row would need a value for it — so that case is left in place
+                and reported via counts['skipped_loop'] instead.
+                """
+                if field_name in fields_to_delete and _in_scope(field_name):
+                    counts['deleted'] += 1
+                    return 'delete', None
+                if field_name in deprecated_replacements and _in_scope(field_name):
+                    successor = deprecated_replacements[field_name]
+                    if _successor_present(current_block, successor, field_name):
+                        counts['removed_existing'] += 1
+                        return 'delete', None
+                    counts['replaced'] += 1
+                    _mark_successor_present(current_block, successor)
+                    return 'rename', successor
+                if field_name in deprecated_updates and _in_scope(field_name):
+                    successor = deprecated_updates[field_name]
+                    if not _successor_present(current_block, successor, field_name):
+                        counts['skipped_loop'] += 1
+                    return 'keep', None
+                if field_name in format_corrections and _in_scope(field_name):
+                    rename_to = format_corrections[field_name]
+                    if field_name in malformed_fixes:
+                        counts['malformed_fixed'] += 1
+                    else:
+                        counts['corrected'] += 1
+                    return 'rename', rename_to
+                return 'keep', None
+
+            idx = 0
+            while idx < len(lines):
+                line = lines[idx]
                 stripped = line.strip()
 
                 # Consume the trailing lines of a deleted multi-line bracket value.
@@ -2502,6 +2585,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     if bracket_depth <= 0:
                         skip_bracket_value = False
                         bracket_depth = 0
+                    idx += 1
                     continue
 
                 # Handle semicolon-delimited multiline values
@@ -2509,19 +2593,23 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     if skip_until_semicolon:
                         # This is the closing semicolon of a deleted field's multiline value
                         skip_until_semicolon = False
+                        idx += 1
                         continue
                     if awaiting_deleted_value:
                         # This is the opening semicolon of the deleted field's multiline value;
                         # skip it and then skip everything until the closing semicolon
                         awaiting_deleted_value = False
                         skip_until_semicolon = True
+                        idx += 1
                         continue
                     in_multiline = not in_multiline
                     new_lines.append(line)
+                    idx += 1
                     continue
 
                 if skip_until_semicolon:
                     # Skip lines that are part of a deleted multiline field
+                    idx += 1
                     continue
 
                 if awaiting_deleted_value:
@@ -2530,6 +2618,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                     if not stripped or stripped.startswith('#'):
                         # Blank line or comment between name and value — drop it
                         # along with the field.
+                        idx += 1
                         continue
                     lowered = stripped.lower()
                     if (stripped.startswith('_') or lowered.startswith('loop_')
@@ -2545,89 +2634,79 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                             skip_bracket_value = True
                         else:
                             bracket_depth = 0
+                        idx += 1
                         continue
                     else:
                         # Ordinary single-line value (bare, quoted, or a
                         # self-contained bracket expression).
                         awaiting_deleted_value = False
+                        idx += 1
                         continue
 
                 if in_multiline:
                     new_lines.append(line)
+                    idx += 1
                     continue
 
                 # Track which data block we're in for block-scoped actions
                 if stripped.lower().startswith('data_'):
                     current_block = stripped[5:]
-                    in_loop_header = False
                     new_lines.append(line)
+                    idx += 1
                     continue
 
-                # Enter a loop_ column-name header
+                # A loop_ is parsed and rewritten as a whole: a loop is a table
+                # where data names are column headers, so deleting or renaming
+                # a column has to update every row's value in lockstep, which a
+                # single-line pass can't do safely.
                 if stripped.lower() == 'loop_':
-                    in_loop_header = True
-                    new_lines.append(line)
-                    continue
+                    loop_obj, consumed = loop_helper._parse_loop(lines, idx)
+                    if loop_obj is None:
+                        # Malformed loop_ (no field names found) — leave as-is.
+                        new_lines.append(line)
+                        idx += 1
+                        continue
 
-                # A non-blank, non-comment line that is not a data name ends the
-                # loop header (the loop's data rows have started).
-                if in_loop_header and stripped and not stripped.startswith('_') \
-                        and not stripped.startswith('#'):
-                    in_loop_header = False
+                    keep_indices = []
+                    new_field_names = []
+                    loop_changed = False
+                    for col_index, field_name in enumerate(loop_obj.field_names):
+                        action, new_name = _decide_loop_column_action(field_name.lower())
+                        if action == 'delete':
+                            loop_changed = True
+                            continue
+                        if action == 'rename':
+                            loop_changed = True
+                            new_field_names.append(new_name)
+                        else:
+                            new_field_names.append(field_name)
+                        keep_indices.append(col_index)
+
+                    if not loop_changed:
+                        # Nothing in this loop needs to change — emit it
+                        # verbatim to avoid any incidental reformatting.
+                        new_lines.extend(lines[idx:idx + consumed])
+                    else:
+                        modified = True
+                        if new_field_names:
+                            new_rows = [
+                                [row[i] for i in keep_indices]
+                                for row in loop_obj.data_rows
+                            ]
+                            new_lines.extend(loop_helper._format_loop(
+                                CIFLoop(new_field_names, new_rows)))
+                        # else: every column was deleted, so the whole loop
+                        # (header and data rows) is dropped along with it.
+
+                    idx += consumed
+                    continue
 
                 # Check if this line contains a field
                 if stripped.startswith('_'):
                     parts = stripped.split(None, 1)
                     field_name = parts[0].lower() if parts else ''
 
-                    if in_loop_header:
-                        # Only pure renames are safe on a loop column with this
-                        # line-based pass; deletion / successor-insertion are not.
-                        if field_name in fields_to_delete and _in_scope(field_name):
-                            counts['skipped_loop'] += 1
-                            new_lines.append(line)
-                            continue
-                        if (field_name in deprecated_updates
-                                and _in_scope(field_name)
-                                and not _successor_present(
-                                    current_block,
-                                    deprecated_updates[field_name],
-                                    field_name)):
-                            counts['skipped_loop'] += 1
-                            new_lines.append(line)
-                            continue
-
-                    # Decide what happens to this occurrence (block-scoped)
-                    delete_this = False
-                    rename_to = None
-                    add_successor = None
-
-                    if field_name in fields_to_delete and _in_scope(field_name):
-                        delete_this = True
-                        counts['deleted'] += 1
-                    elif field_name in deprecated_replacements and _in_scope(field_name):
-                        successor = deprecated_replacements[field_name]
-                        if _successor_present(current_block, successor, field_name):
-                            # Successor already in this block: removing the
-                            # deprecated field is enough
-                            delete_this = True
-                            counts['removed_existing'] += 1
-                        else:
-                            rename_to = successor
-                            counts['replaced'] += 1
-                            _mark_successor_present(current_block, successor)
-                    elif field_name in deprecated_updates and _in_scope(field_name):
-                        successor = deprecated_updates[field_name]
-                        if not _successor_present(current_block, successor, field_name):
-                            add_successor = successor
-                            counts['added'] += 1
-                            _mark_successor_present(current_block, successor)
-                    elif field_name in format_corrections and _in_scope(field_name):
-                        rename_to = format_corrections[field_name]
-                        if field_name in malformed_fixes:
-                            counts['malformed_fixed'] += 1
-                        else:
-                            counts['corrected'] += 1
+                    delete_this, rename_to, add_successor = _decide_action(field_name)
 
                     if delete_this:
                         modified = True
@@ -2639,11 +2718,13 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                             # value (semicolon block, bracket value, or a plain
                             # value on its own line) is removed too.
                             awaiting_deleted_value = True
+                            idx += 1
                             continue
                         value_part = parts[1].strip()
                         if value_part.startswith(';'):
                             # Inline semicolon after field name (e.g. _field ;\nvalue\n;)
                             skip_until_semicolon = True
+                            idx += 1
                             continue
                         elif value_part[:1] in '[{':
                             # Bracket value on the same line, possibly continuing
@@ -2653,9 +2734,11 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                                 skip_bracket_value = True
                             else:
                                 bracket_depth = 0
+                            idx += 1
                             continue
                         else:
                             # Single line value, skip this line
+                            idx += 1
                             continue
 
                     if rename_to is not None:
@@ -2666,6 +2749,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                             # Field name only (value on next line)
                             new_lines.append(rename_to)
                         modified = True
+                        idx += 1
                         continue
 
                     if add_successor is not None:
@@ -2677,9 +2761,11 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                         else:
                             new_lines.append(add_successor)
                         modified = True
+                        idx += 1
                         continue
 
                 new_lines.append(line)
+                idx += 1
 
             if modified:
                 new_content = '\n'.join(new_lines)
@@ -2712,15 +2798,16 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
                 )
 
             if counts['skipped_loop']:
-                # A loop column cannot be removed safely by this line-based pass
-                # without also rewriting every data row, so it was left in place.
+                # Adding a brand-new loop column isn't safe here: every existing
+                # data row would need a value for it, and there's no sensible
+                # default to fill in, so those successors were left out.
                 QMessageBox.warning(
                     self,
-                    "Loop Column Not Removed",
-                    f"{counts['skipped_loop']} field(s) are columns of a loop_ and "
-                    "were left unchanged. Removing a loop column also requires "
-                    "deleting its value from every row of the loop; please edit "
-                    "the loop by hand."
+                    "Loop Column Not Added",
+                    f"{counts['skipped_loop']} successor field(s) could not be added "
+                    "automatically because they would be new columns in a loop_, and "
+                    "every existing row would need a value for them; please add "
+                    "them by hand."
                 )
     
     def show_editor_settings(self):

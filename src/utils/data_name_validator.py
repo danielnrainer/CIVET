@@ -77,6 +77,7 @@ class FieldValidationResult:
     # pairs in file order. Only populated for multi-block files; drives the
     # per-block action scoping in the validation dialog.
     block_occurrences: List = field(default_factory=list)
+    in_loop: bool = False              # True when this is a loop_ column, not a standalone field
 
 
 @dataclass
@@ -359,7 +360,7 @@ class DataNameValidator:
 
         report = ValidationReport()
         seen_fields: Set[str] = set()
-        parsed_fields: List[tuple[str, int, str]] = []  # (name, line, block)
+        parsed_fields: List[tuple[str, int, str, bool]] = []  # (name, line, block, in_loop)
         # All (block, line) occurrences per field, first line per block
         occurrences: Dict[str, List[tuple]] = {}
 
@@ -372,6 +373,7 @@ class DataNameValidator:
         text_block_tracker = TextBlockTracker()
         current_block = ""      # data_ block currently being scanned
         block_count = 0
+        in_loop_header = False  # walking the column-name header of a loop_
 
         for line_num, line in enumerate(lines, start=1):
             line_stripped = line.strip()
@@ -388,11 +390,17 @@ class DataNameValidator:
                 if line_stripped.lower().startswith('data_'):
                     current_block = line_stripped[5:]
                     block_count += 1
+                    in_loop_header = False
                 continue
 
-            # Skip loop_ headers
+            # Enter a loop_ column-name header
             if line_stripped.lower() == 'loop_':
+                in_loop_header = True
                 continue
+
+            # A non-field line ends the loop header - its data rows have started.
+            if in_loop_header and not line_stripped.startswith('_'):
+                in_loop_header = False
 
             # Match field names (start with underscore)
             # Handle both standalone field names and field name with value
@@ -413,15 +421,16 @@ class DataNameValidator:
                             field_occurrences.append((current_block, line_num))
                         continue
                     seen_fields.add(field_name_lower)
-                    parsed_fields.append((field_name, line_num, current_block))
+                    parsed_fields.append((field_name, line_num, current_block, in_loop_header))
                     occurrences[field_name_lower] = [(current_block, line_num)]
 
-        all_field_names = {field_name.lower() for field_name, _, _ in parsed_fields}
+        all_field_names = {field_name.lower() for field_name, _, _, _ in parsed_fields}
         multi_block = block_count > 1
 
-        for field_name, line_num, block_name in parsed_fields:
+        for field_name, line_num, block_name, in_loop in parsed_fields:
             # Validate the field
             result = self.validate_field(field_name, line_num)
+            result.in_loop = in_loop
             # Only attach block context when there is more than one block -
             # single-block reports stay unchanged
             if multi_block:

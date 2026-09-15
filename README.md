@@ -28,7 +28,8 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **CIF2 Compliance Support**: Maintains `#\#CIF_2.0` headers and handles CIF2 quoting/formatting edge cases (including triple-quoted values and CIF2 lists/tables).
 - **Dictionary-Backed Intelligence**: Multi-dictionary loading, metadata display, update checks, and parser support for DDLm + DDL1 dictionaries.
 - **Dictionary Search**: Search loaded dictionaries by data name, alias, category, and optionally description text; filter to selected dictionaries and cross-check hits against the currently loaded CIF.
-- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting. On multi-block files, a field's occurrences across all blocks are shown together, and any fix can be applied to all blocks or scoped to just one.
+- **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting. On multi-block files, a field's occurrences across all blocks are shown together, and any fix can be applied to all blocks or scoped to just one. A data name that's a `loop_` column is flagged with a 🔁 indicator, and deleting one asks for confirmation first since it removes the value from every row.
+- **Loop Editor**: Edit any `loop_` as a spreadsheet-style table via **Actions → Edit Loop...** or the editor's right-click menu - add/rename/delete columns (data items) and rows, edit cells directly, or set every row's value for one column at once. A built-in picker (filterable by data block on multi-block files) switches between loops or starts a new one from scratch, and a freeze-first-column option keeps context in view while scrolling wide loops.
 - **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows. On multi-block files this runs per block, so the same data name legitimately repeated across blocks is never flagged as a duplicate.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
 - **Multi-Data-Block Support**: Files with several `data_` blocks are checked block-by-block instead of silently mixing them up (see below for details).
@@ -265,8 +266,30 @@ The validation results dialog now combines several related checks in one place:
 - **Deprecated Fields**: Offers a **+ Successor** action that adds the appropriate successor name while keeping the deprecated field, a **Replace** action that swaps the deprecated name for its successor in place, and a **Delete** action to remove the deprecated field once its successor already exists. In legacy or mixed CIF files, CIVET prefers a legacy successor name when one exists; otherwise it falls back to the modern name.
 - **Conflict Resolution Controls**: The conflict dialog now supports keeping aliases while synchronizing all alias values when that strategy is preferred.
 - **Details Tooltips**: Hover over the Details column to read the full text when the column is truncated.
+- **Loop Column Awareness**: A data name that's a column in a `loop_` (not a standalone field) shows a 🔁 indicator and tooltip in the list. Clicking **Delete** on one asks for confirmation first, explaining that the whole column - its value in every row - will be removed, and points to the **Loop Editor** (below) for finer-grained changes.
 
 Malformed-field fixes are now handled through the validation dialog itself rather than through a separate pre-check option.
+
+### Loop Editor
+
+A `loop_` is a table where data names are column headers and each row is one record holding one
+value per column. Any loop can be opened and edited directly, without hand-editing the raw text:
+
+- **Open it** via **Actions → Edit Loop...**, or **Edit Loop...** in the editor's right-click menu.
+  If the text cursor is inside a loop, that loop is pre-loaded; otherwise the dialog opens blank,
+  ready to build a new loop from scratch.
+- **Built-in loop picker**: a dropdown inside the dialog itself lists every loop in the file (plus a
+  "New Loop" option) so you can switch what you're editing without a separate selection window. On
+  multi-block files, a **Filter by Data Block** control narrows the picker to just the block(s) you
+  select.
+- **Edit freely**: add, rename, or delete columns (data items) - deleting a column removes its value
+  from every row, and deleting every column removes the loop entirely; add or delete rows (a loop
+  always needs at least one); edit any cell directly; or use **Set All Values in Column...** to set
+  one column to the same value across every row in a single action.
+- **Freeze First Column**: on by default, keeps the first column visible while scrolling through a
+  wide loop; untick it to scroll freely.
+- Only the edited loop's own text is rewritten (or a new loop inserted at the cursor) - the rest of
+  the file is left untouched.
 
 ### Syntax Highlighting Categories
 
