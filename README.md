@@ -17,7 +17,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **Multiline text blocks are never rewritten.** Content inside a semicolon-delimited (`;...;`) or CIF 2.0 triple-quoted (`"""..."""` / `'''...'''`) value — such as the reflection/refinement narrative in `_iucr_refine_fcf_details` — is treated as opaque text. CIVET does not convert notation, flag deprecated data names, or otherwise modify anything inside these blocks, even if the text happens to contain data-name-like strings (e.g. software echoing part of the CIF back into a details block). This is intentional: checkCIF and other downstream tools may expect that content to survive untouched. I will review this periodically and change the behaviour if it becomes safe to do so.
 - **Some legacy data names are deliberately retained alongside their modern successors.** For example, `_cell_measurement_temperature` is kept even when the modern `_diffrn_ambient_temperature` is present, because checkCIF's [PLAT197](https://journals.iucr.org/services/cif/checking/PLAT197.html) check does not yet recognise the modern name. The full list of these data names (as far as I am aware) lives in [field_rules/checkcif_compatibility.cif_rules](field_rules/checkcif_compatibility.cif_rules) and is reviewed periodically as checkCIF is updated.
 
-## Key Features (v1.3)
+## Key Features (v1.4)
 
 - **CIF Editing and Validation**: Syntax highlighting, guided dialogs, smart field checks, and duplicate/alias-aware workflows.
 - **Command-Line File Opening**: Launch CIVET with an optional CIF file path argument to open it on startup (unknown arguments are ignored, so Qt flags can be passed through safely).
@@ -30,6 +30,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **Dictionary Search**: Search loaded dictionaries by data name, alias, category, and optionally description text; filter to selected dictionaries and cross-check hits against the currently loaded CIF.
 - **Data Name Validation**: Validates names against loaded dictionaries and IUCr registered prefixes, groups malformed/unknown/deprecated names, offers one-click fixes (including **Replace** and **Delete** for deprecated fields with an existing successor), and uses validation-aware highlighting. On multi-block files, a field's occurrences across all blocks are shown together, and any fix can be applied to all blocks or scoped to just one. A data name that's a `loop_` column is flagged with a 🔁 indicator, and deleting one asks for confirmation first since it removes the value from every row.
 - **Loop Editor**: Edit any `loop_` as a spreadsheet-style table via **Actions → Edit Loop...** or the editor's right-click menu - add/rename/delete columns (data items) and rows, edit cells directly, or set every row's value for one column at once. A built-in picker (filterable by data block on multi-block files) switches between loops or starts a new one from scratch, and a freeze-first-column option keeps context in view while scrolling wide loops.
+- **Rename Data Block**: **Actions → Rename Data Block...** renames a `data_` block and follows the rename through every place the block's code is referenced elsewhere in the file (VRF fields, `_audit.block_code`, `_audit_link.block_code`, and echoed `data_` headers in pasted `.fcf` details), validating the new name first.
 - **Data-Name Integrity Resolution**: Detects duplicate data names and alias groups with conflicting values, then offers guided manual or auto-resolution in save/conversion workflows. On multi-block files this runs per block, so the same data name legitimately repeated across blocks is never flagged as a duplicate.
 - **Data Value Validation**: Validates field values against dictionary-defined types, numeric ranges, and enumeration sets; detects loop count mismatches. Results shown in a sortable, live-refreshable dialog. Accessible via **Actions → Validate Data Values...**
 - **Multi-Data-Block Support**: Files with several `data_` blocks are checked block-by-block instead of silently mixing them up (see below for details).
@@ -39,6 +40,7 @@ A few CIVET behaviours exist specifically to keep files compatible for example w
 - **Productivity UX**: Built-in/user/custom rules selection, dropdown suggestions for field values, configurable dialog interaction modes, and focused editor settings.
 - **Performance**: Debounced/background compliance checks, content-hash-based reparse avoidance, and caching across dictionary lookups and validation keep the editor responsive on larger files.
 - **Headless CLI**: `src/cli.py` exposes syntax/data-name/data-value validation, CIF1↔CIF2 and legacy↔modern conversion, and `.cif_rules` linting for CI/batch use without launching the GUI (see below).
+- **Unsaved-Changes Exit Confirmation**: Closing CIVET with unsaved edits prompts to Save, Discard, or Cancel instead of exiting silently.
 
 ## Quick Start
 

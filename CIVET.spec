@@ -61,6 +61,7 @@ a = Analysis(
         
         # Application modules - Main application structure
         'gui',
+        'gui.block_renaming',
         'gui.collapsible_widgets',
         'gui.check_progress',
         'gui.data_name_integrity',
@@ -92,6 +93,7 @@ a = Analysis(
         'gui.dialogs.non_ascii_conversion_dialog',
         'gui.dialogs.progress_banner',
         'gui.dialogs.recognised_prefixes_dialog',
+        'gui.dialogs.rename_block_dialog',
         'version',
         
         # Utility modules - Core functionality
@@ -108,6 +110,7 @@ a = Analysis(
         'utils.CIF_parser',
         'utils.cif_syntax_compliance',
         'utils.cif2_value_formatting',    # CIF2 value formatting
+        'utils.cif_block_rename',         # Data block renaming and reference updates
         'utils.data_name_validator',      # CIF data name validation
         'utils.dictionary_suggestion_manager',
         'utils.field_rules_validator',
@@ -190,7 +193,7 @@ if sys.platform == 'darwin':
         icon='civet.icns' if os.path.exists('civet.icns') else None,
         bundle_identifier='org.civet.civet',
         info_plist={
-            'CFBundleShortVersionString': '1.3.0',
+            'CFBundleShortVersionString': '1.4',
             'CFBundleDisplayName': 'CIVET',
             'NSHighResolutionCapable': True,
         },

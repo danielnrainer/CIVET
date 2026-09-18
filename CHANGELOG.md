@@ -3,7 +3,9 @@
 All notable changes to CIVET are documented in this file. Dates are release dates; entries are grouped by
 theme rather than strict chronological commit order.
 
-## since 1.3
+## since 1.4
+
+## [1.4] - 2026-09-18
 
 ### Added
 - **Headless CLI** (`src/cli.py`): `check` (syntax/data-name/data-value validation, text or JSON
@@ -53,6 +55,9 @@ theme rather than strict chronological commit order.
   field) now shows a 🔁 indicator and tooltip in the list, and clicking **Delete** on one asks for
   confirmation - explaining that the whole column (its value in every row) will be removed, and
   pointing to the Loop Editor for finer-grained changes.
+- **Unsaved-changes exit confirmation**: closing CIVET with unsaved edits now prompts to Save,
+  Discard, or Cancel instead of exiting silently; choosing Save keeps the window open if the save is
+  cancelled or fails.
 - **Rename Data Block**: **Actions → Rename Data Block...** renames a `data_` block and follows the
   rename to every place the block's code is referenced elsewhere in the file - `_vrf_<ALERT>_<code>`
   checkCIF/PLATON validation-reply-form field names inside the block, `_audit.block_code` when it
