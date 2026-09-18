@@ -63,6 +63,8 @@ def editor(app, monkeypatch):
     monkeypatch.setattr(main_window.QMessageBox, "information", lambda *args, **kwargs: None)
     monkeypatch.setattr(main_window.QMessageBox, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(main_window.QMessageBox, "critical", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_window.QMessageBox, "question",
+                         lambda *args, **kwargs: main_window.QMessageBox.StandardButton.Discard)
     window = CIFEditor()
     yield window
     window.close()

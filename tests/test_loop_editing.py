@@ -53,6 +53,8 @@ def editor(app, monkeypatch):
     monkeypatch.setattr(main_window.QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr(main_window.QMessageBox, "warning", lambda *a, **k: None)
     monkeypatch.setattr(main_window.QMessageBox, "critical", lambda *a, **k: None)
+    monkeypatch.setattr(main_window.QMessageBox, "question",
+                         lambda *a, **k: main_window.QMessageBox.StandardButton.Discard)
     window = CIFEditor()
     window.update_status_bar = lambda: None
     monkeypatch.setattr(
