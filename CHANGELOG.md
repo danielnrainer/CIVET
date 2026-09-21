@@ -6,6 +6,16 @@ theme rather than strict chronological commit order.
 ## since 1.4
 
 ### Fixed
+- **A data name echoed inside a multiline text value (e.g. a checkCIF VRF response quoting the
+  field it discusses) could be mistaken for a real occurrence of that field.** `.cif_rules` CHECK
+  prompts and DELETE/EDIT/RENAME/APPEND actions, the malformed-field-name scan, and several
+  supporting field lookups (space-group number, absolute-configuration/electron-diffraction
+  detection, duplicate/alias/deprecated-field reporting) scanned CIF text line-by-line without
+  tracking whether a line was inside a semicolon-delimited or triple-quoted value. A data-name-
+  looking line inside such a block was therefore sometimes edited/deleted in place - corrupting the
+  text value - and since most of these scans stop at the first match, the *real* field further down
+  the file could end up never checked at all. All affected scanners now skip multiline text-block
+  content, consistent with the existing guarantee (see README) that such blocks are never rewritten.
 - **Data names, block codes, and `.cif_rules` field matching were sometimes compared
   case-sensitively**: per the CIF spec, these identifiers are case-insensitive, but several code
   paths compared them literally instead.

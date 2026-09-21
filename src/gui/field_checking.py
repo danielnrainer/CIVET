@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.CIF_field_parsing import safe_eval_expr, evaluate_condition
 from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
-                              TextBlockTracker, cif_casefold)
+                              TextBlockTracker, cif_casefold, iter_structural_lines)
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
 from .check_progress import CheckProgressTracker, count_rule_steps
@@ -458,7 +458,7 @@ class FieldCheckingMixin:
         removable_chars = "'"
         lines, line_offset = self._get_check_lines()
 
-        for i, line in enumerate(lines):
+        for i, line in iter_structural_lines(lines):
             parts = line.split(None, 1)
             if parts and cif_casefold(parts[0]) == cif_casefold(prefix):
                 current_value = self.extract_field_value(lines, i, prefix)
@@ -567,7 +567,7 @@ class FieldCheckingMixin:
 
         # Check if field exists
         field_found = False
-        for i, line in enumerate(lines):
+        for i, line in iter_structural_lines(lines):
             parts = line.split(None, 1)
             if parts and cif_casefold(parts[0]) == cif_casefold(prefix):
                 field_found = True
@@ -1177,7 +1177,7 @@ class FieldCheckingMixin:
         self._active_check_block = block
         try:
             lines, _ = self._get_check_lines()
-            for i, line in enumerate(lines):
+            for i, line in iter_structural_lines(lines):
                 parts = line.split(None, 1)
                 if parts and cif_casefold(parts[0]) == cif_casefold(field_name):
                     self.update_field_value(lines, i, field_name, value)
@@ -1653,7 +1653,7 @@ class FieldCheckingMixin:
         lines, _ = self._get_check_lines()
 
         # Find space group number
-        for line in lines:
+        for _, line in iter_structural_lines(lines):
             if line.startswith("_space_group_IT_number"):
                 parts = line.split()
                 if len(parts) > 1:
@@ -1679,7 +1679,7 @@ class FieldCheckingMixin:
         lines, _ = self._get_check_lines()
 
         folded_field_name = cif_casefold(field_name)
-        for index, line in enumerate(lines):
+        for index, line in iter_structural_lines(lines):
             if cif_casefold(line).startswith(folded_field_name):
                 return self.extract_field_value(lines, index, field_name).strip().strip("'\"")
 
@@ -1729,7 +1729,7 @@ class FieldCheckingMixin:
         lines, _ = self._get_check_lines()
 
         found = False
-        for line in lines:
+        for _, line in iter_structural_lines(lines):
             if line.startswith(abs_config_field):
                 found = True
                 break
@@ -1767,7 +1767,7 @@ class FieldCheckingMixin:
                 return None
 
         lines, _ = self._get_check_lines()
-        for line in lines:
+        for _, line in iter_structural_lines(lines):
             if line.startswith(abs_config_field):
                 parts = line.split()
                 if len(parts) > 1:
@@ -1781,7 +1781,7 @@ class FieldCheckingMixin:
         _, z_score_field = self._get_absolute_configuration_fields()
         lines, _ = self._get_check_lines()
         found_z_score = False
-        for line in lines:
+        for _, line in iter_structural_lines(lines):
             if line.startswith(z_score_field):
                 found_z_score = True
                 break
@@ -1871,8 +1871,9 @@ class FieldCheckingMixin:
             deprecated_fields = []
             if not is_legacy:
                 lines = content.splitlines()
-                
-                for line_num, line in enumerate(lines, 1):
+
+                for idx, line in iter_structural_lines(lines):
+                    line_num = idx + 1
                     line_stripped = line.strip()
                     if line_stripped.startswith('_') and ' ' in line_stripped:
                         field_name = line_stripped.split()[0]
@@ -1899,17 +1900,19 @@ class FieldCheckingMixin:
                 for alias in alias_list:
                     # Find this field in the content
                     field_in_deprecated = False
-                    for line_num, line in enumerate(lines, 1):
+                    for idx, line in iter_structural_lines(lines):
+                        line_num = idx + 1
                         line_stripped = line.strip()
                         if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
                             if self._is_in_deprecated_section(content, line_num):
                                 deprecated_section_fields.append(alias)
                                 field_in_deprecated = True
                                 break
-                    
+
                     if not field_in_deprecated:
                         # Check if field exists in main section
-                        for line_num, line in enumerate(lines, 1):
+                        for idx, line in iter_structural_lines(lines):
+                            line_num = idx + 1
                             line_stripped = line.strip()
                             if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
                                 if not self._is_in_deprecated_section(content, line_num):
@@ -1981,7 +1984,8 @@ class FieldCheckingMixin:
                 detailed_conflicts[canonical] = []
                 for alias in set(alias_list):
                     # Find line number and value for this alias
-                    for line_num, line in enumerate(lines, 1):
+                    for idx, line in iter_structural_lines(lines):
+                        line_num = idx + 1
                         line_stripped = line.strip()
                         if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
                             # Extract value

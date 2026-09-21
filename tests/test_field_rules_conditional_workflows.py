@@ -639,3 +639,67 @@ def test_rename_field_matches_old_name_regardless_of_case():
 
     assert renamed is True
     assert modified == ["_refine_diff.potential_max 0.5"]
+
+
+def _vrf_echo_lines(real_value="0.274"):
+    """A VRF-style multiline text block that echoes another field's name
+    (e.g. a checkCIF response quoting the data name it discusses), followed
+    by the real occurrence of that field later in the file."""
+    return [
+        "_vrf_PLAT095_blabla",
+        ";",
+        "RESPONSE: values reported below, expressed in e/Ang.:",
+        "_refine_diff.potential_max         1.035",
+        "_refine_diff.potential_min         -0.9930",
+        ";",
+        f"_refine_diff.potential_max  {real_value}",
+    ]
+
+
+def test_delete_field_ignores_field_name_echoed_in_multiline_value():
+    checker = CIFFieldChecker()
+    lines = _vrf_echo_lines()
+
+    modified, deleted = checker._delete_field(lines, "_refine_diff.potential_max")
+
+    assert deleted is True
+    # The echoed line inside the ';' block must survive untouched...
+    assert "_refine_diff.potential_max         1.035" in modified
+    # ...and only the real field line is removed.
+    assert "_refine_diff.potential_max  0.274" not in modified
+
+
+def test_edit_field_ignores_field_name_echoed_in_multiline_value():
+    checker = CIFFieldChecker()
+    lines = _vrf_echo_lines()
+
+    modified, edited = checker._edit_field(lines, "_refine_diff.potential_max", "0.5")
+
+    assert edited is True
+    # The echoed line inside the ';' block must survive untouched.
+    assert "_refine_diff.potential_max         1.035" in modified
+    assert "_refine_diff.potential_max    0.5" in modified
+    # Only one line should have been rewritten.
+    assert modified.count("_refine_diff.potential_max    0.5") == 1
+
+
+def test_rename_field_ignores_field_name_echoed_in_multiline_value():
+    checker = CIFFieldChecker()
+    lines = [
+        "_vrf_PLAT095_blabla",
+        ";",
+        "RESPONSE: values reported below, expressed in e/Ang.:",
+        "_refine_diff_density_max 1.035",
+        ";",
+        "_refine_diff_density_max 0.274",
+    ]
+
+    modified, renamed = checker._rename_field(
+        lines, "_refine_diff_density_max", "_refine_diff.potential_max"
+    )
+
+    assert renamed is True
+    # The echoed line inside the ';' block must survive untouched...
+    assert "_refine_diff_density_max 1.035" in modified
+    # ...and only the real, post-block field is renamed.
+    assert modified.count("_refine_diff.potential_max 0.274") == 1

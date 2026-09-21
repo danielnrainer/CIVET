@@ -225,3 +225,45 @@ def test_check_line_with_config_matches_exact_field_name(monkeypatch):
     assert captured["current_value"] == "0.02510"
     assert "Line 2:" in captured["prompt"]
     assert "_diffrn_radiation_wavelength 0.02510" in captured["prompt"]
+
+
+def test_check_line_with_config_skips_data_name_echoed_in_multiline_value(monkeypatch):
+    """A VRF response (or any multiline text) that happens to quote another
+    field's name/value must not be mistaken for a real occurrence of that
+    field - and the real field later in the file must still be found."""
+    checker = _DecisionHarness(
+        "_vrf_PLAT095_blabla\n"
+        ";\n"
+        "PROBLEM: No Residual Density Maximum Given ..............     Please Do !  \n"
+        "RESPONSE: With the program olex2.refine, least-squares refinement against \n"
+        "3D ED data returns the max/min residuals of the electrostatic potential. \n"
+        "See values reported in the entries below, expressed in in e/Ang.:\n"
+        "_refine_diff.potential_max         1.035\n"
+        "_refine_diff.potential_min         -0.9930\n"
+        "_refine_diff.potential_rms         0.2507    \n"
+        ";\n"
+        "_refine_diff.potential_max  0.274\n"
+    )
+
+    captured = {}
+
+    def fake_get_text(parent, title, prompt, current_value, default_value, **kwargs):
+        _ = (parent, title, default_value, kwargs)
+        captured["prompt"] = prompt
+        captured["current_value"] = current_value
+        return current_value, QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(field_checking_module.CIFInputDialog, "getText", fake_get_text)
+
+    result = checker.check_line_with_config(
+        "_refine_diff.potential_max",
+        "?",
+        False,
+        "Maximum electrostatic potential value in a difference Fourier map.",
+        {"skip_matching_defaults": False},
+    )
+
+    assert result == QDialog.DialogCode.Rejected
+    # Must find the real field on line 11, not the echoed text on line 7.
+    assert captured["current_value"] == "0.274"
+    assert "Line 11:" in captured["prompt"]

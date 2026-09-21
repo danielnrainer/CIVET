@@ -86,6 +86,25 @@ class TextBlockTracker:
         return False
 
 
+def iter_structural_lines(lines: List[str]):
+    """Yield (index, line) for lines that are not part of a multiline text
+    block (a CIF 1.1 ';'-delimited value or a CIF 2.0 triple-quoted value).
+
+    Raw line-by-line scanners that look for a field name at the start of a
+    line (e.g. "does this line start with '_cell_length_a'?") must skip
+    text-block content, or a data value that happens to echo a data-name-
+    looking token (e.g. a VRF response quoting another field's name) gets
+    mistaken for a real occurrence of that field - and once matched, such
+    scanners typically stop looking, so the real field further down the
+    file is never reached. ``line`` is the original (unstripped) line.
+    """
+    tracker = TextBlockTracker()
+    for i, line in enumerate(lines):
+        if tracker.consume(line.strip()):
+            continue
+        yield i, line
+
+
 class CIFField:
     """Represents a single CIF field instance parsed from a CIF file.
     

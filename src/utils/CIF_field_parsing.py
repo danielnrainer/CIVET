@@ -4,7 +4,7 @@ import ast
 import operator
 import re
 
-from .CIF_parser import cif_casefold
+from .CIF_parser import cif_casefold, TextBlockTracker
 
 # Safe operators for expression evaluation
 SAFE_OPERATORS = {
@@ -574,9 +574,12 @@ class CIFFieldChecker:
         modified_lines = []
         deleted = False
         folded_field_name = cif_casefold(field_name)
+        tracker = TextBlockTracker()
 
         for line in lines:
-            if cif_casefold(line.strip()).startswith(folded_field_name):
+            stripped = line.strip()
+            in_text_block = tracker.consume(stripped)
+            if not in_text_block and cif_casefold(stripped).startswith(folded_field_name):
                 # Skip this line (delete it)
                 deleted = True
                 continue
@@ -598,9 +601,12 @@ class CIFFieldChecker:
         modified_lines = []
         edited = False
         folded_field_name = cif_casefold(field_name)
+        tracker = TextBlockTracker()
 
         for line in lines:
-            if cif_casefold(line.strip()).startswith(folded_field_name):
+            stripped = line.strip()
+            in_text_block = tracker.consume(stripped)
+            if not in_text_block and cif_casefold(stripped).startswith(folded_field_name):
                 # Replace the line with new value
                 if new_value:
                     modified_lines.append(f"{field_name}    {new_value}")
@@ -611,7 +617,7 @@ class CIFFieldChecker:
                 edited = True
             else:
                 modified_lines.append(line)
-        
+
         return modified_lines, edited
     
     def _append_field(self, lines, field_name, append_text):
@@ -633,12 +639,14 @@ class CIFFieldChecker:
         appended = False
         i = 0
         folded_field_name = cif_casefold(field_name)
+        tracker = TextBlockTracker()
 
         while i < len(lines):
             line = lines[i]
+            in_text_block = tracker.consume(line.strip())
 
             # Check if this is the target field with semicolon delimiter
-            if cif_casefold(line.strip()).startswith(folded_field_name):
+            if not in_text_block and cif_casefold(line.strip()).startswith(folded_field_name):
                 # Check if it's a multiline value starting with semicolon
                 if i + 1 < len(lines) and lines[i + 1].strip() == ';':
                     # Add field name and opening semicolon
@@ -707,16 +715,18 @@ class CIFFieldChecker:
         renamed = False
         i = 0
         folded_old_name = cif_casefold(old_name)
+        tracker = TextBlockTracker()
 
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
+            in_text_block = tracker.consume(stripped)
 
             # Check for the field name match (including loop columns),
             # case-insensitively - CIF data names are case-insensitive per
             # the spec, so the file may spell old_name differently than the
             # rule does.
-            if cif_casefold(stripped).startswith(folded_old_name):
+            if not in_text_block and cif_casefold(stripped).startswith(folded_old_name):
                 # Get the rest after the field name
                 rest = stripped[len(old_name):]
                 # Check it's a complete field name (followed by whitespace, value, or end of line)

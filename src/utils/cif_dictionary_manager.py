@@ -1713,10 +1713,18 @@ class CIFDictionaryManager:
         lines = content.splitlines()
         notation = self.detect_notation(content)
         prefer_legacy = notation in (FieldNotation.LEGACY, FieldNotation.MIXED)
-        
+        text_block_tracker = TextBlockTracker()
+
         for line_num, line in enumerate(lines, 1):
             line_stripped = line.strip()
-            
+
+            # Skip text-block delimiters/content (CIF 1.1 ';' blocks and
+            # CIF 2.0 triple-quoted values) - a data-name-looking token
+            # quoted inside a multiline value (e.g. a VRF response echoing
+            # another field's name) is not an actual field occurrence.
+            if text_block_tracker.consume(line_stripped):
+                continue
+
             # Skip empty lines, comments, and non-field lines
             if not line_stripped or line_stripped.startswith('#'):
                 continue
