@@ -18,6 +18,18 @@ import re
 from typing import Dict, Any, List, Tuple, Optional
 
 
+def cif_casefold(name: str) -> str:
+    """Normalize a CIF identifier (data name, frame code, or block code) for
+    case-insensitive comparison.
+
+    Per the CIF spec, such identifiers are equivalent if they are "canonical
+    caseless matches" of each other (Unicode canonical caseless matching).
+    str.casefold() is the closer match for that than str.lower(), so assumed
+    more appropriate for this purpose.
+    """
+    return name.casefold()
+
+
 class TextBlockTracker:
     """Tracks whether a line lies inside a multiline CIF text value.
 
@@ -127,6 +139,72 @@ class CIFLoop:
         return f"CIFLoop(fields={len(self.field_names)}, rows={len(self.data_rows)})"
 
 
+class CaseInsensitiveFieldMap(dict):
+    """dict[str, CIFField] keyed by literal on-disk spelling, but looked up
+    and tested for containment case-insensitively (via cif_casefold), since
+    CIF data names are case-insensitive per the spec.
+
+    The first spelling seen for a given data name is kept as the actual
+    dict key, so iteration and output preserve the file's original casing.
+    Writing a value under a different-case spelling of an already-stored
+    name updates that existing entry in place rather than adding a second,
+    duplicate-looking key - the same "last write wins" semantics a plain
+    dict already had for repeated fields, extended to case variants.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self._casefold_to_key: Dict[str, str] = {}
+        if args or kwargs:
+            for key, value in dict(*args, **kwargs).items():
+                self[key] = value
+
+    def __setitem__(self, field_name: str, field: 'CIFField') -> None:
+        folded = cif_casefold(field_name)
+        existing_key = self._casefold_to_key.get(folded)
+        if existing_key is not None and existing_key != field_name:
+            super().__delitem__(existing_key)
+        super().__setitem__(field_name, field)
+        self._casefold_to_key[folded] = field_name
+
+    def __delitem__(self, field_name: str) -> None:
+        folded = cif_casefold(field_name)
+        actual_key = self._casefold_to_key.pop(folded, field_name)
+        super().__delitem__(actual_key)
+
+    def __contains__(self, field_name: object) -> bool:
+        if not isinstance(field_name, str):
+            return False
+        return cif_casefold(field_name) in self._casefold_to_key
+
+    def __getitem__(self, field_name: str) -> 'CIFField':
+        actual_key = self._casefold_to_key.get(cif_casefold(field_name))
+        if actual_key is None:
+            raise KeyError(field_name)
+        return super().__getitem__(actual_key)
+
+    def get(self, field_name: str, default=None):
+        actual_key = self._casefold_to_key.get(cif_casefold(field_name))
+        if actual_key is None:
+            return default
+        return super().__getitem__(actual_key)
+
+    def setdefault(self, field_name: str, default=None):
+        if field_name in self:
+            return self[field_name]
+        self[field_name] = default
+        return default
+
+    def pop(self, field_name: str, *args):
+        actual_key = self._casefold_to_key.get(cif_casefold(field_name))
+        if actual_key is None:
+            if args:
+                return args[0]
+            raise KeyError(field_name)
+        self._casefold_to_key.pop(cif_casefold(field_name), None)
+        return super().pop(actual_key)
+
+
 class CIFDataBlock:
     """One data_ block of a parsed CIF file (or the preamble before the first).
 
@@ -149,7 +227,7 @@ class CIFDataBlock:
     def __init__(self, name: Optional[str], header_line: Optional[str] = None):
         self.name = name  # Block code without the 'data_' prefix; None for the preamble
         self.header_line = header_line  # Full 'data_xxxx' line; None for the preamble
-        self.fields: Dict[str, CIFField] = {}
+        self.fields: CaseInsensitiveFieldMap = CaseInsensitiveFieldMap()
         self.loops: List[CIFLoop] = []
         self.content_blocks: List[Dict] = []
 
@@ -236,7 +314,7 @@ class CIFParser:
     """Main parser class for processing CIF file content."""
     
     def __init__(self):
-        self.fields: Dict[str, CIFField] = {}
+        self.fields: CaseInsensitiveFieldMap = CaseInsensitiveFieldMap()
         self.loops: List[CIFLoop] = []
         self.content_blocks: List[Dict] = []  # Ordered list of fields, loops, and header lines
         self.header_lines: List[str] = []  # Store important header lines like data_
@@ -498,7 +576,7 @@ class CIFParser:
         data_ line starts a new CIFDataBlock, and every parsed entry is
         also recorded on the block it belongs to.
         """
-        self.fields = {}
+        self.fields = CaseInsensitiveFieldMap()
         self.loops = []
         self.content_blocks = []
         self.header_lines = []
@@ -1210,11 +1288,11 @@ class CIFParser:
         Accepts the bare block code ('xtal1') or the full header form
         ('data_xtal1'). Block codes are case-insensitive per the CIF spec.
         """
-        target = name.lower()
+        target = cif_casefold(name)
         if target.startswith('data_'):
             target = target[5:]
         for block in self.blocks:
-            if (block.name or '').lower() == target:
+            if cif_casefold(block.name or '') == target:
                 return block
         return None
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
-from .CIF_parser import TextBlockTracker
+from .CIF_parser import TextBlockTracker, cif_casefold
 from .cif_dictionary_parser import CIFDictionaryParser
 from .cif_dictionary_format import detect_dictionary_format, create_dictionary_parser, DictionaryFormat
 from .user_config import (
@@ -3236,84 +3236,63 @@ class CIFDictionaryManager:
             (only returns entries where multiple instances are actually present)
         """
         self._ensure_loaded()
-        
-        # Extract all field names from CIF content (including duplicates) 
+
+        # Extract all field names from CIF content (including duplicates)
         # Exclude field references within multi-line text blocks
         all_found_fields = self._extract_fields_excluding_text_blocks(cif_content)
-        
-        # First check for direct duplicates (same field appearing multiple times)
-        field_counts = {}
+
+        # CIF data names are case-insensitive, so group occurrences by their
+        # casefolded spelling before counting - two spellings differing only
+        # in case are the same data name (a duplicate), not two distinct
+        # fields. Preserve the raw occurrences (with their original casing)
+        # per group, in first-seen order, since callers match these strings
+        # back against the literal file text.
+        occurrences_by_fold: Dict[str, List[str]] = {}
         for field in all_found_fields:
-            field_counts[field] = field_counts.get(field, 0) + 1
-        
-        # Find unique fields for alias detection
-        unique_fields = set(all_found_fields)
-        
-        # Group fields by their canonical (CIF2) form
-        canonical_to_aliases = {}
-        
-        # Handle direct duplicates first
-        for field, count in field_counts.items():
-            if count > 1:
-                # Skip deprecated fields - they should not participate in conflict detection
-                if self.is_field_deprecated(field):
-                    continue
-                    
-                # Determine canonical form for this field
-                canonical = None
-                
-                # Check if field is in legacy format and has a modern equivalent
-                if field in self._legacy_to_modern:
-                    canonical = self._legacy_to_modern[field]
-                # Check if field is already in modern format
-                elif field in self._modern_to_legacy:
-                    canonical = field
-                # For unknown fields, use the field itself as canonical
-                else:
-                    canonical = field
-                
-                if canonical not in canonical_to_aliases:
-                    canonical_to_aliases[canonical] = set()
-                canonical_to_aliases[canonical].add(field)
-        
-        # Then handle alias conflicts
-        for field in unique_fields:
+            occurrences_by_fold.setdefault(cif_casefold(field), []).append(field)
+
+        # Group by canonical (CIF2) form; fold_to_canonical tracks which
+        # distinct data names (by casefolded spelling) map to each canonical.
+        fold_to_canonical: Dict[str, str] = {}
+        for fold_key, raw_occurrences in occurrences_by_fold.items():
+            representative = raw_occurrences[0]
             # Skip deprecated fields - they should not participate in conflict detection
-            if self.is_field_deprecated(field):
+            if self.is_field_deprecated(representative):
                 continue
-                
-            # Skip fields already handled as direct duplicates
-            if field_counts.get(field, 0) > 1:
+
+            if fold_key in self._legacy_to_modern:
+                canonical = self._legacy_to_modern[fold_key]
+            elif fold_key in self._modern_to_legacy:
+                canonical = representative
+            elif len(raw_occurrences) > 1:
+                # Unknown field repeated (possibly spelled with different
+                # case) - it is its own canonical for duplicate detection.
+                canonical = representative
+            else:
+                # Unrecognized field appearing once: nothing to flag.
                 continue
-                
-            # Determine canonical form for this field
-            canonical = None
-            
-            # Check if field is in legacy format and has a modern equivalent
-            if field in self._legacy_to_modern:
-                canonical = self._legacy_to_modern[field]
-            # Check if field is already in modern format
-            elif field in self._modern_to_legacy:
-                canonical = field
-            
-            # Only process fields that have known aliases in our dictionaries
-            if canonical:
-                if canonical not in canonical_to_aliases:
-                    canonical_to_aliases[canonical] = set()
-                canonical_to_aliases[canonical].add(field)
-        
+
+            fold_to_canonical[fold_key] = canonical
+
+        canonical_to_folds: Dict[str, List[str]] = {}
+        for fold_key, canonical in fold_to_canonical.items():
+            canonical_to_folds.setdefault(canonical, []).append(fold_key)
+
         # Only return canonical fields that have multiple actual aliases/duplicates present in the CIF
         actual_conflicts = {}
-        for canonical, alias_set in canonical_to_aliases.items():
-            if len(alias_set) > 1:
-                # This canonical field has multiple different aliases/duplicates present - this is a real conflict
-                actual_conflicts[canonical] = list(alias_set)
-            elif len(alias_set) == 1:
-                # Check if this single field appears multiple times
-                single_field = list(alias_set)[0]
-                if field_counts.get(single_field, 0) > 1:
-                    actual_conflicts[canonical] = [single_field] * field_counts[single_field]
-        
+        for canonical, fold_keys in canonical_to_folds.items():
+            if len(fold_keys) > 1:
+                # Multiple distinct data names (aliases, or spellings
+                # differing only in case) map to this canonical - this is a
+                # real conflict.
+                actual_conflicts[canonical] = [occurrences_by_fold[fk][0] for fk in fold_keys]
+            else:
+                raw_occurrences = occurrences_by_fold[fold_keys[0]]
+                if len(raw_occurrences) > 1:
+                    # The same data name (possibly with varying case) appears
+                    # multiple times.
+                    actual_conflicts[canonical] = raw_occurrences
+
         return actual_conflicts
     
     def detect_mixed_format_issues(self, cif_content: str) -> Dict[str, int]:
@@ -3339,9 +3318,10 @@ class CIFDictionaryManager:
         modern_count = 0
         
         for field in found_fields:
-            if field in self._legacy_to_modern:
+            fold_key = cif_casefold(field)
+            if fold_key in self._legacy_to_modern:
                 legacy_count += 1
-            elif field in self._modern_to_legacy:
+            elif fold_key in self._modern_to_legacy:
                 modern_count += 1
         
         return {
@@ -3406,7 +3386,7 @@ class CIFDictionaryManager:
                     fields_to_remove.remove(first_alias)
             else:
                 # Keep the CIF1 form (find it from aliases)
-                cif1_candidates = [f for f in alias_list if f in self._legacy_to_modern]
+                cif1_candidates = [f for f in alias_list if cif_casefold(f) in self._legacy_to_modern]
                 if cif1_candidates:
                     non_deprecated_cif1 = [f for f in cif1_candidates if not self.is_field_deprecated(f)]
                     preferred_field = non_deprecated_cif1[0] if non_deprecated_cif1 else cif1_candidates[0]

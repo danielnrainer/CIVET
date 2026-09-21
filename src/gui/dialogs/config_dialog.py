@@ -119,7 +119,7 @@ class CheckConfigDialog(QDialog):
         # Option 2: Skip fields that match defaults
         self.skip_defaults_checkbox = QCheckBox(
             "Skip prompts for fields that already match default values\n"
-            "(Fields with correct default values will not prompt for editing)"
+            "(Fields corresponding to the default values will not prompt for editing)"
         )
         self.skip_defaults_checkbox.setChecked(self.skip_matching_defaults)
         config_layout.addWidget(self.skip_defaults_checkbox)

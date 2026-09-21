@@ -48,6 +48,48 @@ def test_mismatched_alias_values_are_flagged_as_conflict():
     assert any(m.canonical_name == "_diffrn_detector.make" for m in mismatches)
 
 
+def test_case_variant_duplicate_of_unknown_field_is_flagged():
+    """CIF data names are case-insensitive per the spec: an unrecognized
+    (not in any dictionary) field repeated with different case is the same
+    data name written twice, which is a genuine duplicate-data-name
+    conflict, not two distinct fields."""
+    manager = _build_manager()
+
+    content = "\n".join(
+        [
+            "data_test",
+            "_my_custom_field 1",
+            "_My_Custom_Field 2",
+            "",
+        ]
+    )
+
+    conflicts, _ = get_data_name_conflicts_requiring_resolution(content, manager)
+
+    assert len(conflicts) == 1
+    (alias_list,) = conflicts.values()
+    assert set(alias_list) == {"_my_custom_field", "_My_Custom_Field"}
+
+
+def test_case_variant_duplicate_of_known_legacy_field_is_flagged():
+    manager = _build_manager()
+
+    content = "\n".join(
+        [
+            "data_test",
+            "_cell_length_a 5.0",
+            "_Cell_Length_A 6.0",
+            "",
+        ]
+    )
+
+    conflicts, _ = get_data_name_conflicts_requiring_resolution(content, manager)
+
+    assert len(conflicts) == 1
+    (alias_list,) = conflicts.values()
+    assert set(alias_list) == {"_cell_length_a", "_Cell_Length_A"}
+
+
 def test_map_to_legacy_resolves_modern_alias_name():
     manager = _build_manager()
 

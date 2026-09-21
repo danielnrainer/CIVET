@@ -410,11 +410,17 @@ class _RuleDispatchHarness(FieldCheckingMixin):
         self.dict_manager = _DictManager()
 
     def extract_field_value(self, lines, index, prefix):
+        # Mirrors the real MainWindow.extract_field_value: it extracts by
+        # index, with no name comparison against `prefix` (the caller has
+        # already located the matching line).
         line = lines[index]
         parts = line.split(None, 1)
-        if len(parts) == 2 and parts[0] == prefix:
-            return parts[1]
-        return ""
+        return parts[1] if len(parts) == 2 else ""
+
+    def update_field_value(self, lines, field_index, field_name, new_value):
+        # Minimal stand-in for MainWindow.update_field_value's same-line
+        # case, sufficient for these dispatch tests.
+        lines[field_index] = f"{field_name} {new_value}"
 
     def _show_dialog_with_configured_interaction(self, dialog, mode_setting_key=None):
         _ = (dialog, mode_setting_key)
@@ -563,3 +569,73 @@ def test_nested_if_block_skipped_when_outer_condition_false(monkeypatch):
     assert signal == "continue"
     assert prompted["called"] is False
     assert harness.text_editor.toPlainText() == content
+
+
+# ---------------------------------------------------------------------------
+# CIF data names are case-insensitive per the spec: CHECK/EDIT/DELETE/RENAME
+# must match a field regardless of how its case differs from the rule's.
+# ---------------------------------------------------------------------------
+
+def test_check_action_finds_existing_field_regardless_of_case(monkeypatch):
+    """Regression: bare CHECK rules used to do case-sensitive raw-text
+    matching (`parts[0] == prefix`), so a field present under different case
+    than the rule was treated as missing and prompted to add a duplicate."""
+    content = "_Cell_Length_A 5.0\n"
+    harness = _RuleDispatchHarness(content)
+
+    prompts = []
+
+    def fake_get_text(parent, title, prompt, current_value, default_value, **kwargs):
+        _ = (parent, title, kwargs)
+        prompts.append((prompt, current_value))
+        return current_value, QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(field_checking_module.CIFInputDialog, "getText", fake_get_text)
+
+    check_field = CIFField("_cell_length_a", "5.0", action="CHECK", suggestions=["5.0"])
+
+    harness._execute_rule(
+        check_field, {}, content, _ensure_parser_current_factory(harness), [], is_custom_or_user=False
+    )
+
+    # The existing (differently-cased) field must be found and edited in
+    # place - not treated as missing (which would prompt to add a new one).
+    assert len(prompts) == 1
+    prompt_text, current_value = prompts[0]
+    assert "is missing" not in prompt_text
+    assert current_value == "5.0"
+
+    # No duplicate field should have been inserted.
+    assert harness.text_editor.toPlainText().count("5.0") == 1
+
+
+def test_delete_field_matches_regardless_of_case():
+    checker = CIFFieldChecker()
+    lines = ["_Some_Field value", "_other_field kept"]
+
+    modified, deleted = checker._delete_field(lines, "_some_field")
+
+    assert deleted is True
+    assert modified == ["_other_field kept"]
+
+
+def test_edit_field_matches_regardless_of_case():
+    checker = CIFFieldChecker()
+    lines = ["_Some_Field old_value"]
+
+    modified, edited = checker._edit_field(lines, "_some_field", "new_value")
+
+    assert edited is True
+    assert modified == ["_some_field    new_value"]
+
+
+def test_rename_field_matches_old_name_regardless_of_case():
+    checker = CIFFieldChecker()
+    lines = ["_Refine_Diff_Density_Max 0.5"]
+
+    modified, renamed = checker._rename_field(
+        lines, "_refine_diff_density_max", "_refine_diff.potential_max"
+    )
+
+    assert renamed is True
+    assert modified == ["_refine_diff.potential_max 0.5"]

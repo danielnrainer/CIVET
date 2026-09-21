@@ -4,6 +4,8 @@ import ast
 import operator
 import re
 
+from .CIF_parser import cif_casefold
+
 # Safe operators for expression evaluation
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -571,14 +573,15 @@ class CIFFieldChecker:
         """
         modified_lines = []
         deleted = False
-        
+        folded_field_name = cif_casefold(field_name)
+
         for line in lines:
-            if line.strip().startswith(field_name):
+            if cif_casefold(line.strip()).startswith(folded_field_name):
                 # Skip this line (delete it)
                 deleted = True
                 continue
             modified_lines.append(line)
-        
+
         return modified_lines, deleted
     
     def _edit_field(self, lines, field_name, new_value):
@@ -594,9 +597,10 @@ class CIFFieldChecker:
         """
         modified_lines = []
         edited = False
-        
+        folded_field_name = cif_casefold(field_name)
+
         for line in lines:
-            if line.strip().startswith(field_name):
+            if cif_casefold(line.strip()).startswith(folded_field_name):
                 # Replace the line with new value
                 if new_value:
                     modified_lines.append(f"{field_name}    {new_value}")
@@ -628,12 +632,13 @@ class CIFFieldChecker:
         modified_lines = []
         appended = False
         i = 0
+        folded_field_name = cif_casefold(field_name)
 
         while i < len(lines):
             line = lines[i]
 
             # Check if this is the target field with semicolon delimiter
-            if line.strip().startswith(field_name):
+            if cif_casefold(line.strip()).startswith(folded_field_name):
                 # Check if it's a multiline value starting with semicolon
                 if i + 1 < len(lines) and lines[i + 1].strip() == ';':
                     # Add field name and opening semicolon
@@ -701,14 +706,17 @@ class CIFFieldChecker:
         modified_lines = []
         renamed = False
         i = 0
-        
+        folded_old_name = cif_casefold(old_name)
+
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
-            
-            # Check for exact field name match (including loop columns)
-            # Match the old field name at the start of the line
-            if stripped.startswith(old_name):
+
+            # Check for the field name match (including loop columns),
+            # case-insensitively - CIF data names are case-insensitive per
+            # the spec, so the file may spell old_name differently than the
+            # rule does.
+            if cif_casefold(stripped).startswith(folded_old_name):
                 # Get the rest after the field name
                 rest = stripped[len(old_name):]
                 # Check it's a complete field name (followed by whitespace, value, or end of line)

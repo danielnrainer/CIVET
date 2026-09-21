@@ -168,6 +168,9 @@ Nested rules use the same `CHECK:`/`DELETE:`/`EDIT:`/`APPEND:`/`RENAME:`/`CALCUL
 top-level rules (an explicit `CHECK:` prefix is optional at any nesting level); `DELETE:`/`EDIT:`/
 `APPEND:`/`RENAME:` inside a block still only run for Custom/User rule sets. IF blocks may be
 nested inside one another to any depth - each `ENDIF` closes the innermost still-open block.
+Field names in rules are matched against the CIF case-insensitively - a rule for 
+`_refine_diff.density_rms` matches `_refine_diff.density_RMS` in the file (or any other 
+spelling differing only in case), and vice versa.
 
 Built-in sets include packaged `.cif_rules` files from `field_rules/` (for example 3DED modern and 3DED legacy).
 
@@ -318,6 +321,9 @@ To prevent conflicting aliases and duplicate data names from being written accid
 - **Save** blocks when unresolved duplicate/alias-value conflicts remain.
 - Conversion and automated fix operations prompt to resolve conflicts when detected.
 - Auto-resolution keeps a single recommended field by default; manual resolution can preserve aliases and synchronize values.
+- Data names differing only in case (e.g. `_cell_length_a` and `_Cell_Length_A`) are treated as the
+  same data name, per the CIF spec, so this correctly flags a repeated name even when it isn't
+  recognized by any loaded dictionary.
 
 ### Multi-Data-Block Support
 

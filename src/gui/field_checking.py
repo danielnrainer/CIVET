@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.CIF_field_parsing import safe_eval_expr, evaluate_condition
 from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
-                              TextBlockTracker)
+                              TextBlockTracker, cif_casefold)
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
 from .check_progress import CheckProgressTracker, count_rule_steps
@@ -460,7 +460,7 @@ class FieldCheckingMixin:
 
         for i, line in enumerate(lines):
             parts = line.split(None, 1)
-            if parts and parts[0] == prefix:
+            if parts and cif_casefold(parts[0]) == cif_casefold(prefix):
                 current_value = self.extract_field_value(lines, i, prefix)
 
                 # Determine operation type based on whether value differs from default
@@ -569,7 +569,7 @@ class FieldCheckingMixin:
         field_found = False
         for i, line in enumerate(lines):
             parts = line.split(None, 1)
-            if parts and parts[0] == prefix:
+            if parts and cif_casefold(parts[0]) == cif_casefold(prefix):
                 field_found = True
                 current_value = self.extract_field_value(lines, i, prefix).strip(removable_chars)
                 
@@ -1179,7 +1179,7 @@ class FieldCheckingMixin:
             lines, _ = self._get_check_lines()
             for i, line in enumerate(lines):
                 parts = line.split(None, 1)
-                if parts and parts[0] == field_name:
+                if parts and cif_casefold(parts[0]) == cif_casefold(field_name):
                     self.update_field_value(lines, i, field_name, value)
                     self._set_check_lines(lines)
                     return
@@ -1678,8 +1678,9 @@ class FieldCheckingMixin:
         """
         lines, _ = self._get_check_lines()
 
+        folded_field_name = cif_casefold(field_name)
         for index, line in enumerate(lines):
-            if line.startswith(field_name):
+            if cif_casefold(line).startswith(folded_field_name):
                 return self.extract_field_value(lines, index, field_name).strip().strip("'\"")
 
         return None

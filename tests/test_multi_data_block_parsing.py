@@ -86,6 +86,39 @@ def test_get_block_accepts_prefix_and_is_case_insensitive():
     assert parser.get_block("missing") is None
 
 
+def test_field_lookups_are_case_insensitive():
+    """CIF data names are case-insensitive per the spec (canonical caseless
+    matching); get/has/set_field_value must treat differently-cased
+    spellings of the same name as the same field."""
+    parser = CIFParser()
+    parser.parse_file("data_test\n_cell_length_a 5.0")
+
+    assert parser.get_field_value("_Cell_Length_A") == "5.0"
+    assert parser.get_field_value("_CELL_LENGTH_A") == "5.0"
+    assert parser.has_field("_Cell_Length_A") is True
+
+    block = parser.blocks[0]
+    assert block.get_field_value("_CELL_length_a") == "5.0"
+    assert block.has_field("_Cell_Length_A") is True
+
+
+def test_set_field_value_updates_existing_field_regardless_of_case():
+    """A different-case spelling of an existing field must update that
+    field in place, not create a second, duplicate-looking entry."""
+    parser = CIFParser()
+    parser.parse_file("data_test\n_cell_length_a 5.0")
+
+    parser.set_field_value("_Cell_Length_A", "6.0")
+
+    assert len(parser.fields) == 1
+    assert parser.get_field_value("_cell_length_a") == "6.0"
+
+    # The original on-disk spelling is preserved in the output.
+    output = parser.generate_cif_content()
+    assert "_cell_length_a" in output
+    assert "_Cell_Length_A" not in output
+
+
 def test_get_field_values_by_block_reports_divergence():
     parser = CIFParser()
     parser.parse_file(MULTI_BLOCK_CIF)

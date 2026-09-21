@@ -5,6 +5,16 @@ theme rather than strict chronological commit order.
 
 ## since 1.4
 
+### Fixed
+- **Data names, block codes, and `.cif_rules` field matching were sometimes compared
+  case-sensitively**: per the CIF spec, these identifiers are case-insensitive, but several code
+  paths compared them literally instead.
+  - The core parser's field lookups (`get_field`, `has_field`, `set_field_value`) now match
+    case-insensitively while preserving each field's original on-disk spelling; editing a field
+    under different case now updates it in place instead of creating a duplicate.
+  - Duplicate/alias-conflict detection now catches a data name repeated with different case,
+    previously invisible when the name wasn't in any loaded dictionary.
+
 ## [1.4] - 2026-09-18
 
 ### Added

@@ -16,7 +16,7 @@ Converts between CIF1 and modern formats, handling:
 import re
 from typing import Dict, List, Tuple, Optional, Set
 from .cif_dictionary_manager import CIFDictionaryManager, CIFVersion, FieldNotation, CIFSyntaxVersion
-from .CIF_parser import TextBlockTracker
+from .CIF_parser import TextBlockTracker, cif_casefold
 
 
 _FIELD_LINE_MATCH = re.compile(r'^(\s*)(_[a-zA-Z][a-zA-Z0-9_.\-\[\]()/]*)\s*(.*)$')
@@ -191,7 +191,11 @@ class CIFFormatConverter:
                 continue
 
             _indent, field_name, _rest = field_match.groups()
-            canonical = self.dict_manager.map_to_modern(field_name) or field_name
+            # CIF data names are case-insensitive: fall back to the
+            # casefolded spelling (not the raw one) for fields unknown to
+            # the dictionary, so case-variant duplicates of the same
+            # unrecognized field are still grouped together.
+            canonical = self.dict_manager.map_to_modern(field_name) or cif_casefold(field_name)
             previous = seen_fields.get(canonical)
             if previous is None:
                 seen_fields[canonical] = (i, field_name)
@@ -211,6 +215,9 @@ class CIFFormatConverter:
         if not self.checkcif_compatibility_fields:
             return '\n'.join(cleaned_lines), changes
 
+        # Keyed by casefolded field name so presence checks below are
+        # case-insensitive, per the CIF spec - the file may spell a field
+        # with different case than the dictionary's canonical form.
         existing_fields: Dict[str, Tuple[int, str, str]] = {}
         text_block_tracker = TextBlockTracker()
         for i, line in enumerate(cleaned_lines):
@@ -220,23 +227,23 @@ class CIFFormatConverter:
             if not field_match:
                 continue
             indent, field_name, value = field_match.groups()
-            existing_fields[field_name] = (i, value, indent)
+            existing_fields[cif_casefold(field_name)] = (i, value, indent)
 
         insertions: List[Tuple[int, str, str, str, str]] = []
         for legacy_field in self.checkcif_compatibility_fields:
             if self.dict_manager.is_field_deprecated(legacy_field):
                 modern_replacement = self.dict_manager.get_modern_replacement(legacy_field)
-                if modern_replacement and modern_replacement in existing_fields:
+                if modern_replacement and cif_casefold(modern_replacement) in existing_fields:
                     continue
-                if legacy_field in existing_fields:
+                if cif_casefold(legacy_field) in existing_fields:
                     continue
 
-            legacy_present = legacy_field in existing_fields
+            legacy_present = cif_casefold(legacy_field) in existing_fields
             modern_equiv = self.dict_manager.map_to_modern(legacy_field)
-            modern_present = bool(modern_equiv and modern_equiv in existing_fields)
+            modern_present = bool(modern_equiv and cif_casefold(modern_equiv) in existing_fields)
 
             if modern_present and not legacy_present:
-                line_idx, value, indent = existing_fields[modern_equiv]
+                line_idx, value, indent = existing_fields[cif_casefold(modern_equiv)]
                 insertions.append((line_idx + 1, legacy_field, value, indent, modern_equiv))
 
         for insert_idx, field_name, value, indent, modern_equiv in reversed(insertions):
@@ -989,7 +996,7 @@ class CIFFormatConverter:
         lines = cif_content.split('\n')
         changes = []
         insertions = []  # (line_index, field_name, value, indent)
-        existing_fields = {}  # field_name -> (line_index, value, indent)
+        existing_fields = {}  # casefolded field_name -> (line_index, value, indent)
         
         # Find where the deprecated section starts (if it exists)
         deprecated_section_start = None
@@ -1013,35 +1020,35 @@ class CIFFormatConverter:
             field_match = _FIELD_WITH_VALUE_MATCH.match(line)
             if field_match:
                 indent, field_name, value = field_match.groups()
-                existing_fields[field_name] = (i, value, indent)
-        
+                existing_fields[cif_casefold(field_name)] = (i, value, indent)
+
         # Second pass: ensure legacy versions exist for all compatibility fields
         # Check each compatibility field to see if it or its modern equivalent exists
         for legacy_field in self.checkcif_compatibility_fields:
             # CRITICAL: Skip deprecated fields to prevent duplicates
-            # Deprecated fields will be handled by _handle_deprecated_fields() 
+            # Deprecated fields will be handled by _handle_deprecated_fields()
             # and added to the dedicated deprecated section
             if self.dict_manager.is_field_deprecated(legacy_field):
                 # Check if this deprecated field has a modern replacement that exists
                 modern_replacement = self.dict_manager.get_modern_replacement(legacy_field)
-                if modern_replacement and modern_replacement in existing_fields:
+                if modern_replacement and cif_casefold(modern_replacement) in existing_fields:
                     # The modern replacement exists, so the deprecated field will be
                     # added to the deprecated section. Don't add it to main section.
                     continue
                 # Even without a modern replacement, if the deprecated field is already
                 # present in the file, skip it to avoid duplication with the deprecated section
-                if legacy_field in existing_fields:
+                if cif_casefold(legacy_field) in existing_fields:
                     continue
-            
-            legacy_present = legacy_field in existing_fields
-            
+
+            legacy_present = cif_casefold(legacy_field) in existing_fields
+
             # Find if there's a modern version of this field
             modern_equiv = self.dict_manager.map_to_modern(legacy_field)
-            modern_present = modern_equiv and modern_equiv in existing_fields
-            
+            modern_present = modern_equiv and cif_casefold(modern_equiv) in existing_fields
+
             if modern_present and not legacy_present:
                 # Modern field exists but legacy doesn't - add legacy after modern
-                line_idx, value, indent = existing_fields[modern_equiv]
+                line_idx, value, indent = existing_fields[cif_casefold(modern_equiv)]
                 insertions.append((line_idx + 1, legacy_field, value, indent))
                 changes.append(f"Added legacy field {legacy_field} for checkCIF compatibility (alongside {modern_equiv})")
             elif legacy_present and not modern_present:

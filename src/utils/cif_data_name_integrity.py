@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
-from .CIF_parser import CIFParser
+from .CIF_parser import CIFParser, cif_casefold
 
 
 @dataclass
@@ -39,12 +39,14 @@ def _build_field_value_signatures(cif_content: str) -> Dict[str, List[Tuple[str,
 
     signatures: Dict[str, List[Tuple[str, ...]]] = {}
 
-    # Scalar (non-loop) fields
+    # Scalar (non-loop) fields. Keyed by casefolded name - CIF data names
+    # are case-insensitive, so spellings differing only in case must be
+    # compared as the same field, not treated as unrelated entries.
     for field_name, field_obj in parser.fields.items():
         if field_obj.value == "(in loop)":
             continue
         value = "" if field_obj.value is None else str(field_obj.value)
-        signatures.setdefault(field_name, []).append(("scalar", value))
+        signatures.setdefault(cif_casefold(field_name), []).append(("scalar", value))
 
     # Loop columns (signature is all values in the column)
     for loop in parser.loops:
@@ -52,7 +54,7 @@ def _build_field_value_signatures(cif_content: str) -> Dict[str, List[Tuple[str,
             col_values: List[str] = []
             for row in loop.data_rows:
                 col_values.append(row[col_idx] if col_idx < len(row) else "")
-            signatures.setdefault(field_name, []).append(("loop", *col_values))
+            signatures.setdefault(cif_casefold(field_name), []).append(("loop", *col_values))
 
     return signatures
 
@@ -63,9 +65,16 @@ def find_alias_value_mismatches(cif_content: str, dict_manager) -> List[AliasVal
     all_found_fields: List[str] = dict_manager._extract_fields_excluding_text_blocks(cif_content)
     unique_fields = set(all_found_fields)
 
+    # For fields with no known dictionary canonical, group by casefolded
+    # spelling (CIF data names are case-insensitive) instead of raw case,
+    # using the first-seen spelling in the file as a stable representative.
+    representative_by_fold: Dict[str, str] = {}
+    for field_name in all_found_fields:
+        representative_by_fold.setdefault(cif_casefold(field_name), field_name)
+
     canonical_to_aliases: Dict[str, set[str]] = {}
     for field_name in unique_fields:
-        canonical = dict_manager.map_to_modern(field_name) or field_name
+        canonical = dict_manager.map_to_modern(field_name) or representative_by_fold[cif_casefold(field_name)]
         canonical_to_aliases.setdefault(canonical, set()).add(field_name)
 
     field_signatures = _build_field_value_signatures(cif_content)
@@ -78,7 +87,7 @@ def find_alias_value_mismatches(cif_content: str, dict_manager) -> List[AliasVal
         aliases = sorted(alias_set)
         alias_signatures: Dict[str, Tuple[str, ...]] = {}
         for alias in aliases:
-            sig_list = sorted(field_signatures.get(alias, []), key=_signature_sort_key)
+            sig_list = sorted(field_signatures.get(cif_casefold(alias), []), key=_signature_sort_key)
             flattened: List[str] = []
             for sig in sig_list:
                 flattened.extend(sig)
@@ -100,10 +109,13 @@ def find_alias_value_mismatches(cif_content: str, dict_manager) -> List[AliasVal
 
 
 def _field_occurrence_counts(cif_content: str, dict_manager) -> Dict[str, int]:
-    """Count field-name occurrences outside semicolon text blocks."""
+    """Count field-name occurrences outside semicolon text blocks, keyed by
+    casefolded spelling so occurrences differing only in case - the same
+    CIF data name per the spec - are counted together."""
     counts: Dict[str, int] = {}
     for field_name in dict_manager._extract_fields_excluding_text_blocks(cif_content):
-        counts[field_name] = counts.get(field_name, 0) + 1
+        fold_key = cif_casefold(field_name)
+        counts[fold_key] = counts.get(fold_key, 0) + 1
     return counts
 
 
@@ -126,7 +138,7 @@ def get_data_name_conflicts_requiring_resolution(
     filtered_conflicts: Dict[str, List[str]] = {}
     for canonical, alias_list in raw_conflicts.items():
         unique_aliases = set(alias_list)
-        has_duplicate_names = any(counts.get(alias, 0) > 1 for alias in unique_aliases)
+        has_duplicate_names = any(counts.get(cif_casefold(alias), 0) > 1 for alias in unique_aliases)
 
         # Keep conflict when duplicate names exist OR alias values differ.
         if has_duplicate_names or canonical in mismatch_canonicals:

@@ -20,6 +20,32 @@ def test_convert_to_modern_notation_converts_known_legacy_field(converter: CIFFo
     assert len(changes) >= 1
 
 
+def test_checkcif_legacy_insertion_recognizes_case_variant_modern_field(
+    converter: CIFFormatConverter,
+):
+    """Regression: CIF data names are case-insensitive per the spec. If the
+    file's modern-form field is spelled with different case than the
+    dictionary's canonical form, the checkCIF-compatibility pass must still
+    recognise it as present and add the legacy companion field - not skip
+    it because a case-sensitive lookup missed the match."""
+    content = "\n".join(
+        [
+            "data_test",
+            "_GEOM_ANGLE.VALUE 109.5",
+            "",
+        ]
+    )
+
+    converted, changes = converter._remove_duplicates_and_add_checkcif_legacy(content)
+
+    legacy_lines = [
+        line for line in converted.splitlines()
+        if line.lower().startswith("_geom_angle ")
+    ]
+    assert len(legacy_lines) == 1
+    assert any("Added legacy field _geom_angle" in change for change in changes)
+
+
 def test_convert_to_legacy_notation_converts_known_modern_field(converter: CIFFormatConverter):
     content = "_cell.length_a 5.0"
     converted, changes = converter.convert_to_legacy_notation(content)
