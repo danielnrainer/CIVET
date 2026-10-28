@@ -18,6 +18,7 @@ rather than through the ``civet`` command line.
 import argparse
 import json
 import sys
+import logging
 from io import TextIOWrapper
 from typing import Dict, List, Optional
 
@@ -28,9 +29,10 @@ from utils.cif_data_validator import CIFDataValidator
 from utils.data_name_validator import DataNameValidator, FieldCategory
 from utils.cif_format_converter import CIFFormatConverter
 from utils.field_rules_validator import FieldRulesValidator
+from utils.cif_duplicate_checker import filter_conflicts,detail_conflicts
 
 MINIMUM_PYTHON = (3, 11)
-
+logging.basicConfig(level=logging.WARNING)
 # Data-name categories severe enough to report from `check`. VALID,
 # REGISTERED_LOCAL, and USER_ALLOWED are not issues, so they're omitted.
 _NAME_ISSUE_SEVERITY = {
@@ -75,6 +77,7 @@ def check_content(
     check_data_names: bool = True,
     check_data_values: bool = True,
     check_links: bool = False,
+    check_duplicates_and_aliases:bool=True,
     syntax_version: str = "auto",
 ) -> Dict:
     """Run the requested checks against CIF content; return a plain-dict report.
@@ -133,7 +136,7 @@ def check_content(
                     "field": result.field_name,
                     "message": result.description or category.value,
                 })
-
+                
     if check_data_values or check_links:
         parser = CIFParser()
         parser.parse_file(content)
@@ -163,6 +166,26 @@ def check_content(
                     "message": issue.message,
                     "value": issue.value,
                     "expected": issue.expected,
+                })
+    if check_duplicates_and_aliases:
+            logging.warning("Duplicate testing can't identify duplicates where one entry is mistyped. " 
+                         "If other problems are identified, checks should be re-run" 
+                         " after fixing to test for all duplicates") 
+            lines = content.splitlines()
+            conflicts = dict_manager.detect_field_aliases_in_cif(content)
+            filtered_conflicts = filter_conflicts(conflicts,content,lines)
+            detailed_conflicts = detail_conflicts(filtered_conflicts,lines,dict_manager)
+            for canonical,details in detailed_conflicts.items():
+                report["issues"].append({
+                    "source": "duplicate_checking",
+                    "severity": "warning",
+                    "issue_type": "Duplicate entry",
+                    "line":min([detail['line_num'] for detail in details]),
+                    "field": canonical,
+                    "message": (f"There are duplicated/aliased entries for this data field  present as field names " 
+                                f"{' , '.join([detail['alias'] for detail in details])} with values "
+                                f"{' , '.join([detail['value'] for detail in details])} on lines " 
+                                f"{' , '.join([str(detail['line_num']) for detail in details])}")
                 })
 
     report["issues"].sort(key=lambda i: (i.get("line") is None, i.get("line") or 0))
@@ -255,6 +278,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             check_data_names=not args.no_data_names,
             check_data_values=not args.no_data_values,
             check_links=args.check_links,
+            check_duplicates_and_aliases= not args.no_duplicates,
             syntax_version=args.syntax_version,
         )
         report["file"] = path
@@ -398,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-data-names", action="store_true", help="Skip data-name (dictionary/deprecation) checks.")
     check_parser.add_argument(
         "--no-data-values", action="store_true", help="Skip data-value (type/enum/loop) checks.")
+    check_parser.add_argument(
+        "--no-duplicates", action="store_true", help="Skip duplicate checks.")
     check_parser.add_argument(
         "--check-links", action="store_true",
         help="Also run the opt-in DDL1 parent/child relational check.")

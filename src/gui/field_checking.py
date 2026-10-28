@@ -25,6 +25,7 @@ from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
                               TextBlockTracker, cif_casefold, iter_structural_lines)
 from utils.cif_dictionary_manager import FieldNotation
 from utils.field_rules_validator import CIFFormatAnalyzer
+from utils.cif_duplicate_checker import is_in_deprecated_section, filter_conflicts, detail_conflicts
 from .check_progress import CheckProgressTracker, count_rule_steps
 from .dialogs import (CIFInputDialog, MultilineInputDialog, CheckConfigDialog,
                       MultiBlockValueDialog, RESULT_ABORT, RESULT_STOP_SAVE)
@@ -1880,7 +1881,7 @@ class FieldCheckingMixin:
                         if self.dict_manager.is_field_deprecated(field_name):
                             # Skip if this field is already in a deprecated section
                             # (we don't want to flag fields we already moved to deprecated sections)
-                            if not self._is_in_deprecated_section(content, line_num):
+                            if not is_in_deprecated_section(content, line_num):
                                 modern_equiv = self.dict_manager.get_modern_equivalent(field_name, prefer_format="LEGACY")
                                 deprecated_fields.append({
                                     'field': field_name,
@@ -1891,46 +1892,8 @@ class FieldCheckingMixin:
             
             # Filter conflicts to exclude those between main section and deprecated section
             lines = content.splitlines()
-            filtered_conflicts = {}
-            for canonical, alias_list in conflicts.items():
-                # Check if this conflict involves fields that are in both main and deprecated sections
-                main_section_fields = []
-                deprecated_section_fields = []
-                
-                for alias in alias_list:
-                    # Find this field in the content
-                    field_in_deprecated = False
-                    for idx, line in iter_structural_lines(lines):
-                        line_num = idx + 1
-                        line_stripped = line.strip()
-                        if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
-                            if self._is_in_deprecated_section(content, line_num):
-                                deprecated_section_fields.append(alias)
-                                field_in_deprecated = True
-                                break
+            conflicts=filter_conflicts(conflicts,content,lines)
 
-                    if not field_in_deprecated:
-                        # Check if field exists in main section
-                        for idx, line in iter_structural_lines(lines):
-                            line_num = idx + 1
-                            line_stripped = line.strip()
-                            if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
-                                if not self._is_in_deprecated_section(content, line_num):
-                                    main_section_fields.append(alias)
-                                    break
-                
-                # Only report as conflict if:
-                # 1. Multiple fields in main section, OR
-                # 2. Multiple fields in deprecated section, OR  
-                # 3. Fields only in one section but duplicated
-                if (len(main_section_fields) > 1 or len(deprecated_section_fields) > 1 or
-                    (len(main_section_fields) == 0 and len(deprecated_section_fields) > 0) or
-                    (len(main_section_fields) > 0 and len(deprecated_section_fields) == 0)):
-                    filtered_conflicts[canonical] = alias_list
-                # If we have one field in main and one in deprecated, this is by design, not a conflict
-            
-            conflicts = filtered_conflicts
-            
             # If no conflicts and no deprecated fields found - all good!
             if not conflicts and not deprecated_fields:
                 return True
@@ -1979,28 +1942,7 @@ class FieldCheckingMixin:
                 report_summary += "Modernizing these fields improves CIF compatibility and reduces validation warnings.\n\n"
             
             # Convert conflicts to detailed structure for dialog
-            detailed_conflicts = {}
-            for canonical, alias_list in conflicts.items():
-                detailed_conflicts[canonical] = []
-                for alias in set(alias_list):
-                    # Find line number and value for this alias
-                    for idx, line in iter_structural_lines(lines):
-                        line_num = idx + 1
-                        line_stripped = line.strip()
-                        if line_stripped.startswith(alias + ' ') or line_stripped.startswith(alias + '\t'):
-                            # Extract value
-                            parts = line_stripped.split(None, 1)
-                            value = parts[1] if len(parts) > 1 else ''
-                            
-                            detailed_conflicts[canonical].append({
-                                'line_num': line_num,
-                                'alias': alias,
-                                'value': value,
-                                'is_deprecated': self.dict_manager.is_field_deprecated(alias)
-                            })
-                # Sort found duplicate entries by line number
-                detailed_conflicts[canonical]=sorted(detailed_conflicts[canonical],key=lambda k : k['line_num'])
-
+            detailed_conflicts = detail_conflicts(conflicts,lines,self.dict_manager)
             
             # Show dialog with scrollable content, honoring configured editor
             # interaction behavior (browse/edit the main editor while open).
@@ -2070,41 +2012,6 @@ class FieldCheckingMixin:
             )
             return True  # Continue despite error
     
-    def _is_in_deprecated_section(self, content: str, line_num: int) -> bool:
-        """Check if a line is within a deprecated section of the CIF file."""
-        lines = content.splitlines()
-        
-        # Find the deprecated section boundaries
-        deprecated_section_start = None
-        deprecated_section_end = None
-        
-        for i in range(len(lines)):
-            line = lines[i].strip()
-            if "# DEPRECATED FIELDS" in line:
-                deprecated_section_start = i
-                # Look for the end of this section (closing ###... line)
-                for j in range(i + 1, len(lines)):
-                    end_line = lines[j].strip()
-                    if end_line.startswith('#') and len(end_line) > 70 and all(c == '#' for c in end_line):
-                        # Check if this is actually a closing border
-                        if j + 1 < len(lines):
-                            next_line = lines[j + 1].strip()
-                            if not next_line or next_line.startswith('data_'):
-                                deprecated_section_end = j
-                                break
-                        else:
-                            # End of file
-                            deprecated_section_end = j
-                            break
-                break
-        
-        # Check if our target line is within the deprecated section
-        if deprecated_section_start is not None:
-            end_line = deprecated_section_end if deprecated_section_end is not None else len(lines) - 1
-            target_line_index = line_num - 1  # Convert to 0-based indexing
-            return deprecated_section_start <= target_line_index <= end_line
-        
-        return False
     
     def _resolve_duplicate_conflicts(self, conflicts: Dict, content: str, initial_state: str) -> bool:
         """Resolve duplicate/alias conflicts using existing infrastructure."""
