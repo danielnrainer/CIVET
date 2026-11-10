@@ -1,7 +1,7 @@
 """Behavior-focused tests for LoopEditingMixin (finding and splicing loop_)."""
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog
+from qtpy.QtWidgets import QApplication, QDialog
 
 from gui import main_window
 from gui import loop_editing

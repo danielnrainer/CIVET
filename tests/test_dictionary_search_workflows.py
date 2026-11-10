@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication
 
 from gui.dialogs.dictionary_search_dialog import DictionarySearchDialog
 from utils.cif_dictionary_manager import DictionarySearchResult

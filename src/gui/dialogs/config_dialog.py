@@ -1,6 +1,6 @@
 """Configuration dialog for CIF field checking parameters."""
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                            QPushButton, QCheckBox, QGroupBox, QMessageBox,
                            QRadioButton)
 

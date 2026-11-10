@@ -8,11 +8,12 @@ Dialog showing application version, credits, and links to documentation.
 import sys
 import os
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 )
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QPixmap, QFont, QDesktopServices
+from qtpy.QtCore import Qt, QUrl
+from qtpy.QtGui import QPixmap, QFont, QDesktopServices
+from qtpy import API_NAME, PYQT_VERSION, PYSIDE_VERSION, QT_VERSION
 
 # Import version information
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -101,7 +102,24 @@ class AboutDialog(QDialog):
         copyright_label = QLabel(APP_COPYRIGHT)
         copyright_label.setStyleSheet("color: #666; font-size: 9pt;")
         layout.addWidget(copyright_label)
-        
+
+        # Third-party notice required by the LGPL-3.0 (section 4c) for the bundled Qt libraries
+        if PYSIDE_VERSION:
+            qt_notice = (
+                f"Uses Qt for Python (PySide6 {PYSIDE_VERSION}) and Qt {QT_VERSION}, "
+                "© The Qt Company Ltd., licensed under the "
+                '<a href="https://www.gnu.org/licenses/lgpl-3.0.html">GNU LGPL v3</a>. '
+                "See THIRD_PARTY_NOTICES.md for details."
+            )
+        else:
+            # Running from source with another binding (e.g. PyQt6)
+            qt_notice = f"Uses {API_NAME} {PYQT_VERSION} and Qt {QT_VERSION}."
+        third_party_label = QLabel(qt_notice)
+        third_party_label.setWordWrap(True)
+        third_party_label.setOpenExternalLinks(True)
+        third_party_label.setStyleSheet("color: #666; font-size: 9pt;")
+        layout.addWidget(third_party_label)
+
         layout.addSpacing(10)
         
         # Links section

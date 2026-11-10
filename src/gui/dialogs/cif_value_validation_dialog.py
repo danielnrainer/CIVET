@@ -9,13 +9,13 @@ any flagged line in the main editor.
 
 from typing import List, Optional
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QDialogButtonBox, QGroupBox, QSizePolicy, QHeaderView,
     QAbstractItemView, QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QBrush
+from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QColor, QFont, QBrush
 
 from utils.cif_data_validator import ValidationIssue
 
@@ -45,8 +45,8 @@ class CIFValueValidationDialog(QDialog):
         The integer is the 1-based line number.
     """
 
-    navigate_to_line = pyqtSignal(int)
-    refresh_requested = pyqtSignal()
+    navigate_to_line = Signal(int)
+    refresh_requested = Signal()
 
     def __init__(
         self,

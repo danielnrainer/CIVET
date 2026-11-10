@@ -13,8 +13,8 @@ Both expose ``content_layout`` (a ``QVBoxLayout``) plus ``add_widget`` /
 ``is_expanded()``.
 """
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
     QFrame, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 )
 

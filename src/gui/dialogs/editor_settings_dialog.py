@@ -5,12 +5,12 @@ Allows users to customize editor preferences like font, line numbers, syntax hig
 Settings are persisted to the user's configuration directory.
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
                             QCheckBox, QPushButton, QFontComboBox, QMessageBox,
                             QComboBox, QColorDialog, QGridLayout, QScrollArea,
                             QWidget)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QFont, QColor
 import sys
 import os
 

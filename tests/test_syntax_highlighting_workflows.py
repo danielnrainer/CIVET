@@ -1,8 +1,8 @@
 """Behavior-focused tests for syntax-highlighting token classification workflows."""
 
 import pytest
-from PyQt6.QtGui import QTextDocument
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtGui import QTextDocument
+from qtpy.QtWidgets import QApplication
 
 from gui.editor.syntax_highlighter import CIFSyntaxHighlighter
 

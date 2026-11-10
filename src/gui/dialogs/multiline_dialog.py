@@ -1,7 +1,7 @@
 """Multiline Input Dialog for editing large text fields."""
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
-from PyQt6.QtCore import Qt
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
+from qtpy.QtCore import Qt
 from . import RESULT_ABORT, RESULT_STOP_SAVE
 from .progress_banner import build_check_progress_banner
 

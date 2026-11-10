@@ -7,7 +7,7 @@ additions to CheckConfigDialog. See .github/multi_data_block_plan.md.
 """
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog
+from qtpy.QtWidgets import QApplication, QDialog
 
 import gui.field_checking as field_checking_module
 from gui.field_checking import FieldCheckingMixin

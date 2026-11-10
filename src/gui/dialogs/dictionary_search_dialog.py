@@ -8,9 +8,9 @@ Search loaded CIF dictionaries for data names and categories.
 from html import escape
 from typing import Callable, Dict, List, Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QAction
+from qtpy.QtWidgets import (
     QCheckBox,
     QDialog,
     QHBoxLayout,

@@ -16,8 +16,8 @@ separate selection popup.
 
 from typing import List, NamedTuple, Optional, Tuple
 
-from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import QEvent, Qt
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableView,
     QTableWidgetItem, QLabel, QMessageBox, QInputDialog, QDialogButtonBox,
     QAbstractItemView, QGroupBox, QComboBox, QCheckBox, QHeaderView,

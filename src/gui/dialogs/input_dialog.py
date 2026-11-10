@@ -1,8 +1,8 @@
 """CIF Input Dialog for field editing."""
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPalette
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette
 from . import RESULT_ABORT, RESULT_STOP_SAVE
 from .progress_banner import build_check_progress_banner
 

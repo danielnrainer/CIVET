@@ -16,11 +16,11 @@ Settings Priority (highest to lowest):
 2. Built-in defaults in DEFAULT_SETTINGS
 """
 
-from PyQt6.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayout,
+from qtpy.QtWidgets import (QWidget, QTextEdit, QHBoxLayout, QDialog, QVBoxLayout,
                            QLabel, QLineEdit, QCheckBox, QPushButton, QMessageBox,
                            QFontDialog)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import (QFont, QFontMetrics, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QColor, QTextBlockFormat)
+from qtpy.QtCore import Qt, Signal, QTimer
+from qtpy.QtGui import (QFont, QFontMetrics, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QColor, QTextBlockFormat)
 import sys
 import os
 
@@ -45,9 +45,9 @@ class CIFTextEditor(QWidget):
     """
     
     # Signals
-    textChanged = pyqtSignal()
-    cursorPositionChanged = pyqtSignal()
-    modificationChanged = pyqtSignal(bool)
+    textChanged = Signal()
+    cursorPositionChanged = Signal()
+    modificationChanged = Signal(bool)
 
     # Number of digits the line number gutter is sized to fit (right-aligned)
     LINE_NUMBER_DIGITS = 6

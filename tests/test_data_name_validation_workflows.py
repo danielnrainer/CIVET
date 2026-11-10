@@ -1,7 +1,7 @@
 """Behavior-focused tests for Data Name Validation dialog workflows."""
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
+from qtpy.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from gui.dialogs.data_name_validation_dialog import DataNameValidationDialog
 from utils.data_name_validator import (

@@ -3,8 +3,13 @@ import os
 import argparse
 from io import TextIOWrapper
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon, QPalette, QColor
+# Prefer PySide6 (LGPL) as the Qt binding; qtpy falls back to any other
+# installed binding (e.g. PyQt6) if PySide6 is unavailable. Must be set
+# before the first qtpy import.
+os.environ.setdefault("QT_API", "pyside6")
+
+from qtpy.QtWidgets import QApplication
+from qtpy.QtGui import QIcon, QPalette, QColor
 from gui.main_window import CIFEditor
 
 MINIMUM_PYTHON = (3, 11)

@@ -7,9 +7,9 @@ instead of silently applying a single value to all of them.
 See .github/multi_data_block_plan.md, section 2.3.
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLabel, QLineEdit, QPushButton)
-from PyQt6.QtCore import Qt
+from qtpy.QtCore import Qt
 from . import RESULT_ABORT, RESULT_STOP_SAVE
 from .progress_banner import build_check_progress_banner
 

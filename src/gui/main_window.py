@@ -1,10 +1,10 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QTextEdit,
+from qtpy.QtWidgets import (QMainWindow, QWidget, QTextEdit,
                            QPushButton, QVBoxLayout, QHBoxLayout, QMenu,
                            QFileDialog, QMessageBox, QLineEdit, QCheckBox,
                            QDialog, QLabel, QFontDialog, QGroupBox, QRadioButton,
                            QButtonGroup, QComboBox, QFormLayout, QProgressBar)
-from PyQt6.QtCore import Qt, QRegularExpression, QTimer, QEventLoop, QObject, QRunnable, QThreadPool, pyqtSignal
-from PyQt6.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
+from qtpy.QtCore import Qt, QRegularExpression, QTimer, QEventLoop, QObject, QRunnable, QThreadPool, Signal
+from qtpy.QtGui import (QTextCharFormat, QSyntaxHighlighter, QColor, QFont, 
                         QFontMetrics, QTextCursor, QTextDocument, QIcon)
 import os
 import json
@@ -56,8 +56,8 @@ from .block_renaming import BlockRenamingMixin
 
 class _BackgroundTaskSignals(QObject):
     """Signals for background tasks executed via QThreadPool."""
-    finished = pyqtSignal(object)
-    failed = pyqtSignal(str)
+    finished = Signal(object)
+    failed = Signal(str)
 
 
 class _BackgroundTask(QRunnable):
@@ -1384,7 +1384,7 @@ class CIFEditor(DataNameIntegrityMixin, FieldCheckingMixin, FormatHandlersMixin,
         dialog.setWindowModality(Qt.WindowModality.NonModal)
 
         loop = QEventLoop(self)
-        result_code = int(QDialog.DialogCode.Rejected)
+        result_code = QDialog.DialogCode.Rejected.value
         locked = (mode != "allow_editing")
 
         def _on_dialog_finished(code: int) -> None:

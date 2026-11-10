@@ -9,13 +9,13 @@ This includes:
 """
 
 from typing import Dict, Set, Optional
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTreeWidget, QTreeWidgetItem, QPushButton, QGroupBox,
     QWidget, QHeaderView, QMessageBox, QInputDialog
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtGui import QFont, QColor
 
 from utils.registered_prefixes import (
     get_registered_prefixes, get_prefix_info, get_prefix_data_source,
@@ -28,7 +28,7 @@ from utils.data_name_validator import DataNameValidator
 class PrefixUpdateWorker(QThread):
     """Worker thread for fetching the official IUCr reserved-prefixes registry."""
 
-    finished = pyqtSignal(bool, str)  # success, message
+    finished = Signal(bool, str)  # success, message
 
     def run(self):
         try:
@@ -270,7 +270,7 @@ class RecognisedPrefixesDialog(QDialog):
         if not prefix:
             return
         
-        from PyQt6.QtWidgets import QMenu
+        from qtpy.QtWidgets import QMenu
         menu = QMenu(self)
         remove_action = menu.addAction(f"Remove '{prefix}' from allowed list")
         

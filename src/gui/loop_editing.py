@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from PyQt6.QtWidgets import QDialog, QTextEdit
+from qtpy.QtWidgets import QDialog, QTextEdit
 
 from utils.CIF_parser import CIFParser, CIFLoop, find_loops
 from .dialogs.loop_editor_dialog import LoopEditorDialog, LoopOption

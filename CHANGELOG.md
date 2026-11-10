@@ -5,6 +5,21 @@ theme rather than strict chronological commit order.
 
 ## since 1.4
 
+### Changed
+- **Qt binding switched from PyQt6 to PySide6, accessed through `qtpy`.** PyQt6 is GPL-licensed,
+  which conflicts with distributing CIVET under its BSD 3-Clause licence; PySide6 is LGPL. All GUI
+  code now imports from `qtpy` (with `Signal` replacing `pyqtSignal`), `requirements.txt` installs
+  `qtpy` + `PySide6`, and the PyInstaller spec bundles PySide6 and explicitly excludes the PyQt
+  bindings. Running from source with PyQt6 still works (qtpy falls back to it), but release builds
+  must use PySide6.
+  *Licensing note for earlier releases:* the executables of v1.0 – v1.4 bundled PyQt6. They are
+  therefore subject to the GPL v3 as distributed, even though CIVET's own source code is
+  BSD 3-Clause licensed. See the Licence section of the README.
+- **LGPL compliance for the bundled Qt libraries.** A new `THIRD_PARTY_NOTICES.md` and the full
+  LGPL-3.0/GPL-3.0 texts (`licenses/`) are now bundled into the executable. A one-folder build
+  option (`CIVET_ONEDIR=1 pyinstaller CIVET.spec`) keeps the PySide6/Qt libraries as separate,
+  replaceable files.
+
 ### Fixed
 - **A data name echoed inside a multiline text value (e.g. a checkCIF VRF response quoting the
   field it discusses) could be mistaken for a real occurrence of that field.** `.cif_rules` CHECK

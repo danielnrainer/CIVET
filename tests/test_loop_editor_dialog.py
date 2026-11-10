@@ -1,7 +1,7 @@
 """Behavior-focused tests for LoopEditorDialog."""
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from qtpy.QtWidgets import QApplication, QMessageBox
 
 from gui.dialogs.loop_editor_dialog import LoopEditorDialog, LoopOption
 

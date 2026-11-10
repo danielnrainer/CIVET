@@ -9,13 +9,13 @@ flagged line in the editor and to trigger auto-fixes.
 
 from typing import List, Optional
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QDialogButtonBox, QGroupBox, QTabWidget, QWidget,
     QHeaderView, QAbstractItemView, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QBrush
+from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QColor, QBrush
 
 from utils.cif_syntax_compliance import ComplianceIssue
 
@@ -59,10 +59,10 @@ class CIFSyntaxComplianceDialog(QDialog):
         Emitted when the user clicks "Non-ASCII Conversion…".
     """
 
-    navigate_to_line = pyqtSignal(int)
-    refresh_requested = pyqtSignal()
-    fix_all_requested = pyqtSignal(str)  # 'cif1', 'cif2', or 'all'
-    non_ascii_conversion_requested = pyqtSignal()
+    navigate_to_line = Signal(int)
+    refresh_requested = Signal()
+    fix_all_requested = Signal(str)  # 'cif1', 'cif2', or 'all'
+    non_ascii_conversion_requested = Signal()
 
     def __init__(
         self,

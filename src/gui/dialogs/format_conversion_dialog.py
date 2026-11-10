@@ -6,11 +6,11 @@ Dialog for suggesting and previewing CIF format conversion to modern format
 when loading legacy or mixed format files.
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                            QPushButton, QTextEdit, QFrame, QGroupBox, QScrollArea,
                            QSizePolicy, QTabWidget, QWidget, QMessageBox)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QFontMetrics
+from qtpy.QtCore import Qt, QSize
+from qtpy.QtGui import QFont, QFontMetrics
 from typing import List, Optional
 from utils.cif_dictionary_manager import FieldNotation
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation

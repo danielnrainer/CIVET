@@ -10,14 +10,14 @@ manual resolution similar to the field conflict dialog.
 import os
 import sys
 from typing import Dict, List, Optional, Tuple
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton,
     QGroupBox, QScrollArea, QWidget, QTreeWidget, QTreeWidgetItem,
     QMessageBox, QFileDialog, QCheckBox, QSplitter, QTreeWidgetItemIterator,
     QTabWidget, QPlainTextEdit, QComboBox, QRadioButton, QButtonGroup
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon
+from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QFont, QIcon
 
 # Add parent directories to path to import from utils / gui
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -183,7 +183,7 @@ class FieldRulesValidationDialog(QDialog):
     """Dialog for validating and fixing field rules files"""
     
     # Signal emitted when validation is completed with fixes
-    validation_completed = pyqtSignal(str, list)  # (fixed_content, changes_made)
+    validation_completed = Signal(str, list)  # (fixed_content, changes_made)
     
     def __init__(self, validation_result: ValidationResult, 
                  field_rules_content: str, field_rules_path: str = "",

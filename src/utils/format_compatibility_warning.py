@@ -20,8 +20,8 @@ To remove this warning system later:
    - src/gui/main_window.py (if applicable)
 """
 
-from PyQt6.QtWidgets import QMessageBox, QCheckBox
-from PyQt6.QtCore import QSettings
+from qtpy.QtWidgets import QMessageBox, QCheckBox
+from qtpy.QtCore import QSettings
 
 # Settings key for "don't show again" preference
 SETTINGS_KEY_SUPPRESS_WARNING = "suppress_modern_format_warning"

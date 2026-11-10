@@ -3,7 +3,7 @@ validation-report block context, and per-block standalone actions.
 See .github/multi_data_block_plan.md.
 """
 
-from PyQt6.QtWidgets import QDialog, QMessageBox
+from qtpy.QtWidgets import QDialog, QMessageBox
 
 import gui.data_name_integrity as data_name_integrity_module
 import gui.field_checking as field_checking_module
@@ -300,7 +300,7 @@ def test_refine_special_details_single_block_unchanged_flow(monkeypatch):
 # ---------------------------------------------------------------------------
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication
 
 from gui.dialogs import data_name_validation_dialog as validation_dialog_module
 from gui.dialogs.data_name_validation_dialog import DataNameValidationDialog

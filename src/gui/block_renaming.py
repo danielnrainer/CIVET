@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt6.QtWidgets import QDialog, QMessageBox, QTextEdit
+from qtpy.QtWidgets import QDialog, QMessageBox, QTextEdit
 
 from utils.CIF_parser import list_data_block_names
 from utils.cif_block_rename import rename_data_block

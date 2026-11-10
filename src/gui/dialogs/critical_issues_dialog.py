@@ -5,10 +5,10 @@ Dialog for displaying critical issues (duplicates/aliases) and deprecated fields
 with proper scrolling to handle large numbers of issues.
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QTextEdit, QScrollArea, QWidget, QMessageBox)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QFont
 
 
 class CriticalIssuesDialog(QDialog):

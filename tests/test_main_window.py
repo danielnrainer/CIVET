@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication
 
 from gui import main_window
 from gui.main_window import CIFEditor

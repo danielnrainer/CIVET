@@ -9,6 +9,10 @@
 #   macOS:    pyinstaller CIVET.spec
 #   Linux:    pyinstaller CIVET.spec
 #
+# By default a single-file executable is produced. Set CIVET_ONEDIR=1 to build a
+# one-folder distribution (dist/CIVET/) instead, in which the LGPL PySide6/Qt
+# libraries are separate, user-replaceable files (see THIRD_PARTY_NOTICES.md).
+#
 #
 # User data is stored in platform-specific locations:
 #   Windows: %APPDATA%/CIVET/
@@ -19,6 +23,9 @@ import sys
 import os
 
 block_cipher = None
+
+# One-folder build (CIVET_ONEDIR=1) instead of the default single-file executable
+ONEDIR = os.environ.get("CIVET_ONEDIR", "").strip() == "1"
 
 # Platform-specific settings
 if sys.platform == 'darwin':
@@ -48,16 +55,18 @@ a = Analysis(
         # Documentation and licensing
         ('LICENSE', '.'),                                      # Include license file
         ('README.md', '.'),                                    # Include readme file
+        ('THIRD_PARTY_NOTICES.md', '.'),                       # Third-party licence notices (PySide6/Qt are LGPL-3.0)
+        ('licenses/*.txt', 'licenses'),                        # Full LGPL-3.0 and GPL-3.0 texts for the bundled Qt libraries
         
         # Version information
         ('src/version.py', '.'),                               # Version module for About dialog
     ],
     hiddenimports=[
-        # PyQt6 core modules - Essential for GUI functionality
-        'PyQt6.sip',
-        'PyQt6.QtWidgets',
-        'PyQt6.QtCore',
-        'PyQt6.QtGui',
+        # Qt binding (PySide6, LGPL) accessed via qtpy - Essential for GUI functionality
+        'qtpy',
+        'PySide6.QtWidgets',
+        'PySide6.QtCore',
+        'PySide6.QtGui',
         
         # Application modules - Main application structure
         'gui',
@@ -149,6 +158,12 @@ a = Analysis(
         'pytest_qt',
         'pytest_mock',
         'coverage',
+
+        # Other Qt bindings: only PySide6 (LGPL) may be bundled. PyQt is GPL and
+        # incompatible with distributing CIVET under the BSD licence.
+        'PyQt5',
+        'PyQt6',
+        'PySide2',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -165,10 +180,9 @@ pyz = PYZ(
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    *([] if ONEDIR else [a.binaries, a.zipfiles, a.datas]),  # single-file: embed everything
     [],
+    exclude_binaries=ONEDIR,              # one-folder: binaries/data go next to the exe (COLLECT below)
     name='CIVET',
     debug=False,                          # Set to True for debugging builds
     bootloader_ignore_signals=False,
@@ -185,10 +199,23 @@ exe = EXE(
     icon=icon_file if icon_file and os.path.exists(icon_file) else None  # Platform-specific icon
 )
 
+# One-folder build: place libraries (incl. replaceable PySide6/Qt) and data next to the exe
+if ONEDIR:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name='CIVET',
+    )
+
 # macOS-specific: Create an app bundle
 if sys.platform == 'darwin':
     app = BUNDLE(
-        exe,
+        coll if ONEDIR else exe,
         name='CIVET.app',
         icon='civet.icns' if os.path.exists('civet.icns') else None,
         bundle_identifier='org.civet.civet',

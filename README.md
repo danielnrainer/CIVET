@@ -374,13 +374,30 @@ pyinstaller CIVET.spec
 
 Output: `dist/CIVET` (or `CIVET.exe` on Windows, `CIVET.app` on macOS)
 
+To build a one-folder distribution (`dist/CIVET/`) instead, set `CIVET_ONEDIR=1` before running
+PyInstaller. In that layout the LGPL-licensed PySide6/Qt libraries are separate, replaceable files.
+
+Release builds must use PySide6 (LGPL). Do not build with PyQt6, which is GPL-licensed;
+`CIVET.spec` excludes it explicitly.
+
 
 ## System Requirements
 - **Executable**: Windows 10/11, macOS 10.14+ (not tested), Linux (not tested)
-- **Source**: Python 3.11+, PyQt6, requests
+- **Source**: Python 3.11+, PySide6 (via qtpy), requests
 
 ## License
-BSD Clause License - see [LICENSE](LICENSE)
+BSD 3-Clause License - see [LICENSE](LICENSE)
+
+The pre-built executables bundle third-party components under their own licences, most notably
+PySide6/Qt (LGPL-3.0). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details, including
+how to use CIVET with your own build of PySide6/Qt.
+
+> **Note on releases v1.0 – v1.4:** these versions used the PyQt6 Qt binding, which is licensed
+> under the GPL v3 (or a commercial licence). CIVET's own source code was and is BSD 3-Clause
+> licensed. However, the pre-built executables of v1.0 – v1.4 bundle PyQt6, and as distributed
+> they are therefore subject to the terms of the GPL v3. Later versions use PySide6 (LGPL-3.0)
+> instead and do not have this restriction. If the GPL is a problem for you, please use a newer
+> release.
 
 ## Citation
 ```

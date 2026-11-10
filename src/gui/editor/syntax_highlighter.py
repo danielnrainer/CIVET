@@ -2,8 +2,8 @@
 
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QRegularExpression
-from PyQt6.QtGui import QTextCharFormat, QSyntaxHighlighter, QColor, QFont
+from qtpy.QtCore import QRegularExpression
+from qtpy.QtGui import QTextCharFormat, QSyntaxHighlighter, QColor, QFont
 
 
 class CIFSyntaxHighlighter(QSyntaxHighlighter):

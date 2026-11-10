@@ -5,10 +5,10 @@ Allows users to resolve CIF field alias conflicts by choosing which field
 to keep and what value to use for each conflict.
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QTextEdit, QComboBox, QLineEdit, QGroupBox,
                            QScrollArea, QWidget, QFormLayout, QMessageBox, QCheckBox)
-from PyQt6.QtCore import Qt
+from qtpy.QtCore import Qt
 from typing import Dict, List, Tuple, Optional
 
 

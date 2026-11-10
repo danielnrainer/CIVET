@@ -1,7 +1,7 @@
 """Behavior-focused tests for field-checking decision workflows."""
 
-from PyQt6.QtWidgets import QDialog
-from PyQt6.QtWidgets import QMessageBox
+from qtpy.QtWidgets import QDialog
+from qtpy.QtWidgets import QMessageBox
 
 import gui.field_checking as field_checking_module
 from gui.field_checking import FieldCheckingMixin

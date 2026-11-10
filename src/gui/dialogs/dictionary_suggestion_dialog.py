@@ -5,13 +5,13 @@ Dialog to display suggested COMCIFS dictionaries based on CIF content analysis
 and allow users to load them automatically.
 """
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTextEdit, QCheckBox, QScrollArea, QWidget, QGroupBox,
     QProgressBar, QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from qtpy.QtCore import Qt, QThread, Signal
+from qtpy.QtGui import QFont
 from typing import List, Dict, Optional, Callable
 import requests
 import os
@@ -22,8 +22,8 @@ from utils.dictionary_suggestion_manager import DictionarySuggestion
 class DictionaryDownloadWorker(QThread):
     """Worker thread for downloading dictionaries without blocking UI."""
     
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(str, bool, str)  # url, success, message
+    progress = Signal(int)
+    finished = Signal(str, bool, str)  # url, success, message
     
     def __init__(self, url: str, save_path: str):
         super().__init__()

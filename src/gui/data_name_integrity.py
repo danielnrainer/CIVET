@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, List
 
-from PyQt6.QtWidgets import QDialog, QMessageBox
+from qtpy.QtWidgets import QDialog, QMessageBox
 
 from utils.cif_data_name_integrity import (
     AliasValueMismatch,

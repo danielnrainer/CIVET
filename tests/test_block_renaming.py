@@ -1,7 +1,7 @@
 """Behavior-focused tests for BlockRenamingMixin (the "Rename Data Block..." action)."""
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog
+from qtpy.QtWidgets import QApplication, QDialog
 
 from gui import main_window
 from gui import block_renaming

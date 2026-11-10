@@ -4,8 +4,8 @@ See gui/check_progress.py for what the numbers mean (an upper-bound estimate
 that grows on the fly, not an exact prediction).
 """
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QProgressBar
-from PyQt6.QtCore import Qt
+from qtpy.QtWidgets import QWidget, QHBoxLayout, QLabel, QProgressBar
+from qtpy.QtCore import Qt
 
 
 def build_check_progress_banner(progress):

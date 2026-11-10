@@ -1,6 +1,6 @@
 """Dialog for renaming a CIF data block."""
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QComboBox,
+from qtpy.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QComboBox,
                               QLineEdit, QLabel, QDialogButtonBox)
 
 from utils.cif_block_rename import validate_new_block_name

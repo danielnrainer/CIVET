@@ -1,6 +1,6 @@
 """Behavior-focused tests for IF/THEN conditional blocks in .cif_rules files."""
 
-from PyQt6.QtWidgets import QDialog
+from qtpy.QtWidgets import QDialog
 
 import gui.field_checking as field_checking_module
 from gui.field_checking import FieldCheckingMixin

@@ -12,13 +12,13 @@ content, with checkboxes for selective conversion.
 
 from typing import List, Optional, Tuple
 
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QDialogButtonBox, QGroupBox, QWidget, QButtonGroup,
     QRadioButton, QHeaderView, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QBrush, QFont
+from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QColor, QBrush, QFont
 
 
 class NonAsciiConversionDialog(QDialog):
@@ -33,7 +33,7 @@ class NonAsciiConversionDialog(QDialog):
         characters (or CIF 1.1 codes) to convert.
     """
 
-    conversion_requested = pyqtSignal(str, list)
+    conversion_requested = Signal(str, list)
 
     # Columns in the tree
     _COL_CHECK   = 0

@@ -1,8 +1,8 @@
 """Behavior-focused tests for dialog navigation workflows."""
 
 import pytest
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QApplication
 
 from gui.dialogs.cif_value_validation_dialog import CIFValueValidationDialog
 from utils.cif_data_validator import ValidationIssue

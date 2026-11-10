@@ -10,14 +10,14 @@ from files or URLs.
 import os
 import sys
 from typing import List, Optional
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QPushButton, QLabel, QMessageBox, QFileDialog, QInputDialog, QProgressBar,
     QGroupBox, QTextEdit, QSplitter, QHeaderView, QAbstractItemView, QApplication,
     QWidget, QCheckBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QIcon, QColor
+from qtpy.QtCore import Qt, QThread, Signal, QTimer
+from qtpy.QtGui import QFont, QIcon, QColor
 import requests
 
 # Add parent directories to path to import from utils
@@ -28,8 +28,8 @@ from utils.cif_dictionary_manager import CIFDictionaryManager, DictionaryInfo
 class DictionaryDownloadWorker(QThread):
     """Worker thread for downloading dictionaries from URLs"""
     
-    finished = pyqtSignal(bool, str)  # success, message
-    progress = pyqtSignal(int)  # progress percentage
+    finished = Signal(bool, str)  # success, message
+    progress = Signal(int)  # progress percentage
     
     def __init__(self, url: str, dict_manager: CIFDictionaryManager):
         super().__init__()
@@ -67,9 +67,9 @@ class DictionaryDownloadWorker(QThread):
 class BulkCOMCIFSDownloadWorker(QThread):
     """Worker thread for downloading all COMCIFS dictionaries"""
     
-    finished = pyqtSignal(dict)  # results dictionary
-    progress = pyqtSignal(int)  # progress percentage
-    status_update = pyqtSignal(str)  # current status message
+    finished = Signal(dict)  # results dictionary
+    progress = Signal(int)  # progress percentage
+    status_update = Signal(str)  # current status message
     
     def __init__(self, dict_manager: CIFDictionaryManager):
         super().__init__()
@@ -97,9 +97,9 @@ class BulkCOMCIFSDownloadWorker(QThread):
 class BulkIUCrDownloadWorker(QThread):
     """Worker thread for downloading all IUCr dictionaries"""
     
-    finished = pyqtSignal(dict)  # results dictionary
-    progress = pyqtSignal(int)  # progress percentage
-    status_update = pyqtSignal(str)  # current status message
+    finished = Signal(dict)  # results dictionary
+    progress = Signal(int)  # progress percentage
+    status_update = Signal(str)  # current status message
     
     def __init__(self, dict_manager: CIFDictionaryManager):
         super().__init__()

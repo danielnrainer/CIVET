@@ -7,13 +7,13 @@ to take actions on unknown, deprecated, and other field categories.
 """
 
 from typing import Dict, List, Optional, Set
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QComboBox, QGroupBox, QWidget, QDialogButtonBox, QFrame,
     QSizePolicy, QMessageBox, QInputDialog, QListWidget, QListWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from qtpy.QtCore import Qt, Signal
+from qtpy.QtGui import QFont, QColor
 
 from utils.data_name_validator import (
     ValidationReport, FieldValidationResult, FieldCategory, FieldAction, DataNameValidator
@@ -245,11 +245,11 @@ class DataNameValidationDialog(QDialog):
     """
     
     # Emitted when user clicks "Apply Changes" - caller should apply and call refresh_validation()
-    changes_requested = pyqtSignal()
+    changes_requested = Signal()
 
     # Emitted when the user double-clicks a field row (or clicks "Go to Line")
     # that has a known line number. The integer is the 1-based line number.
-    navigate_to_line = pyqtSignal(int)
+    navigate_to_line = Signal(int)
     
     # Category display configuration
     CATEGORY_CONFIG = {

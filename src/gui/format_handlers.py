@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, List, Tuple, Optional, cast
 
-from PyQt6.QtWidgets import QMessageBox, QDialog, QWidget, QTextEdit
+from qtpy.QtWidgets import QMessageBox, QDialog, QWidget, QTextEdit
 
 from utils.cif_dictionary_manager import CIFVersion, FieldNotation, CIFSyntaxVersion
 # TEMPORARY: Import modern format warning - remove when checkCIF fully supports modern notation
@@ -782,7 +782,7 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
             dialog.update_issues(fresh_res['cif1'], fresh_res['cif2'])
 
             if not changed:
-                from PyQt6.QtWidgets import QMessageBox
+                from qtpy.QtWidgets import QMessageBox
                 QMessageBox.information(
                     dialog, "No Changes",
                     "No auto-fixable issues were found or could be applied."
@@ -795,7 +795,7 @@ class FormatHandlersMixin(_FormatHandlersWidgetBase):
                 detect_non_ascii_chars(current),
             )
             if not occurrences:
-                from PyQt6.QtWidgets import QMessageBox
+                from qtpy.QtWidgets import QMessageBox
                 QMessageBox.information(
                     dialog, "No Non-ASCII Characters",
                     "No non-ASCII characters were found in the current content."

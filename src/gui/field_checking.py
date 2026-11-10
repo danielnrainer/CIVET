@@ -18,7 +18,7 @@ import re
 import hashlib
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
-from PyQt6.QtWidgets import QDialog, QMessageBox, QFileDialog
+from qtpy.QtWidgets import QDialog, QMessageBox, QFileDialog
 
 from utils.CIF_field_parsing import safe_eval_expr, evaluate_condition
 from utils.CIF_parser import (CIFField, CIFParser, update_audit_creation_method,
